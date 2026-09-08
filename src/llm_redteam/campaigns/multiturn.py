@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 from typing import Protocol, runtime_checkable
+from uuid import uuid4
 
 from pydantic import Field
 
@@ -130,16 +131,20 @@ class MultiTurnCampaignEngine:
         conversation_id: str | None = None,
     ) -> ConversationRunResult:
         self._validate_case(case)
+        identity = self.target.identity
+        resolved_id = conversation_id or f"conv-{uuid4().hex}"
+
         if self.budget is not None:
-            self.budget.reserve_attack()
-            self.budget.check_wall_clock()
-            if self.conversation_budget.max_turns > self.budget.budget.max_turns_per_attack:
+            if (
+                self.conversation_budget.max_turns
+                > self.budget.budget.max_turns_per_attack
+            ):
                 raise ValueError(
                     "conversation max_turns exceeds the authorized campaign per-attack limit"
                 )
+            self.budget.reserve_attack()
+            self.budget.check_wall_clock()
 
-        identity = self.target.identity
-        resolved_id = conversation_id or self._conversation_id(case.id, identity.configuration_hash)
         state = ConversationState(
             conversation_id=resolved_id,
             attack_id=case.id,
@@ -155,7 +160,7 @@ class MultiTurnCampaignEngine:
             state, parent_turn_id, branch_id = self._apply_branch_request(state, proposal)
 
             if self.budget is not None:
-                self.budget.reserve_turn(attack_id=case.id)
+                self.budget.reserve_turn(attack_id=resolved_id)
                 self.budget.check_wall_clock()
 
             history = ()
@@ -434,7 +439,9 @@ class MultiTurnCampaignEngine:
         return tuple(path)
 
     @staticmethod
-    def _branch_for_turn(turns: tuple[ConversationTurn, ...], turn_id: str | None) -> str | None:
+    def _branch_for_turn(
+        turns: tuple[ConversationTurn, ...], turn_id: str | None
+    ) -> str | None:
         if turn_id is None:
             return None
         for turn in turns:
@@ -442,7 +449,9 @@ class MultiTurnCampaignEngine:
                 return turn.branch_id
         return None
 
-    def _flow_fingerprint(self, strategy: MultiTurnStrategy, session_mode: SessionMode) -> str:
+    def _flow_fingerprint(
+        self, strategy: MultiTurnStrategy, session_mode: SessionMode
+    ) -> str:
         raw = "|".join(
             [
                 type(strategy).__name__,
@@ -455,11 +464,6 @@ class MultiTurnCampaignEngine:
             ]
         )
         return sha256(raw.encode()).hexdigest()
-
-    @staticmethod
-    def _conversation_id(attack_id: str, target_hash: str) -> str:
-        digest = sha256(f"conversation:{attack_id}:{target_hash}".encode()).hexdigest()[:16]
-        return f"conv-{digest}"
 
     @staticmethod
     def _turn_id(conversation_id: str, ordinal: int, branch_id: str) -> str:
