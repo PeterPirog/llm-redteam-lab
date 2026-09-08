@@ -1,0 +1,125 @@
+version: 1
+review_date: 2026-09-08
+status: registry_complete_execution_not_yet_implemented
+
+# Coverage here means the corpus registry has a credible source/technique path.
+# It does not mean the corresponding importer, target adapter or judge exists yet.
+
+target_classes:
+  writing:
+    attack_mechanisms:
+      static_override: covered
+      persona_roleplay: covered
+      perturbation_encoding: covered
+      semantic_reframing: covered
+      adaptive_single_turn: covered_external_strategy
+      multi_turn: covered_external_strategy
+      indirect_injection: covered
+      optimized_suffix_search: covered_specialized
+    controls:
+      benign_utility: covered
+      overrefusal: covered
+    standardized_taxonomy:
+      mlcommons_v0_7: covered_with_crosswalk
+    execution_gap:
+      - external importers not implemented
+      - semantic judge not implemented
+
+  reasoning:
+    attack_mechanisms:
+      standard_text_jailbreaks: covered
+      adaptive_multi_turn: covered_external_strategy
+      reasoning_chain_targeted: covered_research_reference
+      context_compliance: covered
+      indirect_tool_context: covered
+      provenance_memory: covered
+      visual_reasoning: covered_optional
+    controls:
+      benign_utility: covered
+      overrefusal: covered
+    execution_gap:
+      - H-CoT/PRJA execution adapters not implemented
+      - reasoning-field evidence must depend on legitimately exposed provider fields
+      - semantic judge not implemented
+
+  coding:
+    attack_mechanisms:
+      repository_injection: covered
+      terminal_output_injection: covered
+      tool_output_injection: covered
+      goal_hijacking: covered
+      mcp_poisoning: covered
+      synthetic_secret_access: covered
+      procfs_runtime_credentials: covered
+      sandbox_read_escape: covered
+      sandbox_write_escape: covered
+      network_egress: covered
+      egress_dlp: covered
+      privilege_escalation: covered
+      memory_poisoning: covered
+      provenance_laundering: covered
+      verifier_sabotage: covered
+      generated_vulnerability: covered
+      automation_poisoning: covered
+      delayed_ci_effects: covered
+      steganographic_exfiltration: covered
+      cross_session_isolation: covered
+    controls:
+      benign_agent_tasks: covered_by_external_sources
+      local_inert_fixtures: covered
+      sandbox_utility_tradeoff: covered_reference
+    system_evidence:
+      deterministic_receipts: covered_reference
+      tool_trace: required
+      filesystem_diff: required
+      network_trace: required_when_applicable
+    execution_gap:
+      - OpenCode target adapter not implemented
+      - Docker/disposable workspace runner not implemented
+      - deterministic host-side verifiers not implemented
+
+  image_generation:
+    attack_mechanisms:
+      risky_prompt_taxonomy: covered
+      prompt_obfuscation: covered
+      semantic_substitution: covered
+      jailbreak_attack_defense: covered
+      multimodal_cross_modal: covered_gated_or_optional
+      moderation_bypass: covered_reference
+      post_finetune_safety_regression: covered
+    controls:
+      benign_utility: covered
+      overrefusal: covered
+      prompt_adherence: covered_reference
+      image_quality: covered_reference
+    evidence:
+      image_artifact: required
+      multimodal_judge: required
+      specialized_classifier: covered_external_reference
+    execution_gap:
+      - image-generation target adapter not implemented
+      - multimodal judge not implemented
+      - external image dataset handling/storage policy not implemented
+
+cross_cutting:
+  provenance_and_license: covered_registry_policy
+  source_revision_locking: defined_at_import_time_not_implemented
+  global_case_id_uniqueness: required_not_automated
+  schema_validation: schema_exists_validator_not_implemented
+  benign_controls: mandatory
+  model_vs_system_compromise: mandatory
+  empirical_difficulty:
+    metric: MRCT
+    status: defined
+  attack_genealogy: architecture_defined_runtime_not_implemented
+
+conclusion:
+  corpus_registry: strong_v1
+  native_smoke_corpus: usable_after_loader_and_detectors_exist
+  external_corpus_execution: blocked_on_importers_and_domain_models
+  adaptive_red_execution: intentionally_deferred
+  recommendation: >-
+    Stop adding broad new sources unless they fill a demonstrated coverage gap.
+    Next work should implement typed corpus models, validation and native smoke
+    loading before more dataset collection. This prevents corpus growth from
+    becoming architectural drift.
