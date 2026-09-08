@@ -1,9 +1,9 @@
-version: 1
+version: 2
 last_verified: 2026-09-08
 
-# Default policy: reference or load upstream datasets explicitly. Do not copy
-# full harmful/restricted datasets into this repository without a source-level
-# license and safety review.
+# Curated source registry. Default policy is to reference or explicitly load
+# upstream data. Full harmful, gated, mixed-license or real-service datasets are
+# never mirrored automatically.
 sources:
   jailbreakbench_artifacts:
     name: JailbreakBench Artifacts
@@ -12,11 +12,22 @@ sources:
     source_mode: external
     url: https://github.com/JailbreakBench/artifacts
     license: MIT
-    priority: high
+    priority: critical
     notes: >-
-      Reproducible jailbreak artifacts with attack metadata such as method,
-      target model, query count and success. Good historical/standardized
-      baseline and provenance source.
+      Reproducible artifacts with attack method, target, query count, prompt and
+      success metadata. Includes standardized examples from methods such as PAIR
+      and GCG. Strong provenance source for historical and algorithmic baselines.
+
+  jailbreakbench:
+    name: JailbreakBench
+    kind: benchmark_and_judge_dataset
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/JailbreakBench/jailbreakbench
+    priority: critical
+    notes: >-
+      Standard benchmark plus human/LLM judge-comparison data. Useful both for
+      behavior selection and for validating semantic graders.
 
   harmbench:
     name: HarmBench
@@ -24,12 +35,11 @@ sources:
     target_classes: [writing, reasoning]
     source_mode: external
     url: https://github.com/centerforaisafety/HarmBench
-    priority: high
+    priority: critical
     notes: >-
-      Standardized automated red-teaming and robust-refusal evaluation. Useful
-      for normalization of attack methods and completion evaluation. Keep as an
-      external adapter unless licensing of each included behavior/artifact has
-      been checked.
+      Standardized automated red-teaming and robust-refusal evaluation. Keep as
+      an external adapter unless licenses of included behavior sets/artifacts are
+      verified record-by-record.
 
   strongreject:
     name: StrongREJECT
@@ -37,12 +47,24 @@ sources:
     target_classes: [writing, reasoning]
     source_mode: external
     url: https://github.com/dsbowen/strong_reject
-    license: MIT-code-and-custom-data-with-mixed-upstream-dataset-licenses
+    license: MIT-code-and-custom-data; mixed-upstream-data-licenses
+    priority: critical
+    notes: >-
+      Evaluator, forbidden-prompt benchmark and several dozen jailbreak
+      baselines. Some dataset records inherit upstream licenses or have no
+      redistribution license, so provenance must be retained per record.
+
+  strongreject_attacks:
+    name: StrongREJECT Attacks
+    kind: attack_implementation_collection
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/alexandrasouly/strongreject-attacks
     priority: high
     notes: >-
-      Provides a jailbreak evaluator, forbidden-prompt benchmark and several
-      dozen jailbreak baselines. Dataset aggregates upstream sources with mixed
-      licenses, so import only records whose provenance permits redistribution.
+      Implementations used for StrongREJECT experiments, including simple
+      templates, encoding and model-assisted transformations. Use as an attack
+      implementation reference rather than copying opaque payloads.
 
   wildjailbreak:
     name: WildJailbreak / WildTeaming
@@ -52,11 +74,23 @@ sources:
     url: https://huggingface.co/datasets/allenai/wildjailbreak
     project_url: https://github.com/allenai/wildteaming
     license: ODC-BY
+    priority: critical
+    notes: >-
+      Large in-the-wild jailbreak/tactic resource. Dataset access is gated by
+      responsible-use terms. Never mirror or bypass the upstream access process.
+
+  ai2_safety_eval:
+    name: Ai2 Safety Evaluation Suite
+    kind: benchmark_aggregator
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/allenai/safety-eval
     priority: high
     notes: >-
-      Large-scale resource mined/composed from in-the-wild jailbreak tactics.
-      Upstream dataset is gated behind responsible-use terms; never mirror it
-      automatically. Use only through an explicit user-approved importer.
+      Aggregates many safety and capability benchmarks and includes support for
+      reasoning models, StrongREJECT, SORRY-Bench and WildTeaming/WildGuard work.
+      Useful as an adapter/reference for normalization, not as a data license
+      umbrella for its upstream datasets.
 
   do_not_answer:
     name: Do-Not-Answer
@@ -65,11 +99,58 @@ sources:
     source_mode: external
     url: https://github.com/Libr-AI/do-not-answer
     license: Apache-2.0
+    priority: high
+    notes: >-
+      939 instructions organized in a 61-risk taxonomy. Useful for base safety
+      objectives and refusal behavior; not a jailbreak method by itself.
+
+  sorry_bench:
+    name: SORRY-Bench
+    kind: refusal_and_linguistic_mutation_benchmark
+    target_classes: [writing, reasoning]
+    source_mode: gated
+    url: https://github.com/SORRY-Bench/sorry-bench
+    code_license: MIT
+    priority: critical
+    notes: >-
+      ICLR 2025 benchmark with 440 unsafe instructions across 44 categories,
+      human judgment data and 20 linguistic mutations. Unsafe dataset access is
+      gated upstream; use only after explicit access approval.
+
+  xstest:
+    name: XSTest
+    kind: overrefusal_benchmark
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/paul-rottger/xstest
+    data_license: CC-BY-4.0
+    priority: critical
+    notes: >-
+      Benign/contrast controls for exaggerated refusal. Essential to prevent a
+      refuse-everything model from being scored as a good defense.
+
+  salad_bench:
+    name: SALAD-Bench
+    kind: hierarchical_safety_benchmark
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/OpenSafetyLab/SALAD-BENCH
     priority: medium
     notes: >-
-      939 instructions organized in a 61-harm taxonomy. Valuable as base safety
-      objectives and for measuring refusal behavior, not as a jailbreak method
-      by itself.
+      Large hierarchical safety benchmark plus MD-Judge. Useful for taxonomy and
+      secondary judge comparison after the core corpus is operational.
+
+  hcot_malicious_educator:
+    name: H-CoT / Malicious-Educator
+    kind: reasoning_model_jailbreak_benchmark
+    target_classes: [reasoning]
+    source_mode: external
+    url: https://github.com/dukeceicenter/jailbreak-reasoning-openai-o1o3-deepseek-r1
+    license: CC-BY-NC-SA-4.0
+    priority: critical
+    notes: >-
+      Reasoning-model-specific benchmark and H-CoT research artifact. Treat as
+      non-commercial external research data and preserve upstream terms.
 
   promptfoo_strategies:
     name: Promptfoo Red Team Strategies
@@ -79,12 +160,25 @@ sources:
     url: https://github.com/promptfoo/promptfoo
     docs_url: https://www.promptfoo.dev/docs/red-team/strategies/
     license: MIT
+    priority: critical
+    notes: >-
+      Current catalog includes fixed transforms, iterative jailbreak, Meta Agent,
+      Hydra, Goblin, Crescendo, GOAT, tree, composite, layer and Best-of-N, plus
+      coding-agent plugins. Integrate through an optional adapter; do not make it
+      the architectural core. Some cloud strategies require Promptfoo Cloud and
+      therefore must not be the local-first default.
+
+  cyberseceval_prompt_injection:
+    name: CyberSecEval Prompt Injection
+    kind: prompt_injection_benchmark
+    target_classes: [writing, reasoning, coding]
+    source_mode: external
+    url: https://meta-llama.github.io/PurpleLlama/CyberSecEval/docs/benchmarks/prompt_injection
     priority: high
     notes: >-
-      Current strategy catalog includes cheap static transforms plus adaptive
-      Meta Agent, Hydra, Crescendo, GOAT, tree/composite/layer strategies and
-      coding-agent-specific plugins. Integrate as an optional strategy adapter;
-      do not make Promptfoo the architectural core.
+      Textual, multilingual and visual prompt-injection benchmark paths with a
+      separate judge stage. Useful for cross-language and visual-injection
+      coverage.
 
   bipia:
     name: BIPIA
@@ -93,24 +187,22 @@ sources:
     source_mode: external
     url: https://github.com/microsoft/BIPIA
     license: MIT-code-with-mixed-dataset-licenses
-    priority: high
+    priority: critical
     notes: >-
-      Indirect prompt-injection benchmark spanning email, web QA, summarization,
-      table QA and code QA. Some underlying datasets have CC BY-SA or other
-      source-specific terms; preserve per-record/source provenance.
+      Indirect prompt injection spanning email, web QA, summarization, table QA
+      and code QA. Preserve source-specific licenses for underlying datasets.
 
   agentdojo:
     name: AgentDojo
     kind: agent_prompt_injection_benchmark
     target_classes: [coding, reasoning]
     source_mode: external
-    url: https://github.com/ethz-spylab/agentdojo
+    url: https://github.com/sequrity-ai/agentdojo
     license: MIT
-    priority: high
+    priority: critical
     notes: >-
-      Dynamic environment for evaluating prompt-injection attacks and defenses
-      in tool-using agents. Prefer adapter-based execution rather than copying
-      task implementations into this repository.
+      Dynamic environment for prompt-injection attacks/defenses in tool-using
+      agents. Prefer adapter execution rather than copying task implementations.
 
   injecagent:
     name: InjecAgent
@@ -119,10 +211,22 @@ sources:
     source_mode: external
     url: https://github.com/uiuc-kang-lab/InjecAgent
     license: MIT
-    priority: high
+    priority: critical
     notes: >-
       1,054 indirect-prompt-injection cases across 17 user-tool types and 62
-      attacker-tool types. Useful for tool-integrated agent threat coverage.
+      attacker-tool types. Strong tool-integrated agent coverage.
+
+  piarena:
+    name: PIArena / PISmith
+    kind: prompt_injection_platform_and_adaptive_attack
+    target_classes: [coding, reasoning]
+    source_mode: external
+    url: https://github.com/sleeepeer/PIArena
+    priority: high
+    notes: >-
+      ACL 2026 platform combining prompt-injection defenses/benchmarks with
+      reinforcement-learning attack work and integrations for InjecAgent,
+      AgentDojo and AgentDyn.
 
   repoguardbench:
     name: RepoGuardBench
@@ -134,9 +238,97 @@ sources:
     data_license: CC-BY-4.0
     priority: critical
     notes: >-
-      2026 benchmark focused on repository-borne prompt injection in local coding
-      agents. Uses inert workspace-local goals, synthetic canaries and a no-GPU
-      deterministic smoke path. Strong methodological fit for OpenCode testing.
+      2026 benchmark for repository-borne injection in local coding agents. Uses
+      inert workspace-local goals, synthetic canaries and deterministic no-GPU
+      smoke tests. Excellent methodological fit for OpenCode.
+
+  agent_injection_bench:
+    name: AgentInjectionBench
+    kind: agent_tool_injection_benchmark
+    target_classes: [coding, reasoning]
+    source_mode: external
+    url: https://github.com/ppradyoth/AgentInjectionBench
+    priority: high
+    notes: >-
+      2026 benchmark covering tool-output injection, goal hijacking, privilege
+      escalation, data exfiltration, multi-turn state and MCP context/tool
+      poisoning, with benign controls and guardrail comparisons.
+
+  agent_security_bench_receipts:
+    name: Agent Security Evaluation Kit
+    kind: deterministic_agent_security_benchmark
+    target_classes: [coding]
+    source_mode: external
+    url: https://github.com/sinakazemnezhad/agent-security-bench
+    license: MIT
+    priority: high
+    notes: >-
+      Deterministic security scoring with machine-readable receipts, MCP traces,
+      allowlists, exfiltration/SSRF checks and fail-closed verification. Useful
+      for our evidence and verifier design.
+
+  agentshield_benchmark:
+    name: AgentShield Benchmark
+    kind: guardrail_benchmark
+    target_classes: [coding, reasoning]
+    source_mode: external
+    url: https://github.com/doronp/agentshield-benchmark
+    license: Apache-2.0
+    priority: medium
+    notes: >-
+      2026 open benchmark with prompt injection, jailbreak, data exfiltration,
+      tool abuse, over-refusal, multi-agent and provenance categories. Useful for
+      Blue-control comparisons rather than primary jailbreak goals.
+
+  agentprov:
+    name: AgentProv / Provenance Attribution Benchmark
+    kind: provenance_laundering_benchmark
+    target_classes: [coding, reasoning]
+    source_mode: external
+    url: https://github.com/webpro255/agentprov
+    license: MIT
+    priority: high
+    notes: >-
+      Measures whether defenses preserve/recognize instruction origin across
+      multiple laundering hops. Fits the project's context-provenance and
+      forensic root-cause objectives.
+
+  agent_egress_bench:
+    name: Agent Egress Bench
+    kind: network_egress_and_dlp_corpus
+    target_classes: [coding]
+    source_mode: external
+    url: https://github.com/luckyPipewrench/agent-egress-bench
+    priority: high
+    notes: >-
+      Tool-neutral corpus for egress controls and synthetic-secret leakage via
+      URL, body, header and hostname channels. Use only against sandboxed/local
+      traps or explicitly authorized endpoints.
+
+  boundary_bench:
+    name: BoundaryBench
+    kind: coding_agent_sandbox_policy_benchmark
+    target_classes: [coding]
+    source_mode: reference
+    url: https://github.com/boundary-bench/boundary-bench
+    priority: medium
+    notes: >-
+      2026 benchmark of coding-agent capability under hardened sandbox policies.
+      Relevant to Blue sandbox/control evaluation, not primarily jailbreak ASR.
+
+  livepi:
+    name: LivePI
+    kind: real_service_indirect_prompt_injection_benchmark
+    target_classes: [coding, reasoning]
+    source_mode: reference
+    url: https://github.com/leizhao7/livepi
+    priority: research_only
+    explicit_opt_in: true
+    notes: >-
+      2026 benchmark using real external services and multiple injection surfaces.
+      Do not include in normal campaigns. Any future adapter requires explicit
+      user opt-in, dedicated test accounts, synthetic data and service-specific
+      safety review.
 
   agentharm:
     name: AgentHarm
@@ -146,9 +338,8 @@ sources:
     url: https://github.com/AIEvals/AgentHarm
     priority: medium
     notes: >-
-      Evaluates refusal and coherent multi-step behavior on harmful agent tasks.
-      Treat as a controlled external benchmark; it complements injection-focused
-      corpora but should not be part of the default smoke pack.
+      Measures refusal and coherent multi-step behavior on harmful agent tasks.
+      Controlled high-risk benchmark; excluded from default smoke campaigns.
 
   jailbreakv_28k:
     name: JailBreakV-28K
@@ -161,8 +352,7 @@ sources:
     priority: medium
     notes: >-
       28K multimodal jailbreak cases combining text-transfer and image-based
-      attacks. Primarily an MLLM benchmark; useful for future cross-modal and
-      visual prompt-injection coverage.
+      attacks. Primarily MLLM-focused but useful for future cross-modal coverage.
 
   mma_diffusion:
     name: MMA-Diffusion
@@ -173,9 +363,8 @@ sources:
     license: CC-BY-NC-ND-3.0
     priority: high
     notes: >-
-      Multimodal attacks on diffusion safety mechanisms. Adversarial prompt
-      benchmark access is controlled upstream. Never transform/vendor this data
-      automatically because of access and no-derivatives restrictions.
+      Multimodal attacks on diffusion safety mechanisms. Access is controlled
+      upstream; no automatic mirroring or transformation of restricted data.
 
   jailbreakdiffbench:
     name: JailbreakDiffBench
@@ -183,11 +372,11 @@ sources:
     target_classes: [image_generation]
     source_mode: reference
     url: https://openaccess.thecvf.com/content/ICCV2025/html/Jin_JailbreakDiffBench_A_Comprehensive_Benchmark_for_Jailbreaking_Diffusion_Models_ICCV_2025_paper.html
-    priority: high
+    priority: critical
     notes: >-
-      ICCV 2025 benchmark for evaluating jailbreak attacks and defenses in
-      diffusion pipelines; also designed to extend to text-to-video. Add an
-      importer only after the official artifact/data terms are verified.
+      ICCV 2025 benchmark with human-annotated prompt/image data, moderation
+      evaluation and attack assessment for diffusion systems; designed to extend
+      to text-to-video. Import only after official artifact/data terms are known.
 
   t2i_riskyprompt:
     name: T2I-RiskyPrompt
@@ -200,8 +389,7 @@ sources:
     notes: >-
       AAAI 2026 benchmark with 6,432 risky prompts, hierarchical risk labels and
       detailed risk reasons; evaluates multiple T2I models, defenses, filters
-      and attack strategies. Verify dataset redistribution terms before any
-      vendoring; external loading is preferred.
+      and attack strategies. Verify redistribution terms before vendoring.
 
   t2isafety:
     name: T2ISafety
@@ -211,9 +399,8 @@ sources:
     url: https://github.com/adwardlee/t2i_safety
     priority: high
     notes: >-
-      CVPR 2025 benchmark spanning safety dimensions including toxicity,
-      fairness and privacy, with a specialized image evaluator. Useful for Blue
-      coverage beyond pure jailbreak ASR.
+      CVPR 2025 T2I safety benchmark spanning toxicity, fairness and privacy and
+      providing a specialized image evaluator. Useful beyond pure jailbreak ASR.
 
   overt:
     name: OVERT
@@ -222,11 +409,10 @@ sources:
     source_mode: external
     url: https://github.com/yixiao-huang/OVERT
     license: Apache-2.0
-    priority: high
+    priority: critical
     notes: >-
-      NeurIPS D&B 2025 benchmark for T2I over-refusal. Include benign-lookalike
-      controls so stronger defenses are not incorrectly rewarded for refusing
-      everything.
+      NeurIPS D&B 2025 T2I over-refusal benchmark. Provides essential benign
+      lookalike controls so safety is not conflated with refusing everything.
 
   spqr:
     name: SPQR
@@ -238,6 +424,5 @@ sources:
     priority: high
     notes: >-
       ECCV 2026 benchmark measuring safety, prompt adherence, quality and
-      robustness after benign fine-tuning across modern T2I backbones. Harmful
-      prompt compilations require upstream access and compliance with original
-      dataset terms.
+      robustness after benign fine-tuning. Harmful prompt compilations require
+      upstream access and original-source license compliance.
