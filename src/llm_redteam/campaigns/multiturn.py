@@ -132,7 +132,9 @@ class MultiTurnCampaignEngine:
     ) -> ConversationRunResult:
         self._validate_case(case)
         identity = self.target.identity
-        resolved_id = conversation_id or f"conv-{uuid4().hex}"
+        resolved_id = conversation_id or (
+            f"conv-{identity.configuration_hash[:8]}-{uuid4().hex}"
+        )
 
         if self.budget is not None:
             if (
