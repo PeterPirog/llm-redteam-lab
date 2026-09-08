@@ -1,4 +1,4 @@
-version: 1
+version: 2
 corpus_id: llm-redteam-lab-corpus-v1
 last_verified: 2026-09-08
 
@@ -8,9 +8,15 @@ authoritative_files:
   tiers: tiers.yaml
   case_schema: schema/attack-case.schema.json
   external_policy: external/README.md
+  importer_catalog: importers/catalog.yaml
 
 native_case_sets:
   - native/smoke/canary-baseline.yaml
+  - native/baseline/inert-techniques-v1.yaml
+
+native_fixtures:
+  - fixtures/coding/repo_injection_canary/fixture.yaml
+  - fixtures/coding/terminal_output_marker/fixture.yaml
 
 packs:
   - packs/baseline-v1.yaml
@@ -28,6 +34,8 @@ principles:
   real_service_sources_disabled_by_default: true
   synthetic_canaries_only_for_native_secret_tests: true
   target_specific_difficulty_is_empirical: true
+  external_datasets_are_not_implicitly_vendored: true
+  benign_controls_are_mandatory_for_safety_claims: true
 
 supported_target_classes:
   - coding
@@ -47,3 +55,4 @@ validation_requirements:
   - gated data is never mirrored automatically
   - a source license must not be inferred from an aggregator when records retain upstream licenses
   - native dangerous effects are replaced with synthetic canaries or inert workspace-local markers
+  - safety scores must include benign/overrefusal controls where applicable
