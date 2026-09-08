@@ -1,0 +1,99 @@
+version: 1
+last_verified: 2026-09-08
+purpose: >-
+  Supplemental 2026 sources discovered after the initial registry. These remain
+  separate until importer and license metadata are normalized into the primary
+  registry. Presence here never enables automatic download or execution.
+
+sources:
+  mlcommons_jailbreak_taxonomy:
+    name: MLCommons Jailbreak Attack Taxonomy
+    kind: standardized_mechanism_taxonomy
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/mlcommons/jailbreak-taxonomy
+    version: 0.7.0
+    license: CC-BY-4.0
+    priority: critical
+    scope: single_turn_prompt_only
+    facts:
+      families: 4
+      categories: 8
+      leaves: 18
+      documented_attacks: 113
+    notes: >-
+      Primary external mechanism taxonomy and crosswalk. It explicitly excludes
+      multi-turn, indirect RAG/tool/file injection and non-text modalities, so
+      project extensions remain necessary for AGENT and image-generation targets.
+
+  agentdyn:
+    name: AgentDyn
+    kind: dynamic_agent_prompt_injection_benchmark
+    target_classes: [coding, reasoning]
+    source_mode: external
+    url: https://github.com/leolee99/AgentDyn
+    priority: critical
+    facts:
+      open_ended_user_tasks: 60
+      injection_test_cases: 560
+      scenarios: [shopping, github, daily_life]
+    notes: >-
+      2026 dynamic open-ended benchmark built on AgentDojo. Useful for testing
+      whether defenses remain secure without becoming over-defensive in more
+      realistic planning tasks.
+
+  prja:
+    name: Psychology-based Reasoning-targeted Jailbreak Attack (PRJA)
+    kind: reasoning_targeted_attack_research
+    target_classes: [reasoning]
+    source_mode: reference
+    paper_url: https://arxiv.org/abs/2604.15725
+    priority: high
+    notes: >-
+      2026 reasoning-targeted work combining semantic trigger selection and
+      psychological framing to manipulate reasoning content. Treat as a T5
+      research/reference family until an official reproducible artifact and its
+      redistribution terms are verified.
+
+  autonomous_lrm_redteam:
+    name: Large Reasoning Models Are Autonomous Jailbreak Agents
+    kind: autonomous_red_attacker_research
+    target_classes: [writing, reasoning]
+    source_mode: reference
+    paper_url: https://arxiv.org/abs/2508.04039
+    priority: high
+    notes: >-
+      Demonstrates LRMs operating as autonomous multi-turn jailbreak attackers.
+      Relevant primarily to Red-agent architecture and evaluation methodology,
+      not as a payload dataset.
+
+  acz_jailbreak:
+    name: ACZ-Jailbreak / Visual Cognitive Overload
+    kind: multimodal_jailbreak_research
+    target_classes: [reasoning]
+    source_mode: external
+    url: https://github.com/Westlake-AGI-Lab/ACZ-Jailbreak
+    priority: medium
+    notes: >-
+      ACL 2026 multimodal jailbreak artifact based on degraded visual text. It
+      targets multimodal language models rather than text-to-image generators,
+      so map to reasoning targets with vision capability, not to T2I by default.
+
+  agent_egress_bench_verified:
+    name: Agent Egress Bench
+    kind: system_control_egress_corpus
+    target_classes: [coding]
+    source_mode: external
+    url: https://github.com/luckyPipewrench/agent-egress-bench
+    license: Apache-2.0
+    priority: critical
+    facts:
+      logical_cases: 197
+      categories: 18
+      block_expected: 149
+      allow_expected: 47
+      warn_expected: 1
+    notes: >-
+      Tests the security layer between an agent and the network, not model
+      alignment. Use for SYSTEM_COMPROMISE/effect-containment evaluation and
+      false-positive measurement with local/authorized traps only.
