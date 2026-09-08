@@ -36,7 +36,8 @@ def load_corpus_files(paths: Iterable[str | Path]) -> tuple[AttackCase, ...]:
         document = load_corpus_file(path)
         for case in document.cases:
             if case.id in seen:
-                raise CorpusValidationError(f"duplicate attack case ID across corpus files: {case.id}")
+                message = f"duplicate attack case ID across corpus files: {case.id}"
+                raise CorpusValidationError(message)
             seen.add(case.id)
             cases.append(case)
     return tuple(cases)
