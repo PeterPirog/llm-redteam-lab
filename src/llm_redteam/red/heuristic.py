@@ -249,7 +249,10 @@ class HeuristicRedPlanner:
         novelty = sum(obs.novelty_score for obs in observations) / trials
         refusal_penalty = sum(obs.refused for obs in observations) / trials
         error_penalty = sum(obs.error for obs in observations) / trials
-        return empirical + exploration + 0.10 * novelty - 0.10 * refusal_penalty - 0.25 * error_penalty
+        score = empirical + exploration + 0.10 * novelty
+        score -= 0.10 * refusal_penalty
+        score -= 0.25 * error_penalty
+        return score
 
     @staticmethod
     def _best_parent(observations: list[AttackObservation]) -> str | None:
