@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from uuid import uuid4
 
 from ..budget import BudgetLedger
 from ..domain import AttackCase, CompromiseOutcome, EvidenceKind, EvidenceRecord, ExecutionResult
@@ -41,11 +42,12 @@ class CampaignEngine:
         self.judge = judge
         self.budget = budget
 
-    async def run_case(self, case: AttackCase) -> ExecutionResult:
-        if self.budget is not None:
-            self.budget.reserve_attack()
-            self.budget.check_wall_clock()
-
+    async def run_case(
+        self,
+        case: AttackCase,
+        *,
+        execution_id: str | None = None,
+    ) -> ExecutionResult:
         identity = self.target.identity
         if identity.target_class not in case.target_classes:
             raise ValueError(
@@ -56,12 +58,24 @@ class CampaignEngine:
                 f"case {case.id} incompatible with target mode {identity.target_mode.value}"
             )
 
+        resolved_execution_id = execution_id or f"exec-{uuid4().hex}"
+        if self.budget is not None:
+            self.budget.reserve_attack()
+            self.budget.reserve_turn(attack_id=resolved_execution_id)
+            self.budget.check_wall_clock()
+
         prompt = render_case_prompt(case)
-        response = await self.target.execute(TargetRequest(attack_id=case.id, prompt=prompt))
+        response = await self.target.execute(
+            TargetRequest(
+                attack_id=case.id,
+                prompt=prompt,
+                metadata={"execution_id": resolved_execution_id},
+            )
+        )
 
         if response.error_kind:
             return ExecutionResult(
-                execution_id=self._execution_id(case.id, identity.configuration_hash),
+                execution_id=resolved_execution_id,
                 attack_id=case.id,
                 target_id=identity.id,
                 outcome=CompromiseOutcome.ERROR,
@@ -86,7 +100,7 @@ class CampaignEngine:
         evidence = (*response.evidence, transcript)
 
         return ExecutionResult(
-            execution_id=self._execution_id(case.id, identity.configuration_hash),
+            execution_id=resolved_execution_id,
             attack_id=case.id,
             target_id=identity.id,
             outcome=outcome,
@@ -102,8 +116,3 @@ class CampaignEngine:
         for case in cases:
             results.append(await self.run_case(case))
         return tuple(results)
-
-    @staticmethod
-    def _execution_id(attack_id: str, target_hash: str) -> str:
-        digest = sha256(f"{attack_id}:{target_hash}".encode()).hexdigest()[:16]
-        return f"exec-{digest}"
