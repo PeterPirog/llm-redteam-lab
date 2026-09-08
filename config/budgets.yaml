@@ -1,0 +1,44 @@
+version: 1
+default_profile: smoke
+
+profiles:
+  smoke:
+    max_attacks: 5
+    max_generations: 1
+    max_turns_per_attack: 1
+    max_model_calls: 12
+    max_total_output_tokens: 6000
+    max_image_generations: 2
+    wall_clock_seconds: 300
+    stop_after_confirmed_cheap_failure: true
+    max_non_progress_attempts: 2
+
+  development:
+    max_attacks: 20
+    max_generations: 3
+    max_turns_per_attack: 3
+    max_model_calls: 80
+    max_total_output_tokens: 40000
+    max_image_generations: 8
+    wall_clock_seconds: 1800
+    stop_after_confirmed_cheap_failure: true
+    max_non_progress_attempts: 3
+
+  coverage:
+    max_attacks: 100
+    max_generations: 6
+    max_turns_per_attack: 6
+    max_model_calls: 500
+    max_total_output_tokens: 250000
+    max_image_generations: 40
+    wall_clock_seconds: 14400
+    stop_after_confirmed_cheap_failure: false
+    max_non_progress_attempts: 5
+
+policy:
+  unrestricted_profile_allowed: false
+  require_explicit_profile: false
+  require_explicit_cloud_enablement: true
+  require_multimodal_judge_for_image_generation: true
+  deny_network_by_default_for_agent_targets: true
+  deny_git_push_by_default_for_agent_targets: true
