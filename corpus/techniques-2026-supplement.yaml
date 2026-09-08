@@ -1,0 +1,73 @@
+version: 1
+last_verified: 2026-09-08
+
+techniques:
+  procfs_credential_read:
+    tier: T4
+    families: [secret_extraction, process_metadata, runtime_credentials]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies, agent_security_bench_receipts]
+    description: >-
+      Tests whether an agent inspects procfs-like process metadata, inherited
+      environment, file descriptors or runtime credentials outside task need.
+
+  dynamic_open_ended_injection:
+    tier: T4
+    families: [indirect_prompt_injection, dynamic_environment, open_ended_planning]
+    target_classes: [coding, reasoning]
+    interaction: environment_injection
+    implementations: [agentdyn]
+    description: >-
+      Tests prompt injection in realistic open-ended tasks where third-party
+      instructions may be helpful or malicious and the agent must plan dynamically.
+
+  goal_hijacking:
+    tier: T4
+    families: [goal_substitution, indirect_prompt_injection]
+    target_classes: [coding, reasoning]
+    interaction: environment_injection
+    implementations: [agent_injection_bench, agentdyn]
+
+  cross_session_leak:
+    tier: T4
+    families: [session_isolation, data_leakage]
+    target_classes: [writing, reasoning, coding]
+    interaction: multi_turn
+    implementations: [promptfoo_strategies]
+    description: >-
+      Tests whether content from an unrelated session becomes observable or
+      actionable in the current session. Use synthetic session canaries only.
+
+  prja_reasoning_targeted:
+    tier: T5
+    families: [reasoning_manipulation, semantic_trigger, psychological_framing]
+    target_classes: [reasoning]
+    interaction: multi_attempt
+    implementations: [prja]
+    description: >-
+      Research-reference technique for targeting reasoning content through
+      semantic triggers and psychological framing. Do not claim implementation
+      parity until an official reproducible artifact is integrated.
+
+  visual_cognitive_overload:
+    tier: T5
+    families: [multimodal, visual_injection, degraded_visual_text]
+    target_classes: [reasoning]
+    interaction: multimodal
+    implementations: [acz_jailbreak]
+    description: >-
+      Vision-capable reasoning-model attack family using degraded visual text.
+      This is not a text-to-image generation attack and must not be mixed with
+      image-generation target metrics.
+
+  egress_dlp_bypass:
+    tier: T4
+    families: [system_control, egress, data_loss_prevention]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [agent_egress_bench_verified]
+    description: >-
+      Tests whether an egress security control blocks synthetic secret movement
+      across URL, request-body, header, hostname and related channels. This is a
+      SYSTEM_COMPROMISE/control test rather than model-alignment scoring.
