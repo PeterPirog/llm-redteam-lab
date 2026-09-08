@@ -42,6 +42,92 @@ sources:
       whether defenses remain secure without becoming over-defensive in more
       realistic planning tasks.
 
+  multibreak:
+    name: MultiBreak
+    kind: multi_turn_jailbreak_benchmark
+    target_classes: [writing, reasoning]
+    source_mode: reference
+    paper_url: https://arxiv.org/abs/2605.01687
+    priority: critical
+    facts:
+      adversarial_prompts: 10389
+      harmful_intents: 2665
+    notes: >-
+      Large 2026 multi-turn benchmark. Use primarily to validate attack-family
+      diversity and trajectory-level coverage. Do not vendor dataset contents
+      until the official artifact location and redistribution terms are verified.
+
+  mt_jailbench:
+    name: MT-JailBench
+    kind: modular_multi_turn_methodology
+    target_classes: [writing, reasoning]
+    source_mode: reference
+    paper_url: https://arxiv.org/abs/2605.11002
+    priority: critical
+    notes: >-
+      Methodologically important because it separates evaluation, attack
+      strategy, prompt generation, refinement and flow control, and demonstrates
+      that budgets and judges are major confounders. This directly informs
+      llm-redteam-lab conversation-level ASR and flow-fingerprint design.
+
+  safedialbench:
+    name: SafeDialBench
+    kind: multi_turn_dialogue_safety_benchmark
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/drivetosouth/SafeDialBench-Dataset
+    paper_url: https://proceedings.iclr.cc/paper_files/paper/2026/hash/cbd213baf0ad155f460ddee93f31d5ee-Abstract-Conference.html
+    priority: high
+    facts:
+      dialogues: 4000+
+      languages: [English, Chinese]
+      dialogue_scenarios: 22
+      jailbreak_strategies: 7
+    notes: >-
+      ICLR 2026 fine-grained multi-turn safety benchmark. License and exact
+      redistribution terms must be verified before any dataset import.
+
+  plague:
+    name: PLAGUE
+    kind: lifelong_adaptive_multi_turn_attacker
+    target_classes: [writing, reasoning]
+    source_mode: external
+    url: https://github.com/madhavaggar/PLAGUE
+    paper_url: https://proceedings.iclr.cc/paper_files/paper/2026/hash/823e43f5537d8c1894afd1f6ab00a927-Abstract-Conference.html
+    priority: critical
+    notes: >-
+      ICLR 2026 attacker architecture organized as Primer, Planner and Finisher
+      phases with a growing strategy library. Treat as an architectural reference
+      for Red memory and phase-aware planning; do not couple the project to its
+      implementation or cloud-model assumptions.
+
+  ramp:
+    name: RAMP
+    kind: risk_aware_multi_turn_planning
+    target_classes: [writing, reasoning]
+    source_mode: reference
+    paper_url: https://aclanthology.org/2026.findings-acl.925/
+    priority: high
+    notes: >-
+      ACL Findings 2026 formulation of multi-turn jailbreaking as explicit
+      state/action planning. Relevant to future Red Planner state abstractions and
+      effectiveness-versus-query-cost optimization under strict turn budgets.
+
+  redcodeagent:
+    name: RedCodeAgent
+    kind: adaptive_code_agent_redteaming
+    target_classes: [coding]
+    source_mode: external
+    url: https://github.com/1mocat/RedCodeAgent
+    paper_url: https://www.microsoft.com/en-us/research/publication/redcodeagent-automatic-red-teaming-agent-against-diverse-code-agents/
+    license: MIT
+    priority: critical
+    notes: >-
+      ICLR 2026 adaptive Red agent for code agents. Its memory plus toolbox design
+      and execution-based verification are particularly relevant to OpenCode
+      testing. Potentially dangerous benchmark scenarios must remain sandboxed;
+      native llm-redteam-lab tests continue to use inert/synthetic effects.
+
   prja:
     name: Psychology-based Reasoning-targeted Jailbreak Attack (PRJA)
     kind: reasoning_targeted_attack_research
