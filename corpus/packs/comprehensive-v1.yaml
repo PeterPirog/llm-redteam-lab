@@ -1,0 +1,225 @@
+version: 1
+id: comprehensive-v1
+status: curated_source_plan
+last_verified: 2026-09-08
+
+# This pack describes comprehensive coverage without silently downloading gated
+# data or launching expensive adaptive attacks. Execution code/importers come
+# after the core domain model and Target abstraction are implemented.
+
+defaults:
+  local_first: true
+  require_budget_profile: true
+  require_evidence_pipeline: true
+  deterministic_grading_first: true
+  preserve_benign_controls: true
+  external_downloads: explicit_only
+  gated_sources: explicit_opt_in
+  real_service_sources: disabled
+
+packs:
+  writing:
+    target_class: writing
+    stages:
+      - id: controls
+        tiers: [T0]
+        techniques: [control_benign]
+        sources: [xstest]
+        purpose: utility_and_overrefusal_baseline
+      - id: direct_safety
+        tiers: [T1]
+        techniques: [direct_request, instruction_override, persona_roleplay, static_jailbreak_template]
+        sources: [do_not_answer, jailbreakbench, strongreject]
+      - id: low_cost_mutations
+        tiers: [T1, T2]
+        techniques:
+          - base64_transform
+          - rot13_transform
+          - hex_transform
+          - leetspeak_transform
+          - homoglyph_transform
+          - ascii_smuggling
+          - emoji_smuggling
+          - multilingual_rewrite
+          - linguistic_mutation
+          - translation_reframing
+          - summarization_reframing
+          - fictional_reframing
+          - authority_reframing
+          - academic_reframing
+          - likert_reframing
+          - math_reframing
+          - context_compliance_attack
+          - composite_static
+        sources: [strongreject_attacks, sorry_bench, cyberseceval_prompt_injection, promptfoo_strategies]
+      - id: adaptive_single_turn
+        tiers: [T3]
+        techniques: [iterative_jailbreak, pair, tree_attack, tap, meta_agent, best_of_n]
+        sources: [jailbreakbench_artifacts, promptfoo_strategies]
+        enabled_by_default: false
+      - id: stateful
+        tiers: [T4]
+        techniques: [crescendo, goat, hydra, goblin, indirect_prompt_injection]
+        sources: [promptfoo_strategies, bipia]
+        enabled_by_default: false
+      - id: specialized
+        tiers: [T5]
+        techniques: [gcg_suffix]
+        sources: [jailbreakbench_artifacts]
+        enabled_by_default: false
+      - id: in_the_wild
+        sources: [wildjailbreak]
+        gated: true
+        enabled_by_default: false
+
+  reasoning:
+    target_class: reasoning
+    stages:
+      - id: controls
+        tiers: [T0]
+        techniques: [control_benign]
+        sources: [xstest]
+      - id: refusal_taxonomy
+        sources: [do_not_answer, sorry_bench, harmbench, salad_bench]
+        tiers: [T1, T2]
+      - id: standard_jailbreaks
+        sources: [jailbreakbench, jailbreakbench_artifacts, strongreject, strongreject_attacks]
+        tiers: [T1, T2, T3]
+      - id: adaptive_reasoning
+        techniques: [iterative_jailbreak, pair, tree_attack, tap, meta_agent, best_of_n]
+        sources: [promptfoo_strategies, jailbreakbench_artifacts]
+        tiers: [T3]
+        enabled_by_default: false
+      - id: multi_turn
+        techniques: [crescendo, goat, hydra, goblin]
+        sources: [promptfoo_strategies]
+        tiers: [T4]
+        enabled_by_default: false
+      - id: reasoning_specific
+        techniques: [hcot]
+        sources: [hcot_malicious_educator]
+        tiers: [T5]
+        enabled_by_default: false
+      - id: indirect_and_tool_context
+        techniques: [indirect_prompt_injection, rag_context_poisoning, tool_output_injection, mcp_tool_poisoning, provenance_laundering, memory_poisoning]
+        sources: [bipia, agentdojo, injecagent, agent_injection_bench, agentprov, piarena]
+        tiers: [T4, T5]
+        enabled_by_default: false
+      - id: in_the_wild
+        sources: [wildjailbreak]
+        gated: true
+        enabled_by_default: false
+
+  coding:
+    target_class: coding
+    required_mode_for_full_pack: AGENT
+    stages:
+      - id: sandbox_controls
+        purpose: prove_test_harness_before_red_team
+        sources: [agent_security_bench_receipts, boundary_bench]
+        tiers: [T0]
+      - id: repository_surfaces
+        techniques: [repository_prompt_injection, terminal_output_injection, tool_output_injection]
+        sources: [repoguardbench, agent_injection_bench, promptfoo_strategies]
+        tiers: [T4]
+      - id: secret_boundaries
+        techniques: [synthetic_secret_extraction, secret_env_read, secret_file_read]
+        sources: [promptfoo_strategies, agent_egress_bench]
+        tiers: [T1, T4]
+      - id: sandbox_boundaries
+        techniques: [sandbox_read_escape, sandbox_write_escape, network_egress_bypass]
+        sources: [promptfoo_strategies, agent_security_bench_receipts, agent_egress_bench, boundary_bench]
+        tiers: [T4]
+      - id: agent_authority
+        techniques: [privilege_escalation, mcp_tool_poisoning, memory_poisoning]
+        sources: [agent_injection_bench, promptfoo_strategies, agentdojo, injecagent]
+        tiers: [T4]
+      - id: persistence_and_integrity
+        techniques: [generated_vulnerability, automation_poisoning, delayed_ci_exfiltration, steganographic_exfiltration, verifier_sabotage]
+        sources: [promptfoo_strategies]
+        tiers: [T4, T5]
+      - id: provenance
+        techniques: [provenance_laundering]
+        sources: [agentprov, agentshield_benchmark]
+        tiers: [T5]
+      - id: adaptive
+        techniques: [meta_agent, hydra]
+        sources: [promptfoo_strategies, piarena]
+        tiers: [T3, T4]
+        enabled_by_default: false
+      - id: real_service_research
+        sources: [livepi]
+        enabled_by_default: false
+        explicit_opt_in: true
+        requirements:
+          - dedicated_test_accounts
+          - synthetic_data_only
+          - service_specific_review
+          - explicit_user_authorization
+      - id: harmful_agent_capability
+        sources: [agentharm]
+        enabled_by_default: false
+        controlled_high_risk: true
+
+  image_generation:
+    target_class: image_generation
+    requirements:
+      - multimodal_judge_or_specialized_visual_classifier
+      - artifact_storage
+      - reproducible_seed_when_supported
+    stages:
+      - id: benign_utility
+        techniques: [t2i_overrefusal_control]
+        sources: [overt]
+        tiers: [T0]
+      - id: broad_safety
+        sources: [t2isafety]
+        tiers: [T0, T1]
+      - id: risky_prompt_taxonomy
+        techniques: [instruction_override, t2i_prompt_obfuscation]
+        sources: [t2i_riskyprompt]
+        tiers: [T1, T2]
+      - id: semantic_attack
+        techniques: [t2i_semantic_substitution, best_of_n]
+        sources: [t2i_riskyprompt, jailbreakdiffbench, promptfoo_strategies]
+        tiers: [T3]
+        enabled_by_default: false
+      - id: visual_and_multimodal
+        techniques: [visual_prompt_injection, t2i_multimodal_jailbreak]
+        sources: [jailbreakv_28k, mma_diffusion, jailbreakdiffbench, spqr]
+        tiers: [T4, T5]
+        enabled_by_default: false
+      - id: moderation_robustness
+        techniques: [image_checker_bypass]
+        sources: [jailbreakdiffbench]
+        tiers: [T5]
+        enabled_by_default: false
+
+cross_cutting_evaluation:
+  judge_validation_sources:
+    - jailbreakbench
+    - sorry_bench
+    - strongreject
+  overrefusal_sources:
+    - xstest
+    - overt
+  control_benchmark_sources:
+    - agentshield_benchmark
+    - agent_security_bench_receipts
+  research_aggregators:
+    - ai2_safety_eval
+
+escalation:
+  start: T0
+  advance_only_if:
+    - evidence_pipeline_passes
+    - budget_remaining
+  stop_conditions:
+    - confirmed_cheap_failure_and_campaign_goal_is_find_first_failure
+    - repeated_non_progress
+    - budget_exhausted
+    - infrastructure_error
+  note: >-
+    Coverage campaigns may continue after a cheap failure when explicitly
+    requested. Cost-sensitive smoke campaigns should stop early and persist the
+    first reproducible finding.
