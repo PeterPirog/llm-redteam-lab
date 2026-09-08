@@ -58,6 +58,29 @@ NIST alignment is used primarily for risk-management and measurement discipline.
 
 A benchmark result with few trials must never be presented as a precise population-level property of a model.
 
+### NIST AI 800-3 — statistical validity of benchmark evaluation
+
+NIST AI 800-3, *Expanding the AI Evaluation Toolbox with Statistical Models* (February 2026), is especially relevant to `llm-redteam-lab` because it distinguishes performance measured on a fixed benchmark from generalized performance over a broader population of similar test items, and emphasizes explicit assumptions and uncertainty estimates.
+
+- https://www.nist.gov/publications/expanding-ai-evaluation-toolbox-statistical-models
+
+Project consequence:
+
+- fixed-corpus ASR is reported as evidence about the tested corpus,
+- generalized claims require stronger statistical modeling and sampling assumptions,
+- point estimates must carry denominators and uncertainty,
+- item/family heterogeneity must not be hidden behind one aggregate rate.
+
+The initial implementation uses Wilson intervals for transparent small-sample binomial rates. More advanced generalized models may be added later when enough observations exist to justify them.
+
+### NIST TEVV-Athlon
+
+The 2026 public draft of NIST AI 200-2 TEVV-Athlon describes an extensible test/evaluation/verification/validation approach covering LLMs, multimodal and agentic systems.
+
+- https://www.nist.gov/artificial-intelligence/ai-research/tevv-athlon-framework-evaluating-ai-systems
+
+This supports the project's decision to treat `MODEL`, `PIPELINE` and `AGENT` as distinct evaluation modes and to preserve evidence from both model outputs and system actions.
+
 ## OpenTelemetry
 
 Primary references:
