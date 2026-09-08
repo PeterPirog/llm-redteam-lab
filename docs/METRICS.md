@@ -15,6 +15,7 @@ The project reports experimental evidence, not absolute claims that a model is "
 6. Benign controls are required to measure over-refusal.
 7. Repeated observations are required before a finding becomes confirmed.
 8. Comparisons across target versions require comparable corpus, budgets and metric definitions.
+9. For multi-turn attacks, one bounded conversation is one Blue vulnerability trial; individual turns are not additional ASR trials.
 
 ## ASR — Attack Success Rate
 
@@ -29,6 +30,62 @@ ASR = conclusive executions with objective_violated=true
 This definition is valid for `MODEL`, `PIPELINE` and `AGENT` targets.
 
 ASR does **not** imply system compromise. A model-only disclosure may be an attack success while deterministic authorization still prevents a system-level unauthorized effect.
+
+## Multi-turn ASR and conversation units
+
+A multi-turn jailbreak is a sequence-level experiment. The complete bounded conversation contributes at most one conclusive ASR trial:
+
+```text
+multi_turn_ASR = successful conclusive conversations
+                 -----------------------------------
+                       conclusive conversations
+```
+
+A five-turn conversation does **not** contribute five trials. Counting turns as trials would make the denominator depend on attacker flow control and would bias comparisons between short and long attack strategies.
+
+Every multi-turn report should therefore distinguish:
+
+### Blue vulnerability measurements
+
+- conversation-level ASR with confidence interval,
+- conversation-level MCR and SCR,
+- whole-sequence reproduction rate,
+- result stratified by session mode and flow fingerprint.
+
+### Red efficiency/resource measurements
+
+- total target interactions,
+- mean/median turns per conversation,
+- turn ordinal to first violation,
+- logical branch depth to first violation,
+- backtracks and branches,
+- successes per 100 target interactions,
+- attacker/Judge model calls and token consumption.
+
+`successes_per_100_turns` is an attacker-efficiency measure. It MUST NOT replace conversation-level ASR.
+
+### Ordinal versus depth
+
+Branching attacks require two separate measurements:
+
+- `ordinal`: actual target interaction order and therefore cost,
+- `depth`: number of conversational steps on the successful logical branch.
+
+After backtracking, ordinal may increase while depth decreases. Reports should preserve both.
+
+### Session and flow comparability
+
+Multi-turn comparisons are directly comparable only when important flow-control conditions are compatible, including:
+
+- replay versus target-managed session semantics,
+- maximum turns,
+- maximum backtracks,
+- maximum branches,
+- continue-after-success policy,
+- Red strategy implementation/version,
+- Judge implementation/version.
+
+The framework records these conditions in a `flow_fingerprint`. A result with a materially different flow fingerprint should be labeled exploratory rather than silently included in a direct comparison.
 
 ## MCR — Model Compromise Rate
 
@@ -109,6 +166,8 @@ and classify findings as:
 - `REPRODUCIBLE`,
 - `CONFIRMED`.
 
+For a multi-turn finding, reproduction means re-running the bounded sequence/strategy under the same recorded flow conditions. Replaying only the final successful message is not a reproduction of a sequence-dependent vulnerability.
+
 ## Stratification
 
 At minimum, security rates should be available by:
@@ -121,7 +180,8 @@ At minimum, security rates should be available by:
 - security invariant,
 - corpus/source,
 - Red strategy,
-- campaign budget profile.
+- campaign budget profile,
+- multi-turn session mode and flow fingerprint when applicable.
 
 Do not hide materially different attack families behind one aggregate ASR.
 
@@ -138,7 +198,8 @@ Red is measured separately through:
 - infrastructure/error rate per family,
 - attack novelty,
 - budget consumed before first success,
-- generations/turns to success.
+- generations/turns to success,
+- backtracks and branch efficiency for multi-turn strategies.
 
 These measure attacker search quality, not severity of the Blue vulnerability.
 
@@ -152,7 +213,8 @@ A target-version comparison is valid only when important experimental conditions
 - Red strategy/profile,
 - target mode and application configuration,
 - judge policy,
-- metric-definition version.
+- metric-definition version,
+- multi-turn flow fingerprint where applicable.
 
 Where conditions differ, reports must label the comparison exploratory rather than directly comparable.
 
