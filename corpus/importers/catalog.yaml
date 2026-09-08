@@ -1,0 +1,205 @@
+version: 1
+status: design_contract
+
+# This file defines HOW sources may be obtained. It does not perform downloads.
+# Importer implementation belongs in application code after the domain model is
+# available. No source is fetched automatically on normal startup.
+
+importers:
+  jailbreakbench:
+    source: jailbreakbench
+    method: huggingface_or_python_package
+    dataset: JailbreakBench/JBB-Behaviors
+    explicit_download: true
+    gated: false
+    normalize:
+      preserve_fields: [goal, prompt, target_response]
+      require_upstream_record_id: true
+
+  jailbreakbench_artifacts:
+    source: jailbreakbench_artifacts
+    method: python_package
+    package: jailbreakbench
+    explicit_download: true
+    gated: false
+    normalize:
+      preserve_fields: [method, model_name, goal, behavior, category, number_of_queries, queries_to_jailbreak, jailbroken]
+
+  strongreject:
+    source: strongreject
+    method: python_package_or_git
+    package: strong_reject
+    explicit_download: true
+    gated: false
+    record_license_policy: preserve_upstream_source_license
+
+  xstest:
+    source: xstest
+    method: git_or_raw_file
+    repository: https://github.com/paul-rottger/xstest
+    expected_file: xstest_prompts.csv
+    explicit_download: true
+    gated: false
+
+  sorry_bench:
+    source: sorry_bench
+    method: huggingface
+    dataset: sorry-bench/sorry-bench-202503
+    explicit_download: true
+    gated: true
+    terms: upstream_access_required
+
+  wildjailbreak:
+    source: wildjailbreak
+    method: huggingface
+    dataset: allenai/wildjailbreak
+    explicit_download: true
+    gated: true
+    terms: responsible_use_acceptance_required
+
+  cyberseceval_prompt_injection:
+    source: cyberseceval_prompt_injection
+    method: upstream_framework
+    repository: https://github.com/meta-llama/PurpleLlama
+    explicit_download: true
+    gated: false
+    notes: Support text, multilingual and visual injection variants separately.
+
+  bipia:
+    source: bipia
+    method: git
+    repository: https://github.com/microsoft/BIPIA
+    explicit_download: true
+    gated: false
+    record_license_policy: preserve_underlying_dataset_license
+
+  agentdojo:
+    source: agentdojo
+    method: python_package_or_git
+    package: agentdojo
+    repository: https://github.com/sequrity-ai/agentdojo
+    explicit_download: true
+    gated: false
+    execution_mode: external_benchmark_adapter
+
+  injecagent:
+    source: injecagent
+    method: git
+    repository: https://github.com/uiuc-kang-lab/InjecAgent
+    explicit_download: true
+    gated: false
+    execution_mode: external_benchmark_adapter
+
+  piarena:
+    source: piarena
+    method: git
+    repository: https://github.com/sleeepeer/PIArena
+    explicit_download: true
+    gated: false
+    execution_mode: optional_external_adapter
+
+  repoguardbench:
+    source: repoguardbench
+    method: git
+    repository: https://github.com/DaoyuanLi2816/RepoGuardBench
+    explicit_download: true
+    gated: false
+    execution_mode: external_benchmark_adapter
+    preferred_for: opencode_repository_injection
+
+  agent_injection_bench:
+    source: agent_injection_bench
+    method: git
+    repository: https://github.com/ppradyoth/AgentInjectionBench
+    explicit_download: true
+    gated: false
+
+  agentprov:
+    source: agentprov
+    method: git
+    repository: https://github.com/webpro255/agentprov
+    explicit_download: true
+    gated: false
+
+  agent_egress_bench:
+    source: agent_egress_bench
+    method: git
+    repository: https://github.com/luckyPipewrench/agent-egress-bench
+    explicit_download: true
+    gated: false
+    safety_requirement: local_or_authorized_network_trap_only
+
+  livepi:
+    source: livepi
+    method: external_research_adapter
+    repository: https://github.com/leizhao7/livepi
+    explicit_download: true
+    gated: false
+    real_services: true
+    enabled_by_default: false
+    requirements:
+      - explicit_user_authorization
+      - dedicated_test_accounts
+      - synthetic_data_only
+      - service_specific_review
+
+  hcot_malicious_educator:
+    source: hcot_malicious_educator
+    method: git_or_upstream_dataset
+    repository: https://github.com/dukeceicenter/jailbreak-reasoning-openai-o1o3-deepseek-r1
+    explicit_download: true
+    gated: false
+    noncommercial_terms: true
+
+  t2i_riskyprompt:
+    source: t2i_riskyprompt
+    method: git_or_upstream_artifact
+    repository: https://github.com/datar001/T2I-RiskyPrompt
+    explicit_download: true
+    gated: false
+    license_review_before_redistribution: true
+
+  t2isafety:
+    source: t2isafety
+    method: git_or_upstream_artifact
+    repository: https://github.com/adwardlee/t2i_safety
+    explicit_download: true
+    gated: false
+
+  overt:
+    source: overt
+    method: git_or_upstream_artifact
+    repository: https://github.com/yixiao-huang/OVERT
+    explicit_download: true
+    gated: false
+
+  jailbreakv_28k:
+    source: jailbreakv_28k
+    method: huggingface_or_git
+    dataset: JailbreakV-28K/JailBreakV-28k
+    repository: https://github.com/SaFoLab-WISC/JailBreakV_28K
+    explicit_download: true
+    gated: false
+
+  mma_diffusion:
+    source: mma_diffusion
+    method: upstream_gated_artifact
+    repository: https://github.com/cure-lab/MMA-Diffusion
+    explicit_download: true
+    gated: true
+    redistribution: disabled
+
+  spqr:
+    source: spqr
+    method: upstream_gated_artifact
+    repository: https://github.com/talha-alam/spqr
+    explicit_download: true
+    gated: true
+    redistribution: source_dependent
+
+  jailbreakdiffbench:
+    source: jailbreakdiffbench
+    method: reference_until_artifact_terms_verified
+    explicit_download: false
+    gated: unknown
+    importer_enabled: false
