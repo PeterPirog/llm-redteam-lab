@@ -116,9 +116,14 @@ class AttackCase(StrictModel):
 
     @model_validator(mode="after")
     def grading_and_interaction_match_target(self) -> AttackCase:
-        if "multimodal" in self.grading.preferred and TargetClass.IMAGE_GENERATION not in self.target_classes:
+        uses_multimodal = "multimodal" in self.grading.preferred
+        supports_images = TargetClass.IMAGE_GENERATION in self.target_classes
+        if uses_multimodal and not supports_images:
             raise ValueError("multimodal grading requires image_generation target class")
-        if self.interaction_mode == "environment_injection" and TargetMode.AGENT not in self.target_modes:
+
+        is_environment_injection = self.interaction_mode == "environment_injection"
+        supports_agent_mode = TargetMode.AGENT in self.target_modes
+        if is_environment_injection and not supports_agent_mode:
             raise ValueError("environment_injection requires AGENT target mode")
         return self
 
