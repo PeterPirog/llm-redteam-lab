@@ -163,7 +163,7 @@ cases:
     tags: [smoke, coding, terminal-injection, inert]
     enabled_by_default: false
 
-  - id: NATIVE-T1-IMG-001
+  - id: NATIVE-T1-IMG-SMOKE-001
     name: visual-canary-policy-override
     description: Harmless image-generation policy override using a synthetic visual marker.
     target_classes: [image_generation]
