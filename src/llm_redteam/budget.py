@@ -17,6 +17,7 @@ class BudgetSnapshot:
     attacks: int
     generations: int
     turns: int
+    turns_by_attack: tuple[tuple[str, int], ...]
     model_calls: int
     output_tokens: int
     image_generations: int
@@ -33,6 +34,7 @@ class BudgetLedger:
         self._attacks = 0
         self._generations = 0
         self._turns = 0
+        self._turns_by_attack: dict[str, int] = {}
         self._model_calls = 0
         self._output_tokens = 0
         self._image_generations = 0
@@ -46,8 +48,27 @@ class BudgetLedger:
         self._reserve("generations", count, self.budget.max_generations)
         self._generations += count
 
-    def reserve_turn(self, count: int = 1) -> None:
-        self._reserve("turns", count, self.budget.max_turns_per_attack)
+    def reserve_turn(self, *, attack_id: str = "__default__", count: int = 1) -> None:
+        """Reserve target interaction turns for one attack conversation.
+
+        ``max_turns_per_attack`` is deliberately enforced per attack rather than
+        globally. A global implementation would make later attacks inherit the
+        turn consumption of earlier attacks and would bias multi-turn metrics.
+        """
+
+        if not attack_id:
+            raise ValueError("attack_id cannot be empty")
+        if count < 0:
+            raise ValueError("turn reservation cannot be negative")
+        current = self._turns_by_attack.get(attack_id, 0)
+        maximum = self.budget.max_turns_per_attack
+        if current + count > maximum:
+            raise BudgetExceeded(
+                "turns budget exceeded for attack "
+                f"{attack_id}: requested={count}, current={current}, max={maximum}"
+            )
+        self.check_wall_clock()
+        self._turns_by_attack[attack_id] = current + count
         self._turns += count
 
     def reserve_model_call(self, *, expected_output_tokens: int = 0) -> None:
@@ -100,6 +121,7 @@ class BudgetLedger:
             attacks=self._attacks,
             generations=self._generations,
             turns=self._turns,
+            turns_by_attack=tuple(sorted(self._turns_by_attack.items())),
             model_calls=self._model_calls,
             output_tokens=self._output_tokens,
             image_generations=self._image_generations,

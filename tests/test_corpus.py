@@ -5,6 +5,7 @@ from llm_redteam.domain import TargetClass, TargetMode
 
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE = ROOT / "corpus" / "native" / "smoke"
+MULTITURN = ROOT / "corpus" / "native" / "multiturn"
 
 
 def test_native_text_corpus_validates() -> None:
@@ -13,12 +14,20 @@ def test_native_text_corpus_validates() -> None:
     assert len(document.cases) == 5
 
 
+def test_native_multi_turn_corpus_validates_and_is_opt_in() -> None:
+    document = load_corpus_file(MULTITURN / "synthetic-sequences-v1.yaml")
+    assert len(document.cases) == 3
+    assert all(case.interaction_mode == "multi_turn" for case in document.cases)
+    assert all(case.enabled_by_default is False for case in document.cases)
+
+
 def test_native_case_ids_are_unique_across_smoke_files() -> None:
     cases = load_corpus_files(
         [
             SMOKE / "writing-reasoning.yaml",
             SMOKE / "coding.yaml",
             SMOKE / "image-generation.yaml",
+            MULTITURN / "synthetic-sequences-v1.yaml",
         ]
     )
     ids = [case.id for case in cases]

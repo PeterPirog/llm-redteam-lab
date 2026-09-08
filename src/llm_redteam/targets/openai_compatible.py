@@ -22,7 +22,7 @@ from ..domain import (
     TargetIdentity,
     TargetMode,
 )
-from .base import TargetRequest, TargetResponse
+from .base import SessionMode, TargetRequest, TargetResponse
 
 
 class OpenAICompatibleConfig(StrictModel):
@@ -38,6 +38,7 @@ class OpenAICompatibleConfig(StrictModel):
     temperature: float = Field(ge=0.0, le=2.0, default=0.0)
     max_output_tokens: int | None = Field(gt=0, default=None)
     capabilities: frozenset[str] = frozenset({"text"})
+    supports_target_managed_sessions: bool = False
 
 
 class OpenAICompatibleTarget:
@@ -65,6 +66,7 @@ class OpenAICompatibleTarget:
                 self.config.target_mode.value,
                 str(self.config.temperature),
                 str(self.config.max_output_tokens),
+                str(self.config.supports_target_managed_sessions),
             ]
         )
         return TargetIdentity(
@@ -79,6 +81,12 @@ class OpenAICompatibleTarget:
         )
 
     async def execute(self, request: TargetRequest) -> TargetResponse:
+        if (
+            request.session_mode == SessionMode.TARGET_MANAGED
+            and not self.config.supports_target_managed_sessions
+        ):
+            return TargetResponse(error_kind="session:target_managed_not_supported")
+
         url = self.config.base_url.rstrip("/") + self.config.endpoint_path
         headers = {"Content-Type": "application/json"}
         if self.config.api_key_env:
@@ -87,9 +95,15 @@ class OpenAICompatibleTarget:
                 return TargetResponse(error_kind=f"missing_api_key_env:{self.config.api_key_env}")
             headers["Authorization"] = f"Bearer {token}"
 
+        messages = [
+            {"role": message.role.value, "content": message.content}
+            for message in request.conversation
+        ]
+        messages.append({"role": "user", "content": request.prompt})
+
         payload: dict[str, object] = {
             "model": self.config.model,
-            "messages": [{"role": "user", "content": request.prompt}],
+            "messages": messages,
             "temperature": self.config.temperature,
             "stream": False,
         }
@@ -140,6 +154,8 @@ class OpenAICompatibleTarget:
             data={
                 "http_status": response.status_code,
                 "endpoint_path": self.config.endpoint_path,
+                "session_mode": request.session_mode.value,
+                "history_messages": len(request.conversation),
             },
             redacted=True,
         )
