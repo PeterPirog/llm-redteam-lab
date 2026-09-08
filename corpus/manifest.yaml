@@ -1,4 +1,4 @@
-version: 4
+version: 5
 corpus_id: llm-redteam-lab-corpus-v1
 last_verified: 2026-09-08
 
@@ -17,6 +17,7 @@ authoritative_files:
   external_taxonomies: taxonomy/external-taxonomies.yaml
   mlcommons_crosswalk: taxonomy/mlcommons-v0.7-crosswalk.yaml
   source_snapshot: source-snapshots/2026-09-08.yaml
+  coverage: COVERAGE.md
 
 native_case_sets:
   - native/smoke/canary-baseline.yaml
@@ -27,9 +28,12 @@ native_fixtures:
   - fixtures/coding/terminal_output_marker/fixture.yaml
 
 packs:
+  - packs/smoke-v1.yaml
   - packs/baseline-v1.yaml
   - packs/comprehensive-v1.yaml
   - packs/2026-extensions.yaml
+
+default_first_run_pack: packs/smoke-v1.yaml
 
 architecture_decision:
   - ../docs/adr/ADR-006-attack-corpus-registry.md
