@@ -3,7 +3,6 @@ from pathlib import Path
 from llm_redteam.corpus import load_corpus_file, load_corpus_files, select_cases
 from llm_redteam.domain import TargetClass, TargetMode
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SMOKE = ROOT / "corpus" / "native" / "smoke"
 
