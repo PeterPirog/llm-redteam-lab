@@ -1,0 +1,136 @@
+version: 1
+id: baseline-v1
+status: design
+
+principles:
+  - start_with_native_smoke
+  - use_deterministic_grading_first
+  - preserve_benign_controls_to_measure_overrefusal
+  - external_sources_are_not_auto_downloaded
+  - escalate_to_adaptive_strategies_only_after_static_baseline
+
+packs:
+  writing:
+    target_class: writing
+    stages:
+      - id: smoke
+        tier_range: [T0, T2]
+        include_native:
+          - NATIVE-T0-WR-001
+          - NATIVE-T1-WR-001
+          - NATIVE-T1-WR-002
+          - NATIVE-T1-WR-003
+          - NATIVE-T2-WR-001
+        max_cases_default: 5
+      - id: base_safety_objectives
+        sources: [do_not_answer]
+        sampling: stratified_by_risk_taxonomy
+        max_cases_default: 12
+      - id: known_jailbreak_baseline
+        sources: [jailbreakbench_artifacts, strongreject]
+        sampling: source_balanced
+        max_cases_default: 12
+      - id: adaptive
+        strategy_sources: [promptfoo_strategies]
+        strategies: [jailbreak_meta, jailbreak_hydra]
+        enabled_by_default: false
+
+  reasoning:
+    target_class: reasoning
+    stages:
+      - id: smoke
+        tier_range: [T0, T2]
+        include_native:
+          - NATIVE-T0-WR-001
+          - NATIVE-T1-WR-001
+          - NATIVE-T1-WR-002
+          - NATIVE-T1-WR-003
+          - NATIVE-T2-WR-001
+        max_cases_default: 5
+      - id: refusal_and_robustness
+        sources: [do_not_answer, harmbench]
+        sampling: category_balanced
+        max_cases_default: 16
+      - id: jailbreak_artifacts
+        sources: [jailbreakbench_artifacts, strongreject]
+        sampling: source_balanced
+        max_cases_default: 12
+      - id: in_the_wild
+        sources: [wildjailbreak]
+        enabled_by_default: false
+        requires_explicit_access: true
+      - id: adaptive
+        strategy_sources: [promptfoo_strategies]
+        strategies: [jailbreak_meta, jailbreak_hydra]
+        enabled_by_default: false
+
+  coding:
+    target_class: coding
+    stages:
+      - id: smoke
+        tier_range: [T0, T4]
+        include_native:
+          - NATIVE-T4-CODE-001
+          - NATIVE-T4-CODE-002
+        enabled_by_default: false
+        reason: requires_agent_sandbox_fixture
+      - id: repository_injection
+        sources: [repoguardbench]
+        sampling: carrier_and_goal_balanced
+        priority: critical
+        max_cases_default: 10
+      - id: indirect_context_injection
+        sources: [bipia, injecagent]
+        sampling: task_and_tool_balanced
+        max_cases_default: 10
+      - id: dynamic_agent_environment
+        sources: [agentdojo]
+        max_cases_default: 8
+      - id: harmful_agent_capability
+        sources: [agentharm]
+        enabled_by_default: false
+        reason: controlled_high_risk_agent_tasks
+      - id: adaptive
+        strategy_sources: [promptfoo_strategies]
+        strategies: [coding_agent_core, jailbreak_meta, jailbreak_hydra]
+        enabled_by_default: false
+
+  image_generation:
+    target_class: image_generation
+    stages:
+      - id: smoke
+        include_native:
+          - NATIVE-T1-IMG-001
+        enabled_by_default: false
+        reason: requires_multimodal_judge_or_visual_detector
+      - id: benign_overrefusal_controls
+        sources: [overt]
+        sampling: category_balanced
+        priority: high
+        max_cases_default: 12
+      - id: risky_prompt_taxonomy
+        sources: [t2i_riskyprompt]
+        sampling: primary_and_subcategory_balanced
+        priority: critical
+        max_cases_default: 18
+      - id: broad_safety_coverage
+        sources: [t2isafety]
+        sampling: task_balanced
+        max_cases_default: 12
+      - id: jailbreak_robustness
+        sources: [jailbreakdiffbench]
+        max_cases_default: 12
+      - id: multimodal_and_gated
+        sources: [mma_diffusion, spqr, jailbreakv_28k]
+        enabled_by_default: false
+        requires_explicit_access: true
+      - id: adaptive
+        strategy_sources: [promptfoo_strategies]
+        enabled_by_default: false
+
+escalation_policy:
+  stop_after_confirmed_cheap_failure: true
+  continue_for_coverage_if_requested: true
+  require_evidence_pipeline_before_adaptive: true
+  require_budget_profile_for_adaptive: true
+  require_multimodal_grader_for_image_generation: true
