@@ -1,0 +1,190 @@
+snapshot_date: 2026-09-08
+purpose: >-
+  Human-readable verification snapshot of important upstream corpus facts.
+  Importers must still record the exact upstream revision/hash used at import
+  time; this file is not a dependency lock.
+
+verified:
+  mlcommons_jailbreak_taxonomy:
+    url: https://github.com/mlcommons/jailbreak-taxonomy
+    version: 0.7.0
+    license: CC-BY-4.0
+    families: 4
+    categories: 8
+    leaves: 18
+    documented_attacks: 113
+    scope: single-turn inference-time prompt-only jailbreaks
+    architectural_use: primary_external_mechanism_crosswalk
+
+  jailbreakbench:
+    url: https://github.com/JailbreakBench/jailbreakbench
+    architectural_use: standardized_behavior_and_judge_reference
+
+  jailbreakbench_artifacts:
+    url: https://github.com/JailbreakBench/artifacts
+    architectural_use: reproducible_attack_artifacts_and_attack_metadata
+
+  do_not_answer:
+    url: https://github.com/Libr-AI/do-not-answer
+    instructions: 939
+    risk_categories: 61
+    license: Apache-2.0
+    architectural_use: safety_objective_taxonomy
+
+  sorry_bench:
+    url: https://github.com/SORRY-Bench/sorry-bench
+    unsafe_instructions: 440
+    safety_categories: 44
+    linguistic_mutations: 20
+    access: gated_for_unsafe_dataset
+    architectural_use: refusal_and_linguistic_robustness
+
+  xstest:
+    url: https://github.com/paul-rottger/xstest
+    data_license: CC-BY-4.0
+    architectural_use: overrefusal_and_false_positive_controls
+
+  agent_injection_bench:
+    url: https://github.com/ppradyoth/AgentInjectionBench
+    categories:
+      - tool_output_injection
+      - goal_hijacking
+      - privilege_escalation
+      - data_exfiltration
+      - multi_turn_stateful
+      - mcp_context_poisoning
+    matched_benign_controls: true
+    architectural_use: agentic_injection_surface_coverage
+
+  repoguardbench:
+    url: https://github.com/DaoyuanLi2816/RepoGuardBench
+    code_license: MIT
+    data_license: CC-BY-4.0
+    architectural_use: primary_repository_injection_reference_for_coding_agents
+
+  agent_security_bench:
+    url: https://github.com/sinakazemnezhad/agent-security-bench
+    public_version: 0.5.0
+    license: MIT
+    characteristics:
+      - deterministic_security_checks
+      - machine_readable_receipts
+      - mcp_trace_adapter
+      - fail_closed_required_checks
+    architectural_use: deterministic_evidence_and_receipt_design_reference
+
+  agentprov:
+    url: https://github.com/webpro255/agentprov
+    license: MIT
+    characteristics:
+      - provenance_attribution
+      - multi_hop_laundering
+      - held_out_ground_truth
+      - synthetic_sandboxed_smoke_split
+      - no_single_blended_safety_utility_score
+    architectural_use: provenance_and_forensic_analysis_reference
+
+  agent_egress_bench:
+    url: https://github.com/luckyPipewrench/agent-egress-bench
+    license: Apache-2.0
+    logical_cases: 197
+    categories: 18
+    block_expected_cases: 149
+    allow_expected_baselines: 47
+    warn_cases: 1
+    architectural_use: system_compromise_egress_and_dlp_control_evaluation
+
+  agentshield_benchmark:
+    url: https://github.com/doronp/agentshield-benchmark
+    license: Apache-2.0
+    current_case_count_seen: 537
+    categories_seen:
+      - prompt_injection
+      - jailbreak
+      - data_exfiltration
+      - tool_abuse
+      - over_refusal
+      - multi_agent
+      - provenance
+    architectural_use: blue_guardrail_comparison_reference
+    caveat: maintained_by_a_security_product_team; preserve_conflict_of_interest_metadata
+
+  livepi:
+    url: https://github.com/leizhao7/livepi
+    year: 2026
+    input_surfaces: 7
+    attack_rendering_families: 12
+    malicious_goals: 5
+    executable_cases_per_model_reported: 169
+    uses_real_services: true
+    architectural_use: research_only_real_world_external_validation
+    policy: explicit_opt_in_only
+
+  boundary_bench:
+    url: https://github.com/boundary-bench/boundary-bench
+    year: 2026
+    terminal_bench_tasks: 89
+    architectural_use: sandbox_policy_utility_tradeoff_reference
+
+  t2i_riskyprompt:
+    url: https://github.com/datar001/T2I-RiskyPrompt
+    venue: AAAI_2026
+    risky_prompts: 6432
+    primary_categories: 6
+    fine_grained_subcategories: 14
+    risky_images_reported: 20373
+    evaluated_t2i_models: 8
+    evaluated_defenses: 9
+    evaluated_safety_filters: 5
+    evaluated_attack_strategies: 5
+    architectural_use: primary_risky_prompt_taxonomy_for_image_generation
+
+  t2isafety:
+    url: https://github.com/adwardlee/t2i_safety
+    venue: CVPR_2025
+    prompts_reported: 70000
+    manually_annotated_images_reported: 68000
+    domains: 3
+    tasks: 12
+    categories: 44
+    architectural_use: broad_image_safety_and_specialized_visual_judge_reference
+
+  overt:
+    url: https://github.com/yixiao-huang/OVERT
+    venue: NeurIPS_DB_2025
+    license: Apache-2.0
+    benign_lookalike_prompts: 4600
+    harmful_controls: 1785
+    safety_categories: 9
+    architectural_use: image_generation_overrefusal_and_utility_controls
+
+  jailbreakdiffbench:
+    venue: ICCV_2025
+    url: https://openaccess.thecvf.com/content/ICCV2025/html/Jin_JailbreakDiffBench_A_Comprehensive_Benchmark_for_Jailbreaking_Diffusion_Models_ICCV_2025_paper.html
+    characteristics:
+      - human_annotated_prompt_and_image_data
+      - moderation_tool_evaluation
+      - attack_and_defense_benchmarking
+      - attack_success_rate
+      - f1
+      - alignment_score
+      - extensible_to_text_to_video
+    architectural_use: diffusion_jailbreak_and_moderation_reference
+
+  spqr:
+    url: https://github.com/talha-alam/spqr
+    venue: ECCV_2026
+    code_license: MIT
+    axes:
+      - safety
+      - prompt_adherence
+      - quality
+      - robustness_after_benign_finetuning
+    evaluated_alignment_methods_reported: 11
+    backbones_reported: 5
+    architectural_use: post_adaptation_image_safety_regression_reference
+
+notes:
+  - Counts and versions reflect upstream pages observed on snapshot_date and may change.
+  - Exact source revision belongs in per-import provenance, not in this review snapshot.
+  - No gated source is downloaded merely because it appears here.
