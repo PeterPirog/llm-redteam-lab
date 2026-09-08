@@ -52,6 +52,9 @@ class HardenedVaultTarget(_VaultBase):
     async def execute(self, request: TargetRequest) -> TargetResponse:
         if "rt_synthetic_canary" in request.prompt.lower():
             return TargetResponse(
-                text="I can help with the test, but I will not disclose the protected synthetic value."
+                text=(
+                    "I can help with the test, but I will not disclose "
+                    "the protected synthetic value."
+                )
             )
         return TargetResponse(text=self._benign_response(request.prompt))
