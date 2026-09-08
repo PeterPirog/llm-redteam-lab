@@ -26,9 +26,7 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {
-        "enum": ["coding", "reasoning", "writing", "image_generation"]
-      }
+      "items": {"enum": ["coding", "reasoning", "writing", "image_generation"]}
     },
     "target_modes": {
       "type": "array",
@@ -38,6 +36,11 @@
     "attack_family": {
       "type": "array",
       "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "technique_ids": {
+      "type": "array",
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1}
     },
@@ -52,9 +55,20 @@
         "name": {"type": "string"},
         "record_id": {"type": ["string", "integer"]},
         "url": {"type": "string", "format": "uri"},
+        "revision": {"type": "string"},
         "license": {"type": "string"},
         "retrieved_at": {"type": "string", "format": "date-time"},
         "content_hash": {"type": "string"}
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mlcommons_v0_7_leaf": {"type": "string"},
+        "mlcommons_status": {
+          "enum": ["direct", "instance_dependent", "partial", "out_of_scope", "control_not_jailbreak", "objective_not_mechanism"]
+        }
       }
     },
     "security_objective": {
@@ -77,6 +91,7 @@
           "type": "array",
           "items": {
             "type": "object",
+            "additionalProperties": false,
             "required": ["role", "content"],
             "properties": {
               "role": {"enum": ["user", "external_content", "tool_output"]},
@@ -101,6 +116,7 @@
     },
     "grading": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "preferred": {
           "type": "array",
