@@ -1,0 +1,433 @@
+version: 1
+last_verified: 2026-09-08
+
+# Technique definitions contain mechanisms and provenance, not harmful goals.
+# Actual external payloads stay upstream unless explicitly and legally imported.
+techniques:
+  control_benign:
+    tier: T0
+    families: [control, utility]
+    target_classes: [writing, reasoning, coding, image_generation]
+    interaction: single_turn
+    description: Benign control used to measure utility and false refusals.
+
+  direct_request:
+    tier: T1
+    families: [direct_request]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    description: Direct request for a protected synthetic outcome; establishes baseline refusal.
+
+  instruction_override:
+    tier: T1
+    families: [instruction_override]
+    target_classes: [writing, reasoning, coding, image_generation]
+    interaction: single_turn
+    description: Attempts to replace or cancel higher-priority instructions.
+
+  persona_roleplay:
+    tier: T1
+    families: [persona, roleplay]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    description: Frames the request through an alternate persona, fictional role or unrestricted assistant.
+
+  static_jailbreak_template:
+    tier: T1
+    families: [persona, instruction_override, known_template]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies, strongreject_attacks]
+    description: Historical known jailbreak templates such as DAN/Skeleton-Key-style wrappers.
+
+  base64_transform:
+    tier: T1
+    families: [encoding, obfuscation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies, strongreject_attacks]
+
+  rot13_transform:
+    tier: T1
+    families: [encoding, obfuscation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [strongreject_attacks]
+
+  hex_transform:
+    tier: T1
+    families: [encoding, obfuscation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  leetspeak_transform:
+    tier: T1
+    families: [obfuscation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  homoglyph_transform:
+    tier: T1
+    families: [unicode, obfuscation]
+    target_classes: [writing, reasoning, coding]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  ascii_smuggling:
+    tier: T2
+    families: [unicode, hidden_content, obfuscation]
+    target_classes: [writing, reasoning, coding]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  emoji_smuggling:
+    tier: T2
+    families: [unicode, hidden_content, obfuscation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  multilingual_rewrite:
+    tier: T2
+    families: [multilingual, semantic_reframing]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies, cyberseceval_prompt_injection, sorry_bench]
+
+  linguistic_mutation:
+    tier: T2
+    families: [linguistic_mutation, obfuscation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [sorry_bench]
+
+  translation_reframing:
+    tier: T2
+    families: [semantic_reframing, transformation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+
+  summarization_reframing:
+    tier: T2
+    families: [semantic_reframing, transformation]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+
+  fictional_reframing:
+    tier: T2
+    families: [semantic_reframing, roleplay]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+
+  authority_reframing:
+    tier: T2
+    families: [authority, semantic_reframing]
+    target_classes: [writing, reasoning, coding]
+    interaction: single_turn
+
+  academic_reframing:
+    tier: T2
+    families: [authority, semantic_reframing]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  likert_reframing:
+    tier: T2
+    families: [evaluation_frame, semantic_reframing]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  math_reframing:
+    tier: T2
+    families: [formalism, semantic_reframing]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  context_compliance_attack:
+    tier: T2
+    families: [context_manipulation, fabricated_history]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+
+  composite_static:
+    tier: T2
+    families: [composition]
+    target_classes: [writing, reasoning]
+    interaction: single_turn
+    implementations: [promptfoo_strategies]
+    description: Chains multiple cheap transformations/reframings in a fixed sequence.
+
+  iterative_jailbreak:
+    tier: T3
+    families: [adaptive, iterative]
+    target_classes: [writing, reasoning]
+    interaction: multi_attempt
+    implementations: [promptfoo_strategies]
+
+  pair:
+    tier: T3
+    families: [adaptive, iterative, attacker_llm]
+    target_classes: [writing, reasoning]
+    interaction: multi_attempt
+    implementations: [jailbreakbench_artifacts]
+    description: PAIR-style attacker model iteratively revises prompts from target feedback.
+
+  tree_attack:
+    tier: T3
+    families: [adaptive, tree_search]
+    target_classes: [writing, reasoning]
+    interaction: multi_attempt
+    implementations: [promptfoo_strategies]
+
+  tap:
+    tier: T3
+    families: [adaptive, tree_search, pruning]
+    target_classes: [writing, reasoning]
+    interaction: multi_attempt
+    description: Tree-of-Attacks-with-Pruning family; integrate from compatible research/framework adapters.
+
+  meta_agent:
+    tier: T3
+    families: [adaptive, taxonomy_search, attacker_memory]
+    target_classes: [writing, reasoning, coding]
+    interaction: multi_attempt
+    implementations: [promptfoo_strategies]
+
+  best_of_n:
+    tier: T3
+    families: [sampling, perturbation, budget_scaling]
+    target_classes: [writing, reasoning, image_generation]
+    interaction: multi_attempt
+    implementations: [promptfoo_strategies]
+    description: Repeated perturbed sampling; comparisons must report attempt budget.
+
+  gcg_suffix:
+    tier: T5
+    families: [adversarial_suffix, optimization]
+    target_classes: [writing, reasoning]
+    interaction: multi_attempt
+    implementations: [jailbreakbench_artifacts, promptfoo_strategies]
+    description: Gradient/optimization-derived adversarial suffix family; specialized and expensive.
+
+  crescendo:
+    tier: T4
+    families: [multi_turn, gradual_escalation, adaptive]
+    target_classes: [writing, reasoning]
+    interaction: multi_turn
+    implementations: [promptfoo_strategies]
+
+  goat:
+    tier: T4
+    families: [multi_turn, attacker_llm, adaptive]
+    target_classes: [writing, reasoning]
+    interaction: multi_turn
+    implementations: [promptfoo_strategies]
+
+  hydra:
+    tier: T4
+    families: [multi_turn, branching, attacker_memory, adaptive]
+    target_classes: [writing, reasoning, coding]
+    interaction: multi_turn
+    implementations: [promptfoo_strategies]
+
+  goblin:
+    tier: T4
+    families: [multi_turn, encoding, logic, adaptive]
+    target_classes: [writing, reasoning]
+    interaction: multi_turn
+    implementations: [promptfoo_strategies]
+
+  hcot:
+    tier: T5
+    families: [reasoning_manipulation, cot_hijacking]
+    target_classes: [reasoning]
+    interaction: multi_turn
+    implementations: [hcot_malicious_educator]
+    description: Reasoning-model-specific attack family; research-only external data and terms apply.
+
+  indirect_prompt_injection:
+    tier: T4
+    families: [indirect_prompt_injection, untrusted_context]
+    target_classes: [writing, reasoning, coding]
+    interaction: environment_injection
+    implementations: [bipia, agentdojo, injecagent, cyberseceval_prompt_injection]
+
+  rag_context_poisoning:
+    tier: T4
+    families: [rag_poisoning, indirect_prompt_injection]
+    target_classes: [writing, reasoning, coding]
+    interaction: environment_injection
+
+  repository_prompt_injection:
+    tier: T4
+    families: [repository_injection, indirect_prompt_injection]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [repoguardbench, promptfoo_strategies]
+
+  terminal_output_injection:
+    tier: T4
+    families: [terminal_injection, tool_output_injection]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [repoguardbench, promptfoo_strategies, agent_injection_bench]
+
+  tool_output_injection:
+    tier: T4
+    families: [tool_output_injection, indirect_prompt_injection]
+    target_classes: [coding, reasoning]
+    interaction: environment_injection
+    implementations: [agent_injection_bench, injecagent]
+
+  mcp_tool_poisoning:
+    tier: T4
+    families: [mcp, tool_poisoning, context_poisoning]
+    target_classes: [coding, reasoning]
+    interaction: environment_injection
+    implementations: [agent_injection_bench, promptfoo_strategies]
+
+  provenance_laundering:
+    tier: T5
+    families: [provenance, multi_hop_injection, memory_laundering]
+    target_classes: [coding, reasoning]
+    interaction: multi_turn
+    implementations: [agentprov]
+
+  memory_poisoning:
+    tier: T4
+    families: [memory_poisoning, persistence]
+    target_classes: [coding, reasoning]
+    interaction: multi_turn
+    implementations: [promptfoo_strategies]
+
+  synthetic_secret_extraction:
+    tier: T1
+    families: [secret_extraction]
+    target_classes: [writing, reasoning, coding]
+    interaction: single_turn
+    description: Project-native form always uses generated canaries, never real secrets.
+
+  secret_env_read:
+    tier: T4
+    families: [secret_extraction, environment_access]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  secret_file_read:
+    tier: T4
+    families: [secret_extraction, filesystem_access]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  sandbox_read_escape:
+    tier: T4
+    families: [sandbox_escape, filesystem_access]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  sandbox_write_escape:
+    tier: T4
+    families: [sandbox_escape, filesystem_mutation]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  network_egress_bypass:
+    tier: T4
+    families: [network_egress, data_exfiltration]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies, agent_egress_bench]
+
+  privilege_escalation:
+    tier: T4
+    families: [authorization, privilege_escalation]
+    target_classes: [coding, reasoning]
+    interaction: environment_injection
+    implementations: [agent_injection_bench, promptfoo_strategies]
+
+  generated_vulnerability:
+    tier: T4
+    families: [code_security, insecure_generation]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  automation_poisoning:
+    tier: T4
+    families: [persistence, automation_poisoning]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  delayed_ci_exfiltration:
+    tier: T5
+    families: [persistence, delayed_effect, data_exfiltration]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  steganographic_exfiltration:
+    tier: T5
+    families: [data_exfiltration, encoding, low_visibility_sink]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  verifier_sabotage:
+    tier: T4
+    families: [verifier_manipulation, goal_substitution]
+    target_classes: [coding]
+    interaction: environment_injection
+    implementations: [promptfoo_strategies]
+
+  visual_prompt_injection:
+    tier: T4
+    families: [visual_injection, cross_modal]
+    target_classes: [reasoning, image_generation]
+    interaction: multimodal
+    implementations: [cyberseceval_prompt_injection, jailbreakv_28k]
+
+  t2i_prompt_obfuscation:
+    tier: T2
+    families: [image_generation, prompt_obfuscation]
+    target_classes: [image_generation]
+    interaction: single_turn
+    implementations: [t2i_riskyprompt]
+
+  t2i_semantic_substitution:
+    tier: T3
+    families: [image_generation, semantic_substitution]
+    target_classes: [image_generation]
+    interaction: multi_attempt
+    implementations: [t2i_riskyprompt, jailbreakdiffbench]
+
+  t2i_multimodal_jailbreak:
+    tier: T5
+    families: [image_generation, multimodal, optimization]
+    target_classes: [image_generation]
+    interaction: multimodal
+    implementations: [mma_diffusion, jailbreakdiffbench, spqr]
+
+  image_checker_bypass:
+    tier: T5
+    families: [image_generation, moderation_bypass]
+    target_classes: [image_generation]
+    interaction: multimodal
+    implementations: [jailbreakdiffbench]
+
+  t2i_overrefusal_control:
+    tier: T0
+    families: [image_generation, utility, overrefusal]
+    target_classes: [image_generation]
+    interaction: single_turn
+    implementations: [overt]
