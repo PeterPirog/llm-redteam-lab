@@ -1,4 +1,4 @@
-version: 3
+version: 4
 corpus_id: llm-redteam-lab-corpus-v1
 last_verified: 2026-09-08
 
@@ -6,8 +6,11 @@ authoritative_files:
   sources:
     - sources.yaml
     - sources-2026-supplement.yaml
-  techniques: techniques.yaml
+  techniques:
+    - techniques.yaml
+    - techniques-2026-supplement.yaml
   tiers: tiers.yaml
+  observed_difficulty: scoring/observed-difficulty.yaml
   case_schema: schema/attack-case.schema.json
   external_policy: external/README.md
   importer_catalog: importers/catalog.yaml
@@ -26,6 +29,7 @@ native_fixtures:
 packs:
   - packs/baseline-v1.yaml
   - packs/comprehensive-v1.yaml
+  - packs/2026-extensions.yaml
 
 architecture_decision:
   - ../docs/adr/ADR-006-attack-corpus-registry.md
