@@ -28,6 +28,21 @@ def test_attack_budget_fails_closed_before_exceeding_limit() -> None:
     assert ledger.snapshot().attacks == 2
 
 
+def test_turn_budget_is_enforced_per_attack_not_globally() -> None:
+    ledger = BudgetLedger(_budget())
+    for _ in range(3):
+        ledger.reserve_turn(attack_id="attack-a")
+    for _ in range(3):
+        ledger.reserve_turn(attack_id="attack-b")
+
+    with pytest.raises(BudgetExceeded):
+        ledger.reserve_turn(attack_id="attack-a")
+
+    snapshot = ledger.snapshot()
+    assert snapshot.turns == 6
+    assert snapshot.turns_by_attack == (("attack-a", 3), ("attack-b", 3))
+
+
 def test_model_call_reserves_token_budget_atomically() -> None:
     ledger = BudgetLedger(_budget())
     ledger.reserve_model_call(expected_output_tokens=60)
