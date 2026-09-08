@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PeterPirog/llm-redteam-lab/corpus/schema/source-lock.schema.json",
+  "title": "LLM Red Team Lab External Source Lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "retrieved_at", "content_hash"],
+  "properties": {
+    "source": {"type": "string", "minLength": 1},
+    "upstream_url": {"type": "string", "format": "uri"},
+    "revision": {"type": "string"},
+    "dataset_revision": {"type": "string"},
+    "retrieved_at": {"type": "string", "format": "date-time"},
+    "content_hash": {"type": "string", "minLength": 1},
+    "license": {"type": "string"},
+    "terms_acknowledged": {"type": "boolean"},
+    "gated": {"type": "boolean"},
+    "record_count": {"type": "integer", "minimum": 0},
+    "normalized_record_count": {"type": "integer", "minimum": 0},
+    "normalizer_version": {"type": "string"},
+    "notes": {"type": "string"}
+  },
+  "anyOf": [
+    {"required": ["revision"]},
+    {"required": ["dataset_revision"]},
+    {"required": ["retrieved_at"]}
+  ]
+}
