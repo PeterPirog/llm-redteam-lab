@@ -1,0 +1,54 @@
+version: 1
+last_verified: 2026-09-08
+
+taxonomies:
+  mlcommons_jailbreak_taxonomy_v0_7:
+    name: MLCommons Jailbreak Attack Taxonomy
+    version: 0.7.0
+    date: 2026-02-16
+    url: https://github.com/mlcommons/jailbreak-taxonomy
+    license: CC-BY-4.0
+    status: primary_external_crosswalk
+    scope: single-turn inference-time prompt-only jailbreak attacks
+    structure:
+      families: 4
+      categories: 8
+      leaves: 18
+      documented_attacks: 113
+    families:
+      - perturbation
+      - encoding-abuse
+      - overt-carriers
+      - composition-ordering
+    known_out_of_scope:
+      - multi-turn and conversational attacks
+      - indirect prompt injection via RAG/tools/files
+      - training-time compromise
+      - infrastructure attacks
+      - social-engineering-dominant attacks
+      - non-text modalities
+    use_in_llm_redteam_lab: >-
+      Primary external mechanism classification for overlapping single-turn
+      prompt attacks. Project T0-T5 remains an orthogonal execution-complexity
+      axis. Project-specific taxonomies extend coverage to agentic, indirect,
+      reasoning-specific and image-generation attack surfaces.
+
+  acl_2026_operational_jailbreak_survey:
+    name: From Attack Surfaces to Actual Operations — Survey of Modern LLM Jailbreaks
+    year: 2026
+    url: https://aclanthology.org/2026.findings-acl.929/
+    status: research_reference
+    scope: technical and operational taxonomy of modern jailbreak attacks
+    use_in_llm_redteam_lab: >-
+      Reference for future operational feasibility dimensions such as practical
+      constraints and sustainability; not used as executable corpus data.
+
+  community_mechanism_taxonomy_2026:
+    name: LLM Jailbreak Taxonomy — mechanism-grounded community reference
+    year: 2026
+    url: https://github.com/zakky8/llm-jailbreak-taxonomy
+    status: secondary_reference
+    scope: 40 patterns across 10 mechanism-grounded categories
+    use_in_llm_redteam_lab: >-
+      Secondary cross-check for emerging 2025-2026 patterns. MLCommons remains
+      the preferred standardized crosswalk where applicable.
