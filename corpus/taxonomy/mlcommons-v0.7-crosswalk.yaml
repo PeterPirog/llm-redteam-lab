@@ -1,0 +1,284 @@
+version: 1
+external_taxonomy: mlcommons_jailbreak_taxonomy_v0_7
+external_version: 0.7.0
+last_verified: 2026-09-08
+
+# MLCommons v0.7 is mechanism-first and requires one concrete attack instance
+# to map to one leaf. Project technique definitions can be broader, therefore
+# candidate_leaves must be resolved from the instantiated case at normalization
+# time. T0-T5 remains an independent execution-complexity/cost axis.
+
+crosswalk:
+  control_benign:
+    status: control_not_jailbreak
+
+  direct_request:
+    status: control_not_jailbreak
+
+  instruction_override:
+    status: direct
+    family: overt-carriers
+    category: direct-override-patterns
+    leaf: simple-overrides
+
+  persona_roleplay:
+    status: direct
+    family: overt-carriers
+    category: roleplay-and-template-jailbreaks
+    leaf: persona-role-play
+
+  static_jailbreak_template:
+    status: instance_dependent
+    family: overt-carriers
+    candidate_leaves: [simple-overrides, dan-style-composites, persona-role-play]
+
+  base64_transform:
+    status: direct
+    family: encoding-abuse
+    category: encoding-unicode-tricks
+    leaf: base64-url-obfuscation
+
+  rot13_transform:
+    status: direct
+    family: encoding-abuse
+    category: encoding-unicode-tricks
+    leaf: base64-url-obfuscation
+
+  hex_transform:
+    status: direct
+    family: encoding-abuse
+    category: encoding-unicode-tricks
+    leaf: base64-url-obfuscation
+
+  leetspeak_transform:
+    status: direct
+    family: perturbation
+    category: plain-perturbations
+    leaf: character-level-micro-edits
+
+  homoglyph_transform:
+    status: direct
+    family: perturbation
+    category: plain-perturbations
+    leaf: character-level-micro-edits
+
+  ascii_smuggling:
+    status: instance_dependent
+    family: encoding-abuse
+    candidate_leaves: [ascii-encoding, unicode-bidi-zero-width]
+
+  emoji_smuggling:
+    status: partial
+    family: encoding-abuse
+    candidate_leaves: [unicode-bidi-zero-width]
+    note: Variation-selector/emoji hiding is more specific than v0.7 leaf wording.
+
+  multilingual_rewrite:
+    status: out_of_scope
+    reason: Cross-lingual strategies are a planned extension in MLCommons v0.7.
+
+  linguistic_mutation:
+    status: instance_dependent
+    family: perturbation
+    candidate_leaves: [character-level-micro-edits, local-paraphrase-and-rewording]
+
+  translation_reframing:
+    status: out_of_scope
+    reason: Cross-lingual strategies are outside MLCommons v0.7 scope.
+
+  summarization_reframing:
+    status: instance_dependent
+    candidate_leaves: [benign-pretext-safety-reframing, benign-wrapper-harmful-core]
+
+  fictional_reframing:
+    status: instance_dependent
+    candidate_leaves: [persona-role-play, benign-wrapper-harmful-core]
+
+  authority_reframing:
+    status: instance_dependent
+    candidate_leaves: [simple-overrides, benign-pretext-safety-reframing]
+
+  academic_reframing:
+    status: direct
+    family: overt-carriers
+    category: roleplay-and-template-jailbreaks
+    leaf: benign-pretext-safety-reframing
+
+  likert_reframing:
+    status: instance_dependent
+    candidate_leaves: [benign-pretext-safety-reframing, benign-wrapper-harmful-core]
+
+  math_reframing:
+    status: instance_dependent
+    candidate_leaves: [json-markdown-code-blocks, benign-wrapper-harmful-core]
+
+  context_compliance_attack:
+    status: instance_dependent
+    candidate_leaves: [length-prefix-suffix-wrappers, benign-wrapper-harmful-core]
+
+  composite_static:
+    status: instance_dependent
+    note: Choose the dominant observable MLCommons mechanism for each instantiated case.
+
+  iterative_jailbreak:
+    status: direct
+    family: composition-ordering
+    category: fragment-assembly
+    leaf: jailbreak-prompt-optimization-and-search
+
+  pair:
+    status: direct
+    family: composition-ordering
+    category: fragment-assembly
+    leaf: jailbreak-prompt-optimization-and-search
+
+  tree_attack:
+    status: direct
+    family: composition-ordering
+    category: fragment-assembly
+    leaf: jailbreak-prompt-optimization-and-search
+
+  tap:
+    status: direct
+    family: composition-ordering
+    category: fragment-assembly
+    leaf: jailbreak-prompt-optimization-and-search
+
+  meta_agent:
+    status: direct
+    family: composition-ordering
+    category: fragment-assembly
+    leaf: jailbreak-prompt-optimization-and-search
+
+  best_of_n:
+    status: instance_dependent
+    candidate_leaves: [paraphrase-based-transfer, jailbreak-prompt-optimization-and-search]
+
+  gcg_suffix:
+    status: direct
+    family: perturbation
+    category: transfer-text-perturbations
+    leaf: adversarial-triggers
+
+  synthetic_secret_extraction:
+    status: objective_not_mechanism
+    note: Classify the delivery mechanism separately.
+
+  crescendo:
+    status: out_of_scope
+    reason: Multi-turn/conversational attacks are explicitly outside MLCommons v0.7.
+
+  goat:
+    status: out_of_scope
+    reason: Multi-turn/conversational attacks are explicitly outside MLCommons v0.7.
+
+  hydra:
+    status: out_of_scope
+    reason: Multi-turn/conversational attacks are explicitly outside MLCommons v0.7.
+
+  goblin:
+    status: out_of_scope
+    reason: Multi-turn/conversational attacks are explicitly outside MLCommons v0.7.
+
+  hcot:
+    status: out_of_scope
+    reason: Reasoning-chain hijacking is not represented by the prompt-only v0.7 taxonomy.
+
+  indirect_prompt_injection:
+    status: out_of_scope
+    reason: Indirect RAG/tool/file channels are explicitly outside MLCommons v0.7.
+
+  rag_context_poisoning:
+    status: out_of_scope
+    reason: RAG/context channels are explicitly outside MLCommons v0.7.
+
+  repository_prompt_injection:
+    status: out_of_scope
+    reason: File/repository-mediated indirect injection is outside MLCommons v0.7.
+
+  terminal_output_injection:
+    status: out_of_scope
+    reason: Terminal/tool-mediated indirect injection is outside MLCommons v0.7.
+
+  tool_output_injection:
+    status: out_of_scope
+    reason: Tool-mediated indirect injection is outside MLCommons v0.7.
+
+  mcp_tool_poisoning:
+    status: out_of_scope
+    reason: Agent/MCP-mediated attacks are outside MLCommons v0.7.
+
+  provenance_laundering:
+    status: out_of_scope
+    reason: Multi-hop provenance attacks are outside MLCommons v0.7.
+
+  memory_poisoning:
+    status: out_of_scope
+    reason: Stateful/multi-turn memory attacks are outside MLCommons v0.7.
+
+  secret_env_read:
+    status: out_of_scope
+    reason: Agent environment/tool action rather than prompt-only mechanism.
+
+  secret_file_read:
+    status: out_of_scope
+    reason: Agent filesystem/tool action rather than prompt-only mechanism.
+
+  sandbox_read_escape:
+    status: out_of_scope
+    reason: System/agent authorization boundary rather than prompt-only mechanism.
+
+  sandbox_write_escape:
+    status: out_of_scope
+    reason: System/agent authorization boundary rather than prompt-only mechanism.
+
+  network_egress_bypass:
+    status: out_of_scope
+    reason: System/network action boundary rather than prompt-only mechanism.
+
+  privilege_escalation:
+    status: out_of_scope
+    reason: Agent/system authorization class rather than prompt-only mechanism.
+
+  generated_vulnerability:
+    status: out_of_scope
+    reason: Coding-agent output security rather than prompt-only jailbreak mechanism.
+
+  automation_poisoning:
+    status: out_of_scope
+    reason: Persistent coding-agent effect rather than prompt-only jailbreak mechanism.
+
+  delayed_ci_exfiltration:
+    status: out_of_scope
+    reason: Delayed system effect rather than prompt-only jailbreak mechanism.
+
+  steganographic_exfiltration:
+    status: out_of_scope
+    reason: Agent output/data-flow class rather than prompt-only jailbreak mechanism.
+
+  verifier_sabotage:
+    status: out_of_scope
+    reason: Coding-agent system-integrity class rather than prompt-only jailbreak mechanism.
+
+  visual_prompt_injection:
+    status: out_of_scope
+    reason: Non-text modalities are explicitly outside MLCommons v0.7.
+
+  t2i_prompt_obfuscation:
+    status: out_of_scope
+    reason: Image-generation targets are outside MLCommons v0.7.
+
+  t2i_semantic_substitution:
+    status: out_of_scope
+    reason: Image-generation targets are outside MLCommons v0.7.
+
+  t2i_multimodal_jailbreak:
+    status: out_of_scope
+    reason: Non-text modalities are explicitly outside MLCommons v0.7.
+
+  image_checker_bypass:
+    status: out_of_scope
+    reason: Image moderation/pipeline attacks are outside MLCommons v0.7.
+
+  t2i_overrefusal_control:
+    status: control_not_jailbreak
