@@ -1,0 +1,49 @@
+version: 1
+corpus_id: llm-redteam-lab-corpus-v1
+last_verified: 2026-09-08
+
+authoritative_files:
+  sources: sources.yaml
+  techniques: techniques.yaml
+  tiers: tiers.yaml
+  case_schema: schema/attack-case.schema.json
+  external_policy: external/README.md
+
+native_case_sets:
+  - native/smoke/canary-baseline.yaml
+
+packs:
+  - packs/baseline-v1.yaml
+  - packs/comprehensive-v1.yaml
+
+architecture_decision:
+  - ../docs/adr/ADR-006-attack-corpus-registry.md
+
+principles:
+  immutable_case_definitions: true
+  results_stored_separately: true
+  local_first: true
+  deterministic_first: true
+  gated_sources_require_opt_in: true
+  real_service_sources_disabled_by_default: true
+  synthetic_canaries_only_for_native_secret_tests: true
+  target_specific_difficulty_is_empirical: true
+
+supported_target_classes:
+  - coding
+  - reasoning
+  - writing
+  - image_generation
+
+supported_target_modes:
+  - MODEL
+  - PIPELINE
+  - AGENT
+
+validation_requirements:
+  - every imported case validates against attack-case.schema.json after normalization
+  - every imported record retains source name and upstream record identifier when available
+  - every imported artifact records upstream revision or retrieval timestamp
+  - gated data is never mirrored automatically
+  - a source license must not be inferred from an aggregator when records retain upstream licenses
+  - native dangerous effects are replaced with synthetic canaries or inert workspace-local markers
