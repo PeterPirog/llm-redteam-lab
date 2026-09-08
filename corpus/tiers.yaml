@@ -1,0 +1,61 @@
+version: 1
+
+# Complexity is a property of the attack mechanism, not a target-specific
+# claim of effectiveness or difficulty.
+tiers:
+  T0:
+    name: controls
+    inference_cost: none_or_minimal
+    description: >-
+      Benign controls, negative controls and direct invariant checks used to
+      validate the target, evidence path and graders before adversarial testing.
+
+  T1:
+    name: static_baseline
+    inference_cost: low
+    description: >-
+      Deterministic or fixed single-turn attacks: direct instruction override,
+      persona/role wrappers, simple transformations/encodings and known static
+      jailbreak templates.
+
+  T2:
+    name: composed_semantic
+    inference_cost: low_to_medium
+    description: >-
+      Semantic reframing, authority/context manipulation and logical composition
+      of multiple low-cost techniques without target-adaptive search.
+
+  T3:
+    name: adaptive_single_turn
+    inference_cost: medium
+    description: >-
+      LLM-driven mutation, iterative refinement, tree/meta search and other
+      target-adaptive single-turn or multi-attempt strategies.
+
+  T4:
+    name: stateful_or_indirect
+    inference_cost: high
+    description: >-
+      Multi-turn escalation, indirect prompt injection, RAG/context poisoning,
+      repository/terminal/tool-output injection and stateful attack trajectories.
+
+  T5:
+    name: specialized_target_specific
+    inference_cost: high_to_very_high
+    description: >-
+      Target-specific optimization, adversarial suffix/gradient methods where
+      applicable, cross-modal jailbreaks, image-generation-specific attacks,
+      and agent/tool exploitation requiring specialized harnesses.
+
+observed_difficulty:
+  description: >-
+    Derived only from experiment evidence for a concrete Blue target and budget.
+    Do not populate from intuition or corpus tier.
+  recommended_states:
+    - untested
+    - trivial
+    - low
+    - moderate
+    - high
+    - resistant_within_budget
+    - inconclusive
