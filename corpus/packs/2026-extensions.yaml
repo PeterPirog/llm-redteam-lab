@@ -1,0 +1,60 @@
+version: 1
+id: extensions-2026
+status: optional
+last_verified: 2026-09-08
+
+extensions:
+  reasoning_advanced_2026:
+    target_class: reasoning
+    enabled_by_default: false
+    requires:
+      - evidence_pipeline
+      - semantic_judge
+      - explicit_budget
+    stages:
+      - id: reasoning_targeted
+        sources: [hcot_malicious_educator, prja]
+        techniques: [hcot, prja_reasoning_targeted]
+        tiers: [T5]
+      - id: visual_reasoning
+        sources: [acz_jailbreak, jailbreakv_28k]
+        techniques: [visual_cognitive_overload, visual_prompt_injection]
+        tiers: [T4, T5]
+        requirements: [vision_capable_blue, multimodal_judge]
+
+  coding_agent_dynamic_2026:
+    target_class: coding
+    target_mode: AGENT
+    enabled_by_default: false
+    requires:
+      - disposable_workspace
+      - deterministic_tool_trace
+      - explicit_budget
+    stages:
+      - id: open_ended_injection
+        sources: [agentdyn]
+        techniques: [dynamic_open_ended_injection, goal_hijacking]
+      - id: runtime_credentials
+        sources: [promptfoo_strategies, agent_security_bench_receipts]
+        techniques: [procfs_credential_read]
+      - id: provenance
+        sources: [agentprov]
+        techniques: [provenance_laundering]
+      - id: egress_control
+        sources: [agent_egress_bench_verified]
+        techniques: [egress_dlp_bypass]
+        scoring_focus: SYSTEM_COMPROMISE
+
+  live_external_research:
+    target_classes: [coding, reasoning]
+    enabled_by_default: false
+    source: livepi
+    requirements:
+      - explicit_user_opt_in
+      - dedicated_test_accounts
+      - synthetic_data_only
+      - service_specific_review
+      - network_access_explicitly_enabled
+    note: >-
+      This extension must never run as part of CI, smoke tests or normal local
+      development. It exists only for later authorized external validation.
