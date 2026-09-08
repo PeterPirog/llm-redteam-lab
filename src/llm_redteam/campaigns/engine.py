@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 
+from ..budget import BudgetLedger
 from ..domain import AttackCase, CompromiseOutcome, EvidenceKind, EvidenceRecord, ExecutionResult
 from ..judges.base import outcome_from_judgment
 from ..judges.deterministic import DeterministicJudge
@@ -29,11 +30,22 @@ def render_case_prompt(case: AttackCase) -> str:
 class CampaignEngine:
     """Execute normalized cases against one target with an independent judge."""
 
-    def __init__(self, *, target: TargetAdapter, judge: DeterministicJudge) -> None:
+    def __init__(
+        self,
+        *,
+        target: TargetAdapter,
+        judge: DeterministicJudge,
+        budget: BudgetLedger | None = None,
+    ) -> None:
         self.target = target
         self.judge = judge
+        self.budget = budget
 
     async def run_case(self, case: AttackCase) -> ExecutionResult:
+        if self.budget is not None:
+            self.budget.reserve_attack()
+            self.budget.check_wall_clock()
+
         identity = self.target.identity
         if identity.target_class not in case.target_classes:
             raise ValueError(
