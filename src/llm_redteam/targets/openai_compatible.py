@@ -14,7 +14,14 @@ from hashlib import sha256
 import httpx
 from pydantic import Field
 
-from ..domain import EvidenceKind, EvidenceRecord, StrictModel, TargetClass, TargetIdentity, TargetMode
+from ..domain import (
+    EvidenceKind,
+    EvidenceRecord,
+    StrictModel,
+    TargetClass,
+    TargetIdentity,
+    TargetMode,
+)
 from .base import TargetRequest, TargetResponse
 
 
