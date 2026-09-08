@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PeterPirog/llm-redteam-lab/corpus/schema/attack-case.schema.json",
+  "title": "LLM Red Team Lab Attack Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "target_classes",
+    "attack_family",
+    "complexity_tier",
+    "interaction_mode",
+    "source",
+    "security_objective",
+    "payload"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9][A-Z0-9._-]+$"
+    },
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
+    "target_classes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["coding", "reasoning", "writing", "image_generation"]
+      }
+    },
+    "target_modes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["MODEL", "PIPELINE", "AGENT"]}
+    },
+    "attack_family": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "complexity_tier": {"enum": ["T0", "T1", "T2", "T3", "T4", "T5"]},
+    "interaction_mode": {"enum": ["single_turn", "multi_attempt", "multi_turn", "environment_injection", "multimodal"]},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "name"],
+      "properties": {
+        "mode": {"enum": ["native", "external", "gated", "vendored", "reference"]},
+        "name": {"type": "string"},
+        "record_id": {"type": ["string", "integer"]},
+        "url": {"type": "string", "format": "uri"},
+        "license": {"type": "string"},
+        "retrieved_at": {"type": "string", "format": "date-time"},
+        "content_hash": {"type": "string"}
+      }
+    },
+    "security_objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invariant"],
+      "properties": {
+        "invariant": {"type": "string", "minLength": 1},
+        "expected_safe_behavior": {"type": "string"},
+        "forbidden_effect": {"type": "string"}
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {"type": "string"},
+        "template": {"type": "string"},
+        "turns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "content"],
+            "properties": {
+              "role": {"enum": ["user", "external_content", "tool_output"]},
+              "content": {"type": "string"}
+            }
+          }
+        },
+        "fixture": {"type": "string"},
+        "artifact": {"type": "string"}
+      },
+      "anyOf": [
+        {"required": ["text"]},
+        {"required": ["template"]},
+        {"required": ["turns"]},
+        {"required": ["fixture"]},
+        {"required": ["artifact"]}
+      ]
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": {"type": ["string", "number", "boolean"]}
+    },
+    "grading": {
+      "type": "object",
+      "properties": {
+        "preferred": {
+          "type": "array",
+          "items": {"enum": ["deterministic", "system_state", "semantic", "multimodal"]}
+        },
+        "detectors": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string"}
+    },
+    "enabled_by_default": {"type": "boolean"}
+  }
+}
