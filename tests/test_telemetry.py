@@ -3,9 +3,9 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from llm_redteam.domain import CompromiseOutcome, ExecutionResult
-from llm_redteam.telemetry import RedTeamTelemetry
 from llm_redteam.targets.base import SessionMode
 from llm_redteam.targets.mock_multiturn import EscalatingVaultTarget
+from llm_redteam.telemetry import RedTeamTelemetry
 
 
 def _telemetry():
@@ -19,32 +19,34 @@ def test_security_spans_record_structure_without_prompt_content() -> None:
     telemetry, exporter = _telemetry()
     target = EscalatingVaultTarget().identity
 
-    with telemetry.campaign_span(campaign_id="campaign-otel", target=target):
-        with telemetry.attack_span(
+    with (
+        telemetry.campaign_span(campaign_id="campaign-otel", target=target),
+        telemetry.attack_span(
             attack_instance_id="attack-1",
             case_id="case-1",
             attack_family="multi_turn_escalation",
             generation=0,
             interaction_mode="multi_turn",
-        ):
-            with telemetry.turn_span(
-                conversation_id="conv-1",
-                ordinal=2,
-                depth=2,
-                branch_id="b0",
-                session_mode=SessionMode.REPLAY,
-            ) as span:
-                result = ExecutionResult(
-                    execution_id="exec-1",
-                    attack_id="case-1",
-                    target_id=target.id,
-                    outcome=CompromiseOutcome.MODEL_COMPROMISE,
-                    objective_violated=True,
-                    model_compromise=True,
-                    system_compromise=False,
-                    confidence=1.0,
-                )
-                telemetry.annotate_execution(span, result)
+        ),
+        telemetry.turn_span(
+            conversation_id="conv-1",
+            ordinal=2,
+            depth=2,
+            branch_id="b0",
+            session_mode=SessionMode.REPLAY,
+        ) as span,
+    ):
+        result = ExecutionResult(
+            execution_id="exec-1",
+            attack_id="case-1",
+            target_id=target.id,
+            outcome=CompromiseOutcome.MODEL_COMPROMISE,
+            objective_violated=True,
+            model_compromise=True,
+            system_compromise=False,
+            confidence=1.0,
+        )
+        telemetry.annotate_execution(span, result)
 
     spans = exporter.get_finished_spans()
     names = {span.name for span in spans}
