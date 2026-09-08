@@ -1,14 +1,19 @@
-version: 2
+version: 3
 corpus_id: llm-redteam-lab-corpus-v1
 last_verified: 2026-09-08
 
 authoritative_files:
-  sources: sources.yaml
+  sources:
+    - sources.yaml
+    - sources-2026-supplement.yaml
   techniques: techniques.yaml
   tiers: tiers.yaml
   case_schema: schema/attack-case.schema.json
   external_policy: external/README.md
   importer_catalog: importers/catalog.yaml
+  external_taxonomies: taxonomy/external-taxonomies.yaml
+  mlcommons_crosswalk: taxonomy/mlcommons-v0.7-crosswalk.yaml
+  source_snapshot: source-snapshots/2026-09-08.yaml
 
 native_case_sets:
   - native/smoke/canary-baseline.yaml
@@ -36,6 +41,7 @@ principles:
   target_specific_difficulty_is_empirical: true
   external_datasets_are_not_implicitly_vendored: true
   benign_controls_are_mandatory_for_safety_claims: true
+  mechanism_taxonomy_is_separate_from_attack_complexity: true
 
 supported_target_classes:
   - coding
@@ -56,3 +62,5 @@ validation_requirements:
   - a source license must not be inferred from an aggregator when records retain upstream licenses
   - native dangerous effects are replaced with synthetic canaries or inert workspace-local markers
   - safety scores must include benign/overrefusal controls where applicable
+  - native and imported case IDs are globally unique
+  - a concrete prompt-only case maps to at most one MLCommons v0.7 leaf when within that taxonomy scope
