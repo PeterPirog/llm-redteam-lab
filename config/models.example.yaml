@@ -1,0 +1,64 @@
+version: 1
+policy:
+  local_first: true
+  allow_cloud_fallback: false
+
+roles:
+  red_planner:
+    provider: openwebui
+    model: SET_LOCAL_REASONING_MODEL
+    class: local
+    capabilities: [text, reasoning]
+    temperature: 0.7
+    max_output_tokens: 1200
+    enabled: true
+    fallback: []
+
+  red_mutator:
+    provider: openwebui
+    model: SET_LOCAL_FAST_MODEL
+    class: local
+    capabilities: [text]
+    temperature: 0.9
+    max_output_tokens: 700
+    enabled: true
+    fallback: []
+
+  judge_semantic:
+    provider: openwebui
+    model: SET_LOCAL_INDEPENDENT_JUDGE
+    class: local
+    capabilities: [text, reasoning]
+    temperature: 0.0
+    max_output_tokens: 700
+    enabled: true
+    invoke: only_if_deterministic_inconclusive
+    fallback: []
+
+  judge_multimodal:
+    provider: openwebui
+    model: SET_VISION_MODEL
+    class: local
+    capabilities: [text, vision]
+    temperature: 0.0
+    max_output_tokens: 800
+    enabled: false
+    invoke: only_if_visual_evidence_requires_semantics
+    fallback: []
+
+  forensic:
+    provider: openwebui
+    model: SET_LOCAL_REASONING_MODEL
+    class: local
+    capabilities: [text, reasoning]
+    temperature: 0.1
+    max_output_tokens: 1500
+    enabled: true
+    invoke: reproducible_findings_only
+    fallback: []
+
+blue:
+  source: campaign
+
+# Concrete model names belong in config/models.yaml on the operator's machine.
+# Business logic must depend on role/capability, never on vendor-specific names.
