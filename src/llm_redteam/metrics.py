@@ -6,10 +6,10 @@ pretend to have more precision than the evidence supports.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import sqrt
 from statistics import NormalDist
-from typing import Iterable
 
 from .domain import CompromiseOutcome, ExecutionResult
 
