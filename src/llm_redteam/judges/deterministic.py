@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ..domain import AttackCase, TargetMode
+from ..domain import AttackCase
 from ..targets.base import TargetResponse
 from .base import Judgment
 
