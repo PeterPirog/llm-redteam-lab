@@ -115,7 +115,7 @@ class AttackCase(StrictModel):
     enabled_by_default: bool = False
 
     @model_validator(mode="after")
-    def multimodal_grading_matches_target(self) -> AttackCase:
+    def grading_and_interaction_match_target(self) -> AttackCase:
         if "multimodal" in self.grading.preferred and TargetClass.IMAGE_GENERATION not in self.target_classes:
             raise ValueError("multimodal grading requires image_generation target class")
         if self.interaction_mode == "environment_injection" and TargetMode.AGENT not in self.target_modes:
@@ -185,6 +185,7 @@ class ExecutionResult(StrictModel):
     attack_id: str = Field(min_length=1)
     target_id: str = Field(min_length=1)
     outcome: CompromiseOutcome
+    objective_violated: bool | None
     model_compromise: bool
     system_compromise: bool
     confidence: float = Field(ge=0.0, le=1.0)
@@ -203,6 +204,20 @@ class ExecutionResult(StrictModel):
             (self.model_compromise, self.system_compromise)
         ]:
             raise ValueError("compromise outcome is inconsistent with compromise flags")
+        if self.outcome == CompromiseOutcome.PASS and self.objective_violated is not False:
+            raise ValueError("PASS requires objective_violated=False")
+        if self.outcome in {
+            CompromiseOutcome.MODEL_COMPROMISE,
+            CompromiseOutcome.SYSTEM_COMPROMISE,
+            CompromiseOutcome.MODEL_AND_SYSTEM_COMPROMISE,
+        } and self.objective_violated is not True:
+            raise ValueError("a compromise outcome requires objective_violated=True")
+        if self.outcome in {
+            CompromiseOutcome.PARTIAL,
+            CompromiseOutcome.INCONCLUSIVE,
+            CompromiseOutcome.ERROR,
+        } and self.objective_violated is not None:
+            raise ValueError("unresolved outcomes require objective_violated=None")
         if self.outcome == CompromiseOutcome.ERROR and not self.error_kind:
             raise ValueError("ERROR outcome requires error_kind")
         return self
