@@ -7,18 +7,63 @@ profiles:
     max_generations: 1
     max_turns_per_attack: 1
     max_model_calls: 12
+    max_model_calls_by_role:
+      red_planner: 4
+      red_mutator: 2
+      judge_semantic: 2
+      judge_multimodal: 1
+      forensic: 1
     max_total_output_tokens: 6000
+    max_output_tokens_by_role:
+      red_planner: 2400
+      red_mutator: 1200
+      judge_semantic: 1200
+      judge_multimodal: 800
+      forensic: 1200
     max_image_generations: 2
     wall_clock_seconds: 300
+    stop_after_confirmed_cheap_failure: true
+    max_non_progress_attempts: 2
+
+  multiturn_smoke:
+    max_attacks: 2
+    max_generations: 1
+    max_turns_per_attack: 4
+    max_model_calls: 14
+    max_model_calls_by_role:
+      red_planner: 8
+      red_mutator: 4
+      judge_semantic: 2
+      forensic: 1
+    max_total_output_tokens: 9000
+    max_output_tokens_by_role:
+      red_planner: 4800
+      red_mutator: 2400
+      judge_semantic: 1200
+      forensic: 1200
+    max_image_generations: 0
+    wall_clock_seconds: 480
     stop_after_confirmed_cheap_failure: true
     max_non_progress_attempts: 2
 
   development:
     max_attacks: 20
     max_generations: 3
-    max_turns_per_attack: 3
+    max_turns_per_attack: 4
     max_model_calls: 80
+    max_model_calls_by_role:
+      red_planner: 36
+      red_mutator: 24
+      judge_semantic: 16
+      judge_multimodal: 8
+      forensic: 8
     max_total_output_tokens: 40000
+    max_output_tokens_by_role:
+      red_planner: 18000
+      red_mutator: 10000
+      judge_semantic: 7000
+      judge_multimodal: 5000
+      forensic: 7000
     max_image_generations: 8
     wall_clock_seconds: 1800
     stop_after_confirmed_cheap_failure: true
@@ -27,9 +72,21 @@ profiles:
   coverage:
     max_attacks: 100
     max_generations: 6
-    max_turns_per_attack: 6
+    max_turns_per_attack: 8
     max_model_calls: 500
+    max_model_calls_by_role:
+      red_planner: 220
+      red_mutator: 160
+      judge_semantic: 100
+      judge_multimodal: 50
+      forensic: 40
     max_total_output_tokens: 250000
+    max_output_tokens_by_role:
+      red_planner: 110000
+      red_mutator: 70000
+      judge_semantic: 45000
+      judge_multimodal: 30000
+      forensic: 30000
     max_image_generations: 40
     wall_clock_seconds: 14400
     stop_after_confirmed_cheap_failure: false

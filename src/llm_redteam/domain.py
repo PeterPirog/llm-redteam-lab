@@ -233,8 +233,23 @@ class CampaignBudget(StrictModel):
     max_generations: int = Field(gt=0)
     max_turns_per_attack: int = Field(gt=0)
     max_model_calls: int = Field(gt=0)
+    max_model_calls_by_role: dict[str, int] = Field(default_factory=dict)
     max_total_output_tokens: int = Field(gt=0)
+    max_output_tokens_by_role: dict[str, int] = Field(default_factory=dict)
     max_image_generations: int = Field(ge=0)
     wall_clock_seconds: int = Field(gt=0)
     stop_after_confirmed_cheap_failure: bool = True
     max_non_progress_attempts: int = Field(gt=0, default=3)
+
+    @model_validator(mode="after")
+    def role_budgets_are_positive(self) -> CampaignBudget:
+        for field_name, values in (
+            ("max_model_calls_by_role", self.max_model_calls_by_role),
+            ("max_output_tokens_by_role", self.max_output_tokens_by_role),
+        ):
+            for role, maximum in values.items():
+                if not role:
+                    raise ValueError(f"{field_name} contains an empty role name")
+                if maximum <= 0:
+                    raise ValueError(f"{field_name}[{role}] must be positive")
+        return self
