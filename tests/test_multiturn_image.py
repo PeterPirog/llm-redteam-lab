@@ -24,7 +24,6 @@ from llm_redteam.domain import (
 )
 from llm_redteam.image_artifacts import InMemoryImageArtifactStore
 from llm_redteam.judges import ImageEvidencePreflightJudge, LayeredJudge, MultimodalJudge
-from llm_redteam.model_roles import ModelRole
 from llm_redteam.multimodal_client import VisualModelRequest, VisualModelResponse
 from llm_redteam.targets import MockImageDisposition, ScriptedImageTarget
 from llm_redteam.targets.base import SessionMode
