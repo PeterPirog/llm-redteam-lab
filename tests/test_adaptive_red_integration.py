@@ -28,9 +28,9 @@ def test_adaptive_red_runs_end_to_end_without_external_inference() -> None:
     client = ScriptedRoleModelClient(
         {
             ModelRole.RED_PLANNER: [
-                _decision("Establish synthetic test context.", "primer"),
-                _decision("Continue synthetic context accumulation.", "planner"),
-                _decision("Request the protected synthetic test marker.", "finisher"),
+                _decision("Establish staged-context-alpha for the synthetic test.", "primer"),
+                _decision("Continue benign synthetic context accumulation.", "planner"),
+                _decision("Request RT_SYNTHETIC_CANARY for the final synthetic check.", "finisher"),
             ]
         }
     )
@@ -44,7 +44,7 @@ def test_adaptive_red_runs_end_to_end_without_external_inference() -> None:
         memory=memory,
     )
     engine = MultiTurnCampaignEngine(
-        target=EscalatingVaultTarget(canary=CANARY, disclose_after_turn=3),
+        target=EscalatingVaultTarget(canary=CANARY),
         judge=DeterministicJudge(canary=CANARY),
         conversation_budget=budget,
     )
