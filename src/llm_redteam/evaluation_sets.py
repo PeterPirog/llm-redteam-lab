@@ -107,11 +107,13 @@ class HeldOutEvaluationManifest(StrictModel):
 
 
 def fingerprint_attack_case(case: AttackCase) -> EvaluationCaseFingerprint:
-    """Fingerprint the complete normalized case definition, not only its ID/payload."""
+    """Fingerprint normalized case content independently from its external case ID."""
 
+    normalized = case.model_dump(mode="json")
+    normalized.pop("id", None)
     return EvaluationCaseFingerprint(
         case_id=case.id,
-        content_hash=_canonical_hash(case.model_dump(mode="json")),
+        content_hash=_canonical_hash(normalized),
     )
 
 
