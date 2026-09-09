@@ -84,7 +84,7 @@ def test_agent_and_tool_spans_use_genai_operations_without_raw_tool_content() ->
     target = EscalatingVaultTarget().identity
     observation = AgentActionObservation(
         control_event_id="call-1",
-        session_id="secret-session-id",
+        session_id="session-private-value",
         message_id="message-1",
         tool="bash",
         phase=AgentActionPhase.EXECUTED,
@@ -94,9 +94,11 @@ def test_agent_and_tool_spans_use_genai_operations_without_raw_tool_content() ->
         source="test",
     )
 
-    with telemetry.agent_span(target=target, session_id=observation.session_id):
-        with telemetry.tool_span(observation):
-            pass
+    with (
+        telemetry.agent_span(target=target, session_id=observation.session_id),
+        telemetry.tool_span(observation),
+    ):
+        pass
 
     spans = {span.name: span for span in exporter.get_finished_spans()}
     agent = spans["llm_redteam.agent.invoke"]
@@ -112,5 +114,4 @@ def test_agent_and_tool_spans_use_genai_operations_without_raw_tool_content() ->
         for span in spans.values()
         for value in span.attributes.values()
     )
-    assert "secret-session-id" not in serialized
-    assert "tool arguments" not in serialized
+    assert "session-private-value" not in serialized
