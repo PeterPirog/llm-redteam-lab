@@ -16,6 +16,7 @@ from ..domain import (
     EvidenceRecord,
     ExecutionResult,
     StrictModel,
+    TargetClass,
 )
 from ..judges.base import Judge, Judgment, evaluate_judge, outcome_from_judgment
 from ..targets.base import (
@@ -146,7 +147,7 @@ class MultiTurnCampaignEngine:
             conversation_id=resolved_id,
             attack_id=case.id,
             session_mode=session_mode,
-            session_id=resolved_id if session_mode == SessionMode.TARGET_MANAGED else None,
+            session_id=None,
         )
         first_violation: ConversationTurn | None = None
 
@@ -158,6 +159,8 @@ class MultiTurnCampaignEngine:
 
             if self.budget is not None:
                 self.budget.reserve_turn(attack_id=resolved_id)
+                if identity.target_class == TargetClass.IMAGE_GENERATION:
+                    self.budget.reserve_image_generation()
                 self.budget.check_wall_clock()
 
             history = ()
@@ -178,6 +181,15 @@ class MultiTurnCampaignEngine:
                     },
                 )
             )
+            if (
+                session_mode == SessionMode.TARGET_MANAGED
+                and response.error_kind is None
+                and response.session_id is None
+            ):
+                response = response.model_copy(
+                    update={"error_kind": "session:target_managed_missing_session_id"}
+                )
+
             turn = await self._make_turn(
                 case=case,
                 state=state,
