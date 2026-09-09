@@ -76,8 +76,7 @@ class CampaignMeasurementSnapshot(StrictModel):
 
     @model_validator(mode="after")
     def content_hash_matches_snapshot(self) -> CampaignMeasurementSnapshot:
-        payload = self.model_dump(mode="json", exclude={"content_hash"})
-        if _canonical_hash(payload) != self.content_hash:
+        if _snapshot_content_hash(self) != self.content_hash:
             raise ValueError("campaign measurement content_hash does not match snapshot")
         return self
 
@@ -160,6 +159,9 @@ def save_campaign_measurement_snapshot(
     snapshot: CampaignMeasurementSnapshot,
 ) -> str:
     """Persist one immutable measurement snapshot, idempotent for exact repeats."""
+
+    if _snapshot_content_hash(snapshot) != snapshot.content_hash:
+        raise ValueError("campaign measurement content_hash does not match snapshot")
 
     with Session(engine) as session, session.begin():
         campaign = session.get(CampaignRow, snapshot.campaign_id)
@@ -307,6 +309,10 @@ def _verify_evaluation_manifest_binding(
         else None
     ):
         raise ValueError("measurement exposure does not match evaluation manifest")
+
+
+def _snapshot_content_hash(snapshot: CampaignMeasurementSnapshot) -> str:
+    return _canonical_hash(snapshot.model_dump(mode="json", exclude={"content_hash"}))
 
 
 def _canonical_hash(value: object) -> str:
