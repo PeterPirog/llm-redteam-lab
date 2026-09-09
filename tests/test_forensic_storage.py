@@ -28,6 +28,7 @@ def _report() -> ForensicReport:
         execution_id="exec-forensic-storage",
         attack_id="case-forensic-storage",
         target_id="escalating-vault-target",
+        attack_family=("multi_turn_escalation",),
         model_compromise=True,
         system_compromise=False,
         reproduction_status=FindingStatus.CONFIRMED,
@@ -80,6 +81,7 @@ def test_forensic_report_persists_as_versioned_derived_analysis() -> None:
         assert row.execution_id == "exec-forensic-storage"
         assert row.analysis_version == "v1"
         assert row.status == ForensicStatus.ANALYZED.value
+        assert row.attack_family == ["multi_turn_escalation"]
         assert row.model_compromise is True
         assert row.system_compromise is False
         assert row.supporting_evidence_refs == ["ev-123"]
