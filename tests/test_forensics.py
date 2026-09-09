@@ -122,8 +122,14 @@ def _decision(
     )
 
 
+def _client_with_grounded_decision() -> ScriptedRoleModelClient:
+    return ScriptedRoleModelClient(
+        {ModelRole.FORENSIC: [_decision(evidence_ref=_evidence_ref())]}
+    )
+
+
 def test_non_reproducible_finding_is_not_sent_to_forensic_model() -> None:
-    client = ScriptedRoleModelClient({ModelRole.FORENSIC: [_decision(evidence_ref=_evidence_ref())]})
+    client = _client_with_grounded_decision()
     analyst = ForensicAnalyst(client)
 
     report = asyncio.run(
@@ -139,7 +145,7 @@ def test_non_reproducible_finding_is_not_sent_to_forensic_model() -> None:
 
 
 def test_forensic_report_uses_verified_compromise_flags_and_known_evidence() -> None:
-    client = ScriptedRoleModelClient({ModelRole.FORENSIC: [_decision(evidence_ref=_evidence_ref())]})
+    client = _client_with_grounded_decision()
     analyst = ForensicAnalyst(client)
 
     report = asyncio.run(
@@ -158,7 +164,7 @@ def test_forensic_report_uses_verified_compromise_flags_and_known_evidence() -> 
 
 
 def test_evidence_content_is_explicitly_untrusted_to_forensic_model() -> None:
-    client = ScriptedRoleModelClient({ModelRole.FORENSIC: [_decision(evidence_ref=_evidence_ref())]})
+    client = _client_with_grounded_decision()
     analyst = ForensicAnalyst(client)
 
     asyncio.run(
@@ -176,7 +182,9 @@ def test_evidence_content_is_explicitly_untrusted_to_forensic_model() -> None:
 
 
 def test_unknown_evidence_reference_fails_closed() -> None:
-    client = ScriptedRoleModelClient({ModelRole.FORENSIC: [_decision(evidence_ref="ev-invented")]})
+    client = ScriptedRoleModelClient(
+        {ModelRole.FORENSIC: [_decision(evidence_ref="ev-invented")]}
+    )
     analyst = ForensicAnalyst(client)
 
     report = asyncio.run(
