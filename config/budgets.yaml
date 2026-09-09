@@ -46,6 +46,27 @@ profiles:
     stop_after_confirmed_cheap_failure: true
     max_non_progress_attempts: 2
 
+  image_multiturn_smoke:
+    max_attacks: 2
+    max_generations: 1
+    max_turns_per_attack: 4
+    max_model_calls: 16
+    max_model_calls_by_role:
+      red_planner: 8
+      red_mutator: 4
+      judge_multimodal: 4
+      forensic: 1
+    max_total_output_tokens: 10000
+    max_output_tokens_by_role:
+      red_planner: 4800
+      red_mutator: 2400
+      judge_multimodal: 2400
+      forensic: 1200
+    max_image_generations: 4
+    wall_clock_seconds: 600
+    stop_after_confirmed_cheap_failure: true
+    max_non_progress_attempts: 2
+
   development:
     max_attacks: 20
     max_generations: 3
