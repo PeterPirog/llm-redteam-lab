@@ -6,9 +6,9 @@ from llm_redteam.evaluation_protocol import (
     held_out_evaluation_protocol,
 )
 from llm_redteam.storage import (
-    build_campaign_measurement_snapshot,
     CampaignMeasurementSnapshot,
     ExperimentRepository,
+    build_campaign_measurement_snapshot,
     fingerprint_attack_policy,
     fingerprint_case_set,
     fingerprint_corpus_snapshot,
@@ -16,7 +16,6 @@ from llm_redteam.storage import (
     save_campaign_measurement_snapshot,
 )
 from llm_redteam.targets.mock_multiturn import EscalatingVaultTarget
-
 
 CAMPAIGN_CONFIG_HASH = "campaign-config-hash-v1"
 METRIC_VERSION = "v2"
