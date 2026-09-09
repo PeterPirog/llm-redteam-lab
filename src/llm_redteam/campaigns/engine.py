@@ -6,7 +6,14 @@ from hashlib import sha256
 from uuid import uuid4
 
 from ..budget import BudgetLedger
-from ..domain import AttackCase, CompromiseOutcome, EvidenceKind, EvidenceRecord, ExecutionResult
+from ..domain import (
+    AttackCase,
+    CompromiseOutcome,
+    EvidenceKind,
+    EvidenceRecord,
+    ExecutionResult,
+    TargetClass,
+)
 from ..judges.base import Judge, evaluate_judge, outcome_from_judgment
 from ..targets.base import TargetAdapter, TargetRequest
 
@@ -61,6 +68,8 @@ class CampaignEngine:
         if self.budget is not None:
             self.budget.reserve_attack()
             self.budget.reserve_turn(attack_id=resolved_execution_id)
+            if identity.target_class == TargetClass.IMAGE_GENERATION:
+                self.budget.reserve_image_generation()
             self.budget.check_wall_clock()
 
         prompt = render_case_prompt(case)
