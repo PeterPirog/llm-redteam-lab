@@ -31,6 +31,7 @@ class ForensicReportRow(Base):
     analysis_version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1")
     status: Mapped[str] = mapped_column(String(48), nullable=False)
     reproduction_status: Mapped[str] = mapped_column(String(48), nullable=False)
+    attack_family: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     model_compromise: Mapped[bool] = mapped_column(Boolean, nullable=False)
     system_compromise: Mapped[bool] = mapped_column(Boolean, nullable=False)
     failure_layer: Mapped[str | None] = mapped_column(String(255))
