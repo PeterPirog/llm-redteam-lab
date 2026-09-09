@@ -57,8 +57,22 @@ def test_manifest_builds_disjoint_hash_bound_partitions() -> None:
     assert manifest.red_can_access_evaluation_content is False
     assert manifest.discovery_case_set_hash != manifest.evaluation_case_set_hash
     assert len(manifest.content_hash) == 64
-    assert select_manifest_cases(discovery + evaluation, manifest=manifest, evaluation=False) == discovery
-    assert select_manifest_cases(discovery + evaluation, manifest=manifest, evaluation=True) == evaluation
+    assert (
+        select_manifest_cases(
+            discovery + evaluation,
+            manifest=manifest,
+            evaluation=False,
+        )
+        == discovery
+    )
+    assert (
+        select_manifest_cases(
+            discovery + evaluation,
+            manifest=manifest,
+            evaluation=True,
+        )
+        == evaluation
+    )
 
 
 def test_manifest_allows_pure_evaluation_without_discovery_cases() -> None:
