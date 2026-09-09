@@ -6,6 +6,7 @@ from contextlib import AbstractContextManager
 
 from opentelemetry.trace import Span, Status, StatusCode, Tracer
 
+from .agent_actions import AgentActionObservation
 from .domain import CompromiseOutcome, ExecutionResult, TargetIdentity
 from .targets.base import SessionMode
 
@@ -89,6 +90,44 @@ class RedTeamTelemetry:
             },
         )
 
+    def agent_span(
+        self,
+        *,
+        target: TargetIdentity,
+        session_id: str,
+    ) -> AbstractContextManager[Span]:
+        """Trace one agent invocation without recording message content."""
+
+        return self.tracer.start_as_current_span(
+            "llm_redteam.agent.invoke",
+            attributes={
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.request.model": target.model,
+                "llm_redteam.target.id": target.id,
+                "llm_redteam.target.provider": target.provider,
+                "llm_redteam.agent.session_id_hash": self._hash_identifier(session_id),
+            },
+        )
+
+    def tool_span(
+        self,
+        observation: AgentActionObservation,
+    ) -> AbstractContextManager[Span]:
+        """Trace one observed tool call without exporting arguments or results."""
+
+        return self.tracer.start_as_current_span(
+            "llm_redteam.tool.execute",
+            attributes={
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": observation.tool,
+                "gen_ai.tool.call.id": observation.control_event_id,
+                "llm_redteam.control.event_id": observation.control_event_id,
+                "llm_redteam.agent.action.phase": observation.phase.value,
+                "llm_redteam.agent.action.categories": sorted(observation.categories),
+                "llm_redteam.agent.action.input_hash": observation.input_hash,
+            },
+        )
+
     def judge_span(self, *, judge_type: str) -> AbstractContextManager[Span]:
         return self.tracer.start_as_current_span(
             "llm_redteam.judge",
@@ -111,3 +150,9 @@ class RedTeamTelemetry:
             span.set_status(Status(StatusCode.ERROR, result.error_kind or "execution error"))
         else:
             span.set_status(Status(StatusCode.OK))
+
+    @staticmethod
+    def _hash_identifier(value: str) -> str:
+        from hashlib import sha256
+
+        return sha256(value.encode()).hexdigest()
