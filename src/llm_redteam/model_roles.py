@@ -41,6 +41,7 @@ class ModelRoleConfig(StrictModel):
     location: ModelLocation = Field(alias="class")
     capabilities: frozenset[str] = frozenset()
     endpoint: str | None = None
+    profile: str | None = None
     api_key_env: str | None = None
     temperature: float = Field(ge=0.0, le=2.0, default=0.0)
     max_output_tokens: int = Field(gt=0, default=800)
@@ -67,7 +68,12 @@ class ModelsConfig(StrictModel):
                 raise ValueError(f"required model role missing: {role.value}")
         return self
 
-    def role(self, role: ModelRole, *, required_capabilities: set[str] | None = None) -> ModelRoleConfig:
+    def role(
+        self,
+        role: ModelRole,
+        *,
+        required_capabilities: set[str] | None = None,
+    ) -> ModelRoleConfig:
         config = self.roles.get(role)
         if config is None or not config.enabled:
             raise ValueError(f"model role is not enabled: {role.value}")
@@ -82,9 +88,7 @@ class ModelsConfig(StrictModel):
             and not self.policy.allow_cloud_fallback
             and config.location == ModelLocation.CLOUD
         ):
-            raise ValueError(
-                f"cloud model role {role.value} blocked by local-first policy"
-            )
+            raise ValueError(f"cloud model role {role.value} blocked by local-first policy")
         return config
 
 
