@@ -1,5 +1,18 @@
 """Adaptive Red Team planning primitives."""
 
+from .ablation import (
+    AblationArm,
+    AblationExecutionOrder,
+    PairedRedAblationContract,
+    PairedRedAblationReport,
+    PairedRedObservation,
+    PairedTrialPlan,
+    PairingMode,
+    build_counterbalanced_pair_plan,
+    observation_from_run,
+    summarize_paired_red_ablation,
+)
+from .ablation_runner import PairedTrialExecutor, execute_paired_red_ablation
 from .adaptive import (
     AdaptiveRedStrategy,
     RedAction,
@@ -24,6 +37,8 @@ from .mechanisms import (
 from .sequence_metrics import RedSequenceMetrics, SequenceRate, summarize_red_sequences
 
 __all__ = [
+    "AblationArm",
+    "AblationExecutionOrder",
     "AdaptiveRedEfficiency",
     "AdaptiveRedStrategy",
     "AttackHypothesis",
@@ -37,6 +52,12 @@ __all__ = [
     "MechanismMemorySnapshot",
     "MechanismPolicy",
     "MechanismRedDecision",
+    "PairedRedAblationContract",
+    "PairedRedAblationReport",
+    "PairedRedObservation",
+    "PairedTrialExecutor",
+    "PairedTrialPlan",
+    "PairingMode",
     "RedAction",
     "RedCampaignMemory",
     "RedDecision",
@@ -47,6 +68,10 @@ __all__ = [
     "RedPlanner",
     "RedSequenceMetrics",
     "SequenceRate",
+    "build_counterbalanced_pair_plan",
+    "execute_paired_red_ablation",
+    "observation_from_run",
     "summarize_adaptive_red",
+    "summarize_paired_red_ablation",
     "summarize_red_sequences",
 ]

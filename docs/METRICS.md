@@ -1,7 +1,7 @@
 # Metrics and Statistical Reporting
 
 Status: initial metric contract
-Last verified: 2026-09-08
+Last verified: 2026-09-09
 
 The project reports experimental evidence, not absolute claims that a model is "secure" or "insecure".
 
@@ -16,6 +16,7 @@ The project reports experimental evidence, not absolute claims that a model is "
 7. Repeated observations are required before a finding becomes confirmed.
 8. Comparisons across target versions require comparable corpus, budgets and metric definitions.
 9. For multi-turn attacks, one bounded conversation is one Blue vulnerability trial; individual turns are not additional ASR trials.
+10. Red component comparisons must isolate the changed component and preserve matched experimental conditions.
 
 ## ASR — Attack Success Rate
 
@@ -202,6 +203,58 @@ Red is measured separately through:
 - backtracks and branch efficiency for multi-turn strategies.
 
 These measure attacker search quality, not severity of the Blue vulnerability.
+
+## Paired Red component ablation
+
+A new Red mechanism, generator, refiner or flow controller is not considered better merely because it succeeds in a synthetic integration test. Controlled component attribution uses paired held-out evaluation.
+
+The matched unit is:
+
+```text
+(case_id, replicate)
+```
+
+Both baseline and treatment arms MUST use the same:
+
+- Blue target snapshot,
+- held-out evaluation manifest,
+- Judge fingerprint,
+- budget fingerprint,
+- metric-definition version,
+- session semantics.
+
+Only the declared Red component/policy may differ. Both arms independently pass the normal held-out evaluation gate, including complete case coverage, balanced replicates and conclusive-only comparative reporting.
+
+For objective-violation success, every pair belongs to one of four cells:
+
+```text
+both succeed
+baseline only succeeds
+treatment only succeeds
+neither succeeds
+```
+
+The descriptive effect is:
+
+```text
+delta = treatment rate - baseline rate
+```
+
+The paired significance diagnostic is the two-sided exact McNemar/binomial test over discordant pairs (`baseline only` versus `treatment only`). This avoids a large-sample normal approximation for small smoke experiments. The treatment win proportion among discordant pairs also receives a Wilson interval.
+
+`MODEL_COMPROMISE` and `SYSTEM_COMPROMISE` rate deltas are reported separately from the objective-violation delta.
+
+Effectiveness and cost MUST NOT be collapsed into one default composite score. Cost deltas include at least:
+
+- target interactions,
+- Red planner calls,
+- Red mutator calls,
+- Red planner/mutator output tokens,
+- first-violation ordinal when both arms succeed.
+
+A negative treatment cost delta means the treatment used fewer resources or reached the violation earlier.
+
+Execution order is counterbalanced across matched pairs to reduce systematic time/runtime/cache bias. If the target supports controlled stochastic seeds, `CASE_REPLICATE_SEED` reuses the same pair seed in both arms. Without supported deterministic seeding, the weaker `CASE_REPLICATE` pairing mode must remain visible in provenance.
 
 ## Target comparison
 
