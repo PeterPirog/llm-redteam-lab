@@ -52,7 +52,11 @@ def summarize_adaptive_red(
         if result.execution.objective_violated is True
     ]
     target_interactions = sum(len(result.turns) for result in results)
-    success_turn_counts = [len(result.turns) for result in successful]
+    interactions_to_success = [
+        result.first_violation_ordinal
+        for result in successful
+        if result.first_violation_ordinal is not None
+    ]
     violation_depths = [
         result.first_violation_depth
         for result in successful
@@ -77,7 +81,9 @@ def summarize_adaptive_red(
             fmean(len(result.turns) for result in results) if results else None
         ),
         median_target_interactions_to_success=(
-            float(median(success_turn_counts)) if success_turn_counts else None
+            float(median(interactions_to_success))
+            if interactions_to_success
+            else None
         ),
         median_first_violation_depth=(
             float(median(violation_depths)) if violation_depths else None
