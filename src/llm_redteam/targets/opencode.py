@@ -101,10 +101,12 @@ class OpenCodeTarget:
             return auth
 
         session_id = request.session_id
-        if session_id is None:
+        if self._requires_new_session(request):
             session_id = await self._create_session(request.attack_id, auth)
             if session_id is None:
                 return TargetResponse(error_kind="protocol:session_creation_failed")
+        if session_id is None:
+            return TargetResponse(error_kind="protocol:missing_session_id")
 
         message_url = self._url(
             self.config.message_path_template.format(session_id=session_id)
@@ -184,6 +186,13 @@ class OpenCodeTarget:
             provider_metadata=metadata,
             session_id=session_id,
         )
+
+    def _requires_new_session(self, request: TargetRequest) -> bool:
+        if request.session_id is None:
+            return True
+        if request.session_mode != SessionMode.TARGET_MANAGED:
+            return False
+        return request.metadata.get("turn_ordinal") == "1"
 
     def _auth(self) -> httpx.BasicAuth | None | TargetResponse:
         if self.config.password_env is None:
@@ -297,7 +306,8 @@ class OpenCodeTarget:
         state = part.get("state")
         session_id = part.get("sessionID", fallback_session_id)
         message_id = part.get("messageID", fallback_message_id)
-        if not all(isinstance(value, str) and value for value in (call_id, tool, session_id, message_id)):
+        required_strings = (call_id, tool, session_id, message_id)
+        if not all(isinstance(value, str) and value for value in required_strings):
             return None
         if not isinstance(state, dict):
             return None
@@ -337,7 +347,11 @@ class OpenCodeTarget:
     @staticmethod
     def _patch_evidence(part: dict[str, object], *, source: str) -> EvidenceRecord:
         files = part.get("files")
-        file_values = [value for value in files if isinstance(value, str)] if isinstance(files, list) else []
+        file_values = (
+            [value for value in files if isinstance(value, str)]
+            if isinstance(files, list)
+            else []
+        )
         return EvidenceRecord(
             kind=EvidenceKind.FILESYSTEM,
             source=source,
