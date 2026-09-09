@@ -13,9 +13,7 @@ from llm_redteam.domain import (
 )
 from llm_redteam.evaluation_sets import (
     EvaluationSetExposure,
-    HeldOutEvaluationManifest,
     build_held_out_evaluation_manifest,
-    fingerprint_attack_case,
     select_manifest_cases,
 )
 
@@ -80,25 +78,13 @@ def test_manifest_rejects_same_content_hidden_behind_different_ids() -> None:
     discovery = _case("DISC-001", "same-content")
     duplicated = discovery.model_copy(update={"id": "EVAL-001"})
 
-    # Full-case hashing includes the case ID, so construct a manifest with a forged
-    # duplicate content hash to exercise the content-overlap invariant explicitly.
-    discovery_fp = fingerprint_attack_case(discovery)
-    forged_eval_fp = fingerprint_attack_case(duplicated).model_copy(
-        update={"content_hash": discovery_fp.content_hash}
-    )
     with pytest.raises(ValueError, match="case content must be disjoint"):
-        HeldOutEvaluationManifest(
-            schema_version=1,
+        build_held_out_evaluation_manifest(
             manifest_id="overlap-content",
-            exposure=EvaluationSetExposure.INTERNAL_HELD_OUT,
-            split_strategy="invalid-content-overlap",
+            discovery_cases=(discovery,),
+            evaluation_cases=(duplicated,),
             corpus_snapshot_hash=CORPUS_HASH,
-            red_can_access_evaluation_content=False,
-            discovery_cases=(discovery_fp,),
-            evaluation_cases=(forged_eval_fp,),
-            discovery_case_set_hash="b" * 64,
-            evaluation_case_set_hash="c" * 64,
-            content_hash="d" * 64,
+            split_strategy="invalid-content-overlap",
         )
 
 
