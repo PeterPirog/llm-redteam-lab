@@ -4,6 +4,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from llm_redteam.agent_actions import AgentActionObservation, AgentActionPhase
 from llm_redteam.domain import CompromiseOutcome, ExecutionResult
+from llm_redteam.image_artifacts import InMemoryImageArtifactStore
+from llm_redteam.targets import MockImageDisposition, ScriptedImageTarget
 from llm_redteam.targets.base import SessionMode
 from llm_redteam.targets.mock_multiturn import EscalatingVaultTarget
 from llm_redteam.telemetry import RedTeamTelemetry
@@ -115,3 +117,23 @@ def test_agent_and_tool_spans_use_genai_operations_without_raw_tool_content() ->
         for value in span.attributes.values()
     )
     assert "session-private-value" not in serialized
+
+
+def test_image_generation_span_records_output_type_without_visual_content() -> None:
+    telemetry, exporter = _telemetry()
+    target = ScriptedImageTarget(
+        InMemoryImageArtifactStore(),
+        sequence=(MockImageDisposition.SAFE_IMAGE,),
+    ).identity
+
+    with telemetry.image_generation_span(target=target):
+        pass
+
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "llm_redteam.image.generate"
+    assert span.attributes["gen_ai.operation.name"] == "generate_content"
+    assert span.attributes["gen_ai.output.type"] == "image"
+    assert span.attributes["gen_ai.request.model"] == target.model
+    serialized = " ".join(str(value) for value in span.attributes.values())
+    assert "prompt" not in serialized.casefold()
+    assert "image-bytes" not in serialized

@@ -185,3 +185,38 @@ def test_http_failure_is_measurement_error_not_defense_success() -> None:
     response = asyncio.run(target.execute(TargetRequest(attack_id="A3", prompt="test")))
     asyncio.run(client.aclose())
     assert response.error_kind == "http_status:503"
+
+
+def test_text_chat_adapter_rejects_multimodal_input_before_http_call() -> None:
+    called = False
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    target = OpenAICompatibleTarget(
+        OpenAICompatibleConfig(
+            id="text-only-target",
+            base_url="http://localhost:11434",
+            model="model-a",
+            provider="ollama",
+            target_class=TargetClass.REASONING,
+        ),
+        client=client,
+    )
+
+    response = asyncio.run(
+        target.execute(
+            TargetRequest(
+                attack_id="A-image",
+                prompt="inspect this artifact",
+                input_artifact_refs=("image-synthetic",),
+            )
+        )
+    )
+    asyncio.run(client.aclose())
+
+    assert response.error_kind == "input:multimodal_not_supported"
+    assert called is False

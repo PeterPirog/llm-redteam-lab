@@ -93,6 +93,10 @@ class OpenCodeTarget:
         )
 
     async def execute(self, request: TargetRequest) -> TargetResponse:
+        if request.input_artifact_refs or any(
+            message.artifact_refs for message in request.conversation
+        ):
+            return TargetResponse(error_kind="input:multimodal_not_supported")
         if request.session_mode == SessionMode.REPLAY and request.conversation:
             return TargetResponse(error_kind="session:opencode_requires_target_managed_history")
 

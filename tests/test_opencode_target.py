@@ -169,3 +169,30 @@ def test_missing_server_password_environment_fails_closed(
     response = asyncio.run(run())
 
     assert response.error_kind == "missing_password_env:OPENCODE_TEST_PASSWORD"
+
+
+def test_opencode_multimodal_input_fails_closed_before_backend_call() -> None:
+    called = False
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    async def run() -> object:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            target = OpenCodeTarget(_config(), client=client)
+            return await target.execute(
+                TargetRequest(
+                    attack_id="case-image",
+                    prompt="inspect supplied artifact",
+                    input_artifact_refs=("image-synthetic",),
+                )
+            )
+
+    response = asyncio.run(run())
+
+    assert response.error_kind == "input:multimodal_not_supported"
+    assert called is False

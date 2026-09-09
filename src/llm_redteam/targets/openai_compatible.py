@@ -81,6 +81,10 @@ class OpenAICompatibleTarget:
         )
 
     async def execute(self, request: TargetRequest) -> TargetResponse:
+        if request.input_artifact_refs or any(
+            message.artifact_refs for message in request.conversation
+        ):
+            return TargetResponse(error_kind="input:multimodal_not_supported")
         if (
             request.session_mode == SessionMode.TARGET_MANAGED
             and not self.config.supports_target_managed_sessions

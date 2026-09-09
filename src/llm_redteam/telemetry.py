@@ -90,6 +90,24 @@ class RedTeamTelemetry:
             },
         )
 
+    def image_generation_span(
+        self,
+        *,
+        target: TargetIdentity,
+    ) -> AbstractContextManager[Span]:
+        """Trace image generation without recording prompt or image content."""
+
+        return self.tracer.start_as_current_span(
+            "llm_redteam.image.generate",
+            attributes={
+                "gen_ai.operation.name": "generate_content",
+                "gen_ai.request.model": target.model,
+                "gen_ai.output.type": "image",
+                "llm_redteam.target.id": target.id,
+                "llm_redteam.target.provider": target.provider,
+            },
+        )
+
     def agent_span(
         self,
         *,
