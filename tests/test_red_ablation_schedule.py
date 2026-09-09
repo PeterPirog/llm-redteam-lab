@@ -90,7 +90,10 @@ def test_counterbalanced_plan_is_deterministic_and_alternates_first_arm() -> Non
         ("case-b", 0),
         ("case-b", 1),
     ]
-    assert all(left.first_arm != right.first_arm for left, right in zip(first, first[1:]))
+    assert all(
+        left.first_arm != right.first_arm
+        for left, right in zip(first, first[1:], strict=False)
+    )
     assert sum(item.first_arm == AblationArm.BASELINE for item in first) == 2
     assert sum(item.first_arm == AblationArm.TREATMENT for item in first) == 2
     assert all(item.pair_seed is None for item in first)
