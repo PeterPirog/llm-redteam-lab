@@ -17,7 +17,7 @@ from ..domain import (
     ExecutionResult,
     StrictModel,
 )
-from ..judges.base import Judgment, outcome_from_judgment
+from ..judges.base import Judge, Judgment, evaluate_judge, outcome_from_judgment
 from ..targets.base import (
     ConversationMessage,
     MessageRole,
@@ -95,11 +95,6 @@ class MultiTurnStrategy(Protocol):
     async def next_turn(self, state: ConversationState) -> TurnProposal | None: ...
 
 
-@runtime_checkable
-class TurnJudge(Protocol):
-    def evaluate(self, case: AttackCase, response: TargetResponse) -> Judgment: ...
-
-
 class MultiTurnCampaignEngine:
     """Execute one multi-turn jailbreak as one statistical attack trial.
 
@@ -113,7 +108,7 @@ class MultiTurnCampaignEngine:
         self,
         *,
         target: TargetAdapter,
-        judge: TurnJudge,
+        judge: Judge,
         conversation_budget: ConversationBudget,
         budget: BudgetLedger | None = None,
     ) -> None:
@@ -183,7 +178,7 @@ class MultiTurnCampaignEngine:
                     },
                 )
             )
-            turn = self._make_turn(
+            turn = await self._make_turn(
                 case=case,
                 state=state,
                 proposal=proposal,
@@ -276,7 +271,7 @@ class MultiTurnCampaignEngine:
             f"b{branches - 1}",
         )
 
-    def _make_turn(
+    async def _make_turn(
         self,
         *,
         case: AttackCase,
@@ -321,7 +316,7 @@ class MultiTurnCampaignEngine:
                 evidence=evidence,
             )
 
-        judgment = self.judge.evaluate(case, response)
+        judgment = await evaluate_judge(self.judge, case, response)
         return ConversationTurn(
             turn_id=turn_id,
             ordinal=ordinal,
