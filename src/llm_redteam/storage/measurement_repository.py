@@ -74,6 +74,13 @@ class CampaignMeasurementSnapshot(StrictModel):
             raise ValueError("EVALUATION requires " + ", ".join(missing))
         return self
 
+    @model_validator(mode="after")
+    def content_hash_matches_snapshot(self) -> CampaignMeasurementSnapshot:
+        payload = self.model_dump(mode="json", exclude={"content_hash"})
+        if _canonical_hash(payload) != self.content_hash:
+            raise ValueError("campaign measurement content_hash does not match snapshot")
+        return self
+
 
 def build_campaign_measurement_snapshot(
     *,
