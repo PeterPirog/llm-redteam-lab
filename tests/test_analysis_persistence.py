@@ -1,7 +1,6 @@
+import pytest
 from sqlalchemy import inspect, select
 from sqlalchemy.orm import Session
-
-import pytest
 
 from llm_redteam.counterfactuals import ComponentCounterfactual, CounterfactualResult
 from llm_redteam.domain import CompromiseOutcome, ExecutionResult, FindingStatus
