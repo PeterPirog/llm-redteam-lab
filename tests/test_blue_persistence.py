@@ -19,6 +19,7 @@ from llm_redteam.targets.mock_multiturn import EscalatingVaultTarget
 CASE_ID = "BLUE-KNOWLEDGE-001"
 FAMILY = "repository_prompt_injection"
 CONTROL_ID = "CTRL-TOOL-AUTHZ"
+CONTROL_EVENT_ID = "tool-authz-event-1"
 
 
 def _setup() -> tuple[ExperimentRepository, str, str]:
@@ -55,7 +56,11 @@ def _setup() -> tuple[ExperimentRepository, str, str]:
                 source="synthetic_tool_authorizer",
                 observed_at="test",
                 content_hash="guardrail-block-hash",
-                data={"decision": "blocked", "reason": "unauthorized synthetic action"},
+                data={
+                    "decision": "blocked",
+                    "reason": "unauthorized synthetic action",
+                    "control_event_id": CONTROL_EVENT_ID,
+                },
                 redacted=True,
             ),
         ),
@@ -85,14 +90,15 @@ def _observation(
     evidence_refs: tuple[str, ...],
     source: ControlEvidenceSource = ControlEvidenceSource.SYSTEM_STATE,
     attack_family: str = FAMILY,
+    control_event_id: str = CONTROL_EVENT_ID,
 ) -> ControlObservation:
     return ControlObservation(
-        observation_id=f"obs-{source.value.lower()}",
+        observation_id=f"obs-{source.value.lower()}-{control_event_id}",
         control_id=CONTROL_ID,
         target_snapshot_id=snapshot_id,
         attack_family=attack_family,
         execution_id=execution_id,
-        control_event_id="tool-authz-event-1",
+        control_event_id=control_event_id,
         experiment_fingerprint=repository.execution_fingerprint(execution_id),
         kind=ControlObservationKind.BLOCKED_BY_CONTROL,
         source=source,
@@ -137,6 +143,22 @@ def test_authoritative_observation_with_unknown_evidence_reference_fails_closed(
                 snapshot_id,
                 execution_id,
                 evidence_refs=("evidence:999999",),
+            )
+        )
+
+
+def test_authoritative_control_event_must_be_grounded_in_cited_evidence() -> None:
+    repository, snapshot_id, execution_id = _setup()
+    refs = repository.evidence_refs_for_execution(execution_id)
+
+    with pytest.raises(ValueError, match="control_event_id is not grounded"):
+        repository.record_control_observation(
+            _observation(
+                repository,
+                snapshot_id,
+                execution_id,
+                evidence_refs=(refs[0],),
+                control_event_id="invented-control-event",
             )
         )
 
