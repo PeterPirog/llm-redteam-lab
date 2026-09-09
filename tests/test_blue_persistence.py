@@ -92,6 +92,7 @@ def _observation(
         target_snapshot_id=snapshot_id,
         attack_family=attack_family,
         execution_id=execution_id,
+        control_event_id="tool-authz-event-1",
         experiment_fingerprint=repository.execution_fingerprint(execution_id),
         kind=ControlObservationKind.BLOCKED_BY_CONTROL,
         source=source,
@@ -120,9 +121,10 @@ def test_authoritative_observation_round_trip_drives_control_state() -> None:
     )
 
     assert assessment.state == BlueControlState.OBSERVED_EFFECTIVE
-    assert assessment.authoritative_trials == 1
+    assert assessment.authoritative_events == 1
+    assert assessment.affected_executions == 1
     assert assessment.direct_blocks == 1
-    assert assessment.block_rate.value == 1.0
+    assert assessment.block_event_rate.value == 1.0
 
 
 def test_authoritative_observation_with_unknown_evidence_reference_fails_closed() -> None:
@@ -189,5 +191,5 @@ def test_semantic_forensic_observation_is_persisted_but_not_authoritative() -> N
 
     assert assessment.state == BlueControlState.DECLARED
     assert assessment.semantic_observations == 1
-    assert assessment.authoritative_trials == 0
-    assert assessment.block_rate.value is None
+    assert assessment.authoritative_events == 0
+    assert assessment.block_event_rate.value is None
