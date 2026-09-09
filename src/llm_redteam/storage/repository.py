@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from ..campaigns.multiturn import ConversationRunResult
 from ..domain import EvidenceKind, EvidenceRecord, ExecutionResult, TargetIdentity
+from ..forensics import ForensicReport
+from .analysis_models import ForensicReportRow
 from .models import (
     AttackRow,
     Base,
@@ -205,6 +207,46 @@ class ExperimentRepository:
                     turn.evidence,
                 )
 
+    def save_forensic_report(
+        self,
+        report: ForensicReport,
+        *,
+        analysis_version: str = "v1",
+    ) -> str:
+        """Persist derived root-cause analysis without storing raw evidence content."""
+
+        if not analysis_version:
+            raise ValueError("analysis_version must be non-empty")
+        report_id = self.forensic_report_id(report.execution_id, analysis_version)
+        with Session(self.engine) as session, session.begin():
+            if session.get(ExecutionRow, report.execution_id) is None:
+                raise ValueError(f"unknown execution: {report.execution_id}")
+            if session.get(ForensicReportRow, report_id) is not None:
+                raise ValueError(f"forensic report already exists: {report_id}")
+            session.add(
+                ForensicReportRow(
+                    forensic_report_id=report_id,
+                    execution_id=report.execution_id,
+                    analysis_version=analysis_version,
+                    status=report.status.value,
+                    reproduction_status=report.reproduction_status.value,
+                    model_compromise=report.model_compromise,
+                    system_compromise=report.system_compromise,
+                    failure_layer=report.failure_layer,
+                    proximate_cause=report.proximate_cause,
+                    enabling_conditions=list(report.enabling_conditions),
+                    controls_effective=list(report.controls_effective),
+                    controls_bypassed=list(report.controls_bypassed),
+                    supporting_evidence_refs=list(report.supporting_evidence_refs),
+                    necessary_component_ids=list(report.necessary_component_ids),
+                    alternative_explanations=list(report.alternative_explanations),
+                    confidence=report.confidence,
+                    summary=report.summary,
+                    error_kind=report.error_kind,
+                )
+            )
+        return report_id
+
     def load_execution(self, execution_id: str) -> ExecutionResult | None:
         with Session(self.engine) as session:
             row = session.get(ExecutionRow, execution_id)
@@ -248,6 +290,11 @@ class ExperimentRepository:
             f"{target.id}:{target.configuration_hash}".encode()
         ).hexdigest()[:24]
         return f"target-{digest}"
+
+    @staticmethod
+    def forensic_report_id(execution_id: str, analysis_version: str) -> str:
+        digest = sha256(f"{execution_id}:{analysis_version}".encode()).hexdigest()[:24]
+        return f"forensic-{digest}"
 
     @staticmethod
     def content_hash(content: str) -> str:
