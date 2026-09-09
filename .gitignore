@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local environment and model configuration
+.env
+.env.*
+!.env.example
+config/models.yaml
+
+# Local databases and coverage output
+*.db
+*.sqlite
+*.sqlite3
+.coverage
+htmlcov/
+
+# Sensitive generated regression reproducers
+regression/artifacts/
+
+# Local reports that may contain unredacted evidence
+reports/private/
