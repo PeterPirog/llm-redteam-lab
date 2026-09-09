@@ -13,6 +13,7 @@ from ..forensics import ForensicReport
 from .analysis_models import ForensicReportRow
 from .analysis_repository import AnalysisPersistenceMixin
 from .blue_repository import BlueKnowledgePersistenceMixin
+from .measurement_models import CampaignMeasurementProtocolRow
 from .models import (
     AttackRow,
     Base,
@@ -36,6 +37,9 @@ class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMix
         return cls(create_engine(url, echo=echo))
 
     def create_schema(self) -> None:
+        # Explicit reference keeps the measurement table registered even when
+        # callers import ExperimentRepository directly from storage.repository.
+        _ = CampaignMeasurementProtocolRow.__table__
         Base.metadata.create_all(self.engine)
 
     def save_target(self, target: TargetIdentity) -> str:
