@@ -193,6 +193,7 @@ async def run_regression(
 ) -> RegressionComparison:
     """Replay an artifact through a caller-supplied provider-independent runner."""
 
+    _validate_artifact_integrity(artifact)
     compatibility = _target_compatibility_error(artifact, target)
     if compatibility is not None:
         return RegressionComparison(
@@ -216,6 +217,7 @@ def compare_regression_result(
 ) -> RegressionComparison:
     """Classify a replay without collapsing MODEL and SYSTEM compromise."""
 
+    _validate_artifact_integrity(artifact)
     compatibility = _target_compatibility_error(artifact, target)
     if compatibility is not None:
         return _comparison(
