@@ -61,6 +61,33 @@ def test_manifest_builds_disjoint_hash_bound_partitions() -> None:
     assert select_manifest_cases(discovery + evaluation, manifest=manifest, evaluation=True) == evaluation
 
 
+def test_manifest_allows_pure_evaluation_without_discovery_cases() -> None:
+    evaluation = (_case("EVAL-001", "evaluation-a"),)
+
+    manifest = build_held_out_evaluation_manifest(
+        manifest_id="pure-eval-v1",
+        discovery_cases=(),
+        evaluation_cases=evaluation,
+        corpus_snapshot_hash=CORPUS_HASH,
+        split_strategy="frozen-policy-regression",
+    )
+
+    assert manifest.discovery_cases == ()
+    assert len(manifest.discovery_case_set_hash) == 64
+    assert select_manifest_cases(evaluation, manifest=manifest, evaluation=False) == ()
+
+
+def test_manifest_rejects_empty_evaluation_partition() -> None:
+    with pytest.raises(ValueError, match="at least one evaluation case"):
+        build_held_out_evaluation_manifest(
+            manifest_id="empty-eval",
+            discovery_cases=(_case("DISC-001", "discovery"),),
+            evaluation_cases=(),
+            corpus_snapshot_hash=CORPUS_HASH,
+            split_strategy="invalid-empty-evaluation",
+        )
+
+
 def test_manifest_rejects_same_case_id_across_partitions() -> None:
     shared = _case("CASE-001", "same")
 
