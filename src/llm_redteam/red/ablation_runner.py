@@ -115,6 +115,8 @@ def _validate_executor_observation(
     if observation.policy_fingerprint != expected_policy:
         raise ValueError("paired trial executor returned the wrong policy fingerprint")
 
-    if contract.pairing_mode == PairingMode.CASE_REPLICATE_SEED:
-        if observation.pair_seed != expected_pair_seed:
-            raise ValueError("paired trial executor did not preserve the scheduled pair seed")
+    if (
+        contract.pairing_mode == PairingMode.CASE_REPLICATE_SEED
+        and observation.pair_seed != expected_pair_seed
+    ):
+        raise ValueError("paired trial executor did not preserve the scheduled pair seed")
