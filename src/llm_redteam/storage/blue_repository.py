@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from ..blue import (
     BlueControlAssessment,
     BlueControlDefinition,
-    ControlEvidenceSource,
     ControlObservation,
     assess_control,
 )
@@ -94,6 +93,7 @@ class BlueKnowledgePersistenceMixin:
                     profile_control_id=profile_control_id,
                     target_snapshot_id=observation.target_snapshot_id,
                     execution_id=observation.execution_id,
+                    control_event_id=observation.control_event_id,
                     attack_family=observation.attack_family,
                     experiment_fingerprint=observation.experiment_fingerprint,
                     kind=observation.kind.value,
@@ -150,6 +150,7 @@ class BlueKnowledgePersistenceMixin:
                     target_snapshot_id=item.target_snapshot_id,
                     attack_family=item.attack_family,
                     execution_id=item.execution_id,
+                    control_event_id=item.control_event_id,
                     experiment_fingerprint=item.experiment_fingerprint,
                     kind=item.kind,
                     source=item.source,
