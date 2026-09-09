@@ -332,7 +332,7 @@ def test_observation_cannot_move_treatment_execution_into_baseline_arm() -> None
         )
 
 
-def test_ablation_experiment_rejects_measurement_without_explicit_judge_binding() -> None:
+def test_ablation_experiment_rejects_changed_judge_against_persisted_campaigns() -> None:
     fixture = _build_fixture()
     restored = load_red_ablation_experiment(
         fixture.repository.engine,
@@ -340,8 +340,13 @@ def test_ablation_experiment_rejects_measurement_without_explicit_judge_binding(
     )
     assert restored is not None
 
-    changed_contract = fixture.contract.model_copy(update={"experiment_id": "other-experiment"})
-    duplicate = build_red_ablation_experiment_snapshot(
+    changed_contract = fixture.contract.model_copy(
+        update={
+            "experiment_id": "other-experiment",
+            "judge_fingerprint": "f" * 64,
+        }
+    )
+    changed = build_red_ablation_experiment_snapshot(
         contract=changed_contract,
         baseline_campaign_id=restored.baseline_campaign_id,
         treatment_campaign_id=restored.treatment_campaign_id,
@@ -349,14 +354,26 @@ def test_ablation_experiment_rejects_measurement_without_explicit_judge_binding(
         treatment_measurement_hash=restored.treatment_measurement_hash,
     )
 
-    # Existing campaign measurements carry explicit Judge/budget fingerprints, so a
-    # different contract Judge must fail against persisted measurement truth.
-    duplicate = duplicate.model_copy(
+    with pytest.raises(ValueError, match="Judge fingerprint"):
+        save_red_ablation_experiment(fixture.repository.engine, changed)
+
+
+def test_ablation_experiment_rejects_tampered_content_hash_before_write() -> None:
+    fixture = _build_fixture()
+    restored = load_red_ablation_experiment(
+        fixture.repository.engine,
+        fixture.contract.experiment_id,
+    )
+    assert restored is not None
+
+    tampered = restored.model_copy(
         update={
-            "contract": changed_contract.model_copy(
-                update={"judge_fingerprint": "f" * 64}
-            )
+            "experiment_id": "tampered-experiment",
+            "contract": restored.contract.model_copy(
+                update={"experiment_id": "tampered-experiment"}
+            ),
+            "content_hash": "f" * 64,
         }
     )
-    with pytest.raises(ValueError, match="Judge fingerprint"):
-        save_red_ablation_experiment(fixture.repository.engine, duplicate)
+    with pytest.raises(ValueError, match="content_hash"):
+        save_red_ablation_experiment(fixture.repository.engine, tampered)
