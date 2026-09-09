@@ -30,6 +30,8 @@ class CampaignMeasurementProtocolRow(Base):
     attack_policy_fingerprint: Mapped[str | None] = mapped_column(String(128))
     held_out_case_set_hash: Mapped[str | None] = mapped_column(String(128))
     corpus_snapshot_hash: Mapped[str | None] = mapped_column(String(128))
+    evaluation_manifest_hash: Mapped[str | None] = mapped_column(String(128), index=True)
+    evaluation_set_exposure: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=_utcnow,
