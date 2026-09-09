@@ -368,13 +368,11 @@ def _preserves_reference(
         and not candidate.model_compromise
     ):
         return False
-    if (
+    return not (
         policy.preserve_system_compromise
         and reference.system_compromise
         and not candidate.system_compromise
-    ):
-        return False
-    return True
+    )
 
 
 def _partition(
