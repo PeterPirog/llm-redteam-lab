@@ -48,6 +48,10 @@ target_snapshot_id
 The target snapshot already distinguishes the same underlying model used in different
 applications/configurations, as required by the project architecture.
 
+The campaign configuration hash must include all experiment-relevant configuration that
+is not already represented by the target snapshot, including Judge configuration,
+attacker-role configuration and sampling settings when those affect comparability.
+
 ### 3. Define a stricter reproduction fingerprint
 
 Reproduction must additionally preserve the tested attack identity and conversation-flow
@@ -71,14 +75,26 @@ payload_hash (preferred) or attack_instance_id fallback
 Therefore a repeat from another Blue configuration, another attack payload, or another
 multi-turn flow cannot silently confirm the original finding.
 
-### 4. Minimization and counterfactual replay require environment compatibility
+### 4. Keep minimization and counterfactual replay in the same causal cohort
 
-Minimization and counterfactual replay intentionally change the attack payload. They
-therefore compare candidate executions using the environment fingerprint rather than the
-strict reproduction fingerprint.
+Minimization and counterfactual replay intentionally change the attack payload, so they
+compare candidate executions using the environment fingerprint rather than the strict
+reproduction fingerprint.
 
-This preserves the tested Blue configuration while allowing the intervention under study
-to vary.
+Payload variation does not authorize cross-test evidence mixing. Every candidate execution
+used for causal analysis must preserve the reference:
+
+```text
+case_id
+attack_family
+interaction_mode
+environment_fingerprint
+```
+
+The in-memory result must also declare the same `attack_id`/case identity as the reference.
+This prevents a successful execution from another security objective or attack family from
+being accepted as evidence that a component of the current attack is necessary,
+sufficient or removable.
 
 ### 5. Persist derived artifacts as first-class versioned records
 
@@ -112,6 +128,8 @@ Positive consequences:
 - multi-turn flow changes are visible to reproduction,
 - minimization and counterfactual evidence remains comparable while allowing payload
   interventions,
+- causal evidence cannot silently cross security objectives, attack families or
+  interaction modes,
 - derived findings are auditable back to concrete execution IDs,
 - historical analysis can be re-run with new analysis versions without rewriting raw
   execution evidence,
@@ -125,6 +143,8 @@ Costs and limitations:
 - the environment fingerprint currently relies on campaign configuration hash and target
   snapshot completeness; adapters must include all security-relevant target settings in
   `configuration_hash`,
+- campaign creation currently trusts the supplied `configuration_hash`; a future typed
+  campaign manifest should compute it canonically from Red/Judge/budget/sampling policy,
 - model sampling seed/temperature and provider response nondeterminism must be included in
   target/campaign configuration when they are relevant to a specific experiment,
 - raw minimal reproducer content still needs a separate controlled artifact-store design
