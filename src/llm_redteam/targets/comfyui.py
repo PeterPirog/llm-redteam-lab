@@ -14,7 +14,14 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import Field, model_validator
 
-from ..domain import EvidenceKind, EvidenceRecord, StrictModel, TargetClass, TargetIdentity, TargetMode
+from ..domain import (
+    EvidenceKind,
+    EvidenceRecord,
+    StrictModel,
+    TargetClass,
+    TargetIdentity,
+    TargetMode,
+)
 from ..image_artifacts import ImageArtifactStore
 from .base import SessionMode, TargetRequest, TargetResponse
 
@@ -43,7 +50,9 @@ class ComfyUIConfig(StrictModel):
     poll_interval_seconds: float = Field(ge=0.0, default=0.25)
     max_poll_attempts: int = Field(gt=0, default=480)
     max_images_per_request: int = Field(gt=0, le=16, default=1)
-    capabilities: frozenset[str] = frozenset({"text", "image_generation", "workflow"})
+    capabilities: frozenset[str] = frozenset(
+        {"text", "image_generation", "workflow"}
+    )
 
     @model_validator(mode="after")
     def workflow_is_non_empty(self) -> ComfyUIConfig:
@@ -53,13 +62,12 @@ class ComfyUIConfig(StrictModel):
 
 
 class ComfyUITarget:
-    """Execute a deterministic API-format ComfyUI workflow and ingest final images.
+    """Execute a ComfyUI workflow and ingest final images from durable history.
 
-    The adapter deliberately does not use websocket events as authoritative evidence.
-    It queues a workflow through ``/prompt``, waits for the durable ``/history`` record,
-    then downloads the exact recorded output through ``/view``. Raw image bytes enter
-    only the configured image artifact store; normalized experiment evidence retains
-    hashes and artifact references.
+    Websocket events are intentionally not authoritative. The adapter queues an
+    API-format workflow through ``/prompt``, waits for the durable ``/history``
+    record, and downloads only image outputs referenced by that record through
+    ``/view``. Raw image bytes enter only the configured image artifact store.
     """
 
     def __init__(
@@ -83,7 +91,9 @@ class ComfyUITarget:
             "model": self.config.model,
             "workflow_hash": self._workflow_hash,
             "prompt_binding": self.config.prompt_binding.model_dump(mode="json"),
-            "seed_bindings": [item.model_dump(mode="json") for item in self.config.seed_bindings],
+            "seed_bindings": [
+                item.model_dump(mode="json") for item in self.config.seed_bindings
+            ],
             "default_seed": self.config.default_seed,
             "output_node_ids": self.config.output_node_ids,
             "application_version": self.config.application_version,
@@ -103,13 +113,17 @@ class ComfyUITarget:
 
     async def execute(self, request: TargetRequest) -> TargetResponse:
         if self._configuration_error is not None:
-            return TargetResponse(error_kind=f"configuration:{self._configuration_error}")
+            return TargetResponse(
+                error_kind=f"configuration:{self._configuration_error}"
+            )
         if request.input_artifact_refs:
             return TargetResponse(error_kind="input:multimodal_not_supported")
         if request.session_mode == SessionMode.TARGET_MANAGED:
             return TargetResponse(error_kind="session:target_managed_not_supported")
         if request.conversation:
-            return TargetResponse(error_kind="session:comfyui_has_no_conversation_memory")
+            return TargetResponse(
+                error_kind="session:comfyui_has_no_conversation_memory"
+            )
 
         seed, seed_error = self._resolve_seed(request)
         if seed_error is not None:
@@ -130,38 +144,36 @@ class ComfyUITarget:
         if output_error is not None:
             return TargetResponse(error_kind=output_error)
 
-        evidence: list[EvidenceRecord] = []
+        image_evidence: list[EvidenceRecord] = []
         for image_ref in image_refs[: self.config.max_images_per_request]:
             item, error = await self._ingest_image(image_ref, seed=seed)
             if error is not None:
                 return TargetResponse(error_kind=error)
             assert item is not None
-            evidence.append(item)
+            image_evidence.append(item)
 
         prompt_id_hash = sha256(prompt_id.encode()).hexdigest()
-        evidence.append(
-            EvidenceRecord(
-                kind=EvidenceKind.METADATA,
-                source="comfyui_target",
-                observed_at=datetime.now(UTC).isoformat(),
-                data={
-                    "workflow_hash": self._workflow_hash,
-                    "prompt_id_hash": prompt_id_hash,
-                    "history_verified": True,
-                    "image_count": len(evidence),
-                    "seed": seed if seed is not None else -1,
-                },
-                redacted=True,
-            )
+        metadata_evidence = EvidenceRecord(
+            kind=EvidenceKind.METADATA,
+            source="comfyui_target",
+            observed_at=datetime.now(UTC).isoformat(),
+            data={
+                "workflow_hash": self._workflow_hash,
+                "prompt_id_hash": prompt_id_hash,
+                "history_verified": True,
+                "image_count": len(image_evidence),
+                "seed": seed if seed is not None else -1,
+            },
+            redacted=True,
         )
         return TargetResponse(
             text="Image generation completed",
-            evidence=tuple(evidence),
+            evidence=(*image_evidence, metadata_evidence),
             provider_metadata={
                 "image_generated": True,
                 "safety_refusal": False,
                 "history_verified": True,
-                "image_count": len(evidence) - 1,
+                "image_count": len(image_evidence),
                 "workflow_hash": self._workflow_hash,
                 "seed": seed if seed is not None else -1,
             },
@@ -186,28 +198,38 @@ class ComfyUITarget:
     def _resolve_seed(self, request: TargetRequest) -> tuple[int | None, str | None]:
         raw = request.metadata.get("seed")
         if raw is None:
-            return self.config.default_seed, None
-        try:
-            seed = int(raw)
-        except ValueError:
-            return None, "input:invalid_seed"
-        if seed < 0:
-            return None, "input:invalid_seed"
+            seed = self.config.default_seed
+        else:
+            try:
+                seed = int(raw)
+            except ValueError:
+                return None, "input:invalid_seed"
+            if seed < 0:
+                return None, "input:invalid_seed"
+
+        if self.config.seed_bindings and seed is None:
+            return None, "input:seed_required"
         return seed, None
 
-    def _render_workflow(self, prompt: str, seed: int | None) -> dict[str, Any]:
+    def _render_workflow(
+        self, prompt: str, seed: int | None
+    ) -> dict[str, Any]:
         workflow = copy.deepcopy(self.config.workflow_api)
         _set_binding(workflow, self.config.prompt_binding, prompt)
         if self.config.seed_bindings:
-            if seed is None:
-                raise ValueError("seed bindings require default_seed or request metadata seed")
+            assert seed is not None
             for binding in self.config.seed_bindings:
                 _set_binding(workflow, binding, seed)
         return workflow
 
-    async def _queue(self, workflow: dict[str, Any]) -> tuple[str | None, str | None]:
+    async def _queue(
+        self, workflow: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
         try:
-            response = await self._client.post(self._url(self.config.queue_path), json={"prompt": workflow})
+            response = await self._client.post(
+                self._url(self.config.queue_path),
+                json={"prompt": workflow},
+            )
             response.raise_for_status()
             body = response.json()
         except httpx.HTTPStatusError as exc:
@@ -246,7 +268,10 @@ class ComfyUITarget:
                     return None, status_error
                 if _history_complete(record):
                     return record, None
-            if attempt + 1 < self.config.max_poll_attempts and self.config.poll_interval_seconds:
+            if (
+                attempt + 1 < self.config.max_poll_attempts
+                and self.config.poll_interval_seconds
+            ):
                 await asyncio.sleep(self.config.poll_interval_seconds)
         return None, "timeout:history_not_complete"
 
@@ -271,9 +296,17 @@ class ComfyUITarget:
                 filename = raw.get("filename")
                 subfolder = raw.get("subfolder", "")
                 image_type = raw.get("type", "output")
-                if all(isinstance(value, str) for value in (filename, subfolder, image_type)) and filename:
+                values_are_strings = all(
+                    isinstance(value, str)
+                    for value in (filename, subfolder, image_type)
+                )
+                if values_are_strings and filename:
                     refs.append(
-                        {"filename": filename, "subfolder": subfolder, "type": image_type}
+                        {
+                            "filename": filename,
+                            "subfolder": subfolder,
+                            "type": image_type,
+                        }
                     )
         if not refs:
             return [], "protocol:history_missing_images"
@@ -284,7 +317,9 @@ class ComfyUITarget:
     ) -> tuple[EvidenceRecord | None, str | None]:
         query = urlencode(image_ref)
         try:
-            response = await self._client.get(f"{self._url(self.config.view_path)}?{query}")
+            response = await self._client.get(
+                f"{self._url(self.config.view_path)}?{query}"
+            )
             response.raise_for_status()
             data = response.content
         except httpx.HTTPStatusError as exc:
@@ -295,7 +330,10 @@ class ComfyUITarget:
             return None, "protocol:view_empty_image"
 
         try:
-            mime_type = _image_mime(data, response.headers.get("content-type"))
+            mime_type = _image_mime(
+                data,
+                response.headers.get("content-type"),
+            )
             width, height = _image_dimensions(data, mime_type)
             artifact = self.artifacts.put(
                 data,
@@ -340,7 +378,11 @@ class ComfyUITarget:
             await self._client.aclose()
 
 
-def _set_binding(workflow: dict[str, Any], binding: ComfyUIInputBinding, value: object) -> None:
+def _set_binding(
+    workflow: dict[str, Any],
+    binding: ComfyUIInputBinding,
+    value: object,
+) -> None:
     node = workflow[binding.node_id]
     inputs = node["inputs"]
     inputs[binding.input_name] = value
@@ -362,11 +404,10 @@ def _history_failure(record: dict[str, Any]) -> str | None:
     if not isinstance(status, dict):
         return None
     status_str = status.get("status_str")
-    completed = status.get("completed")
-    if isinstance(status_str, str) and status_str.casefold() in {"error", "failed"}:
-        return f"execution:{status_str.casefold()}"
-    if completed is False and status_str == "error":
-        return "execution:error"
+    if isinstance(status_str, str):
+        normalized = status_str.casefold()
+        if normalized in {"error", "failed"}:
+            return f"execution:{normalized}"
     return None
 
 
@@ -375,11 +416,20 @@ def _history_complete(record: dict[str, Any]) -> bool:
     if isinstance(status, dict) and status.get("completed") is True:
         return True
     outputs = record.get("outputs")
-    return isinstance(outputs, dict) and bool(outputs) and not isinstance(status, dict)
+    return (
+        isinstance(outputs, dict)
+        and bool(outputs)
+        and not isinstance(status, dict)
+    )
 
 
 def _canonical_hash(value: object) -> str:
-    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    raw = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
     return sha256(raw.encode()).hexdigest()
 
 
@@ -417,7 +467,21 @@ def _positive_dimensions(width: int, height: int) -> tuple[int, int]:
 
 def _jpeg_dimensions(data: bytes) -> tuple[int, int]:
     offset = 2
-    sof = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+    sof = {
+        0xC0,
+        0xC1,
+        0xC2,
+        0xC3,
+        0xC5,
+        0xC6,
+        0xC7,
+        0xC9,
+        0xCA,
+        0xCB,
+        0xCD,
+        0xCE,
+        0xCF,
+    }
     while offset + 9 <= len(data):
         if data[offset] != 0xFF:
             offset += 1
@@ -452,7 +516,11 @@ def _webp_dimensions(data: bytes) -> tuple[int, int]:
         width = (bits & 0x3FFF) + 1
         height = ((bits >> 14) & 0x3FFF) + 1
         return _positive_dimensions(width, height)
-    if chunk == b"VP8 " and len(data) >= 30 and data[23:26] == b"\x9d\x01\x2a":
+    if (
+        chunk == b"VP8 "
+        and len(data) >= 30
+        and data[23:26] == b"\x9d\x01\x2a"
+    ):
         width = int.from_bytes(data[26:28], "little") & 0x3FFF
         height = int.from_bytes(data[28:30], "little") & 0x3FFF
         return _positive_dimensions(width, height)
