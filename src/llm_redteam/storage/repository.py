@@ -11,6 +11,7 @@ from ..campaigns.multiturn import ConversationRunResult
 from ..domain import EvidenceKind, EvidenceRecord, ExecutionResult, TargetIdentity
 from ..forensics import ForensicReport
 from .analysis_models import ForensicReportRow
+from .analysis_repository import AnalysisPersistenceMixin
 from .models import (
     AttackRow,
     Base,
@@ -23,7 +24,7 @@ from .models import (
 )
 
 
-class ExperimentRepository:
+class ExperimentRepository(AnalysisPersistenceMixin):
     """Persist normalized experiment facts without storing raw prompts by default."""
 
     def __init__(self, engine: Engine) -> None:
@@ -309,10 +310,23 @@ class ExperimentRepository:
         attack_instance_id: str,
         target_snapshot_id: str,
     ) -> None:
-        if session.get(AttackRow, attack_instance_id) is None:
+        attack = session.get(AttackRow, attack_instance_id)
+        if attack is None:
             raise ValueError(f"unknown attack instance: {attack_instance_id}")
-        if session.get(TargetSnapshotRow, target_snapshot_id) is None:
+        target = session.get(TargetSnapshotRow, target_snapshot_id)
+        if target is None:
             raise ValueError(f"unknown target snapshot: {target_snapshot_id}")
+        campaign = session.get(CampaignRow, attack.campaign_id)
+        if campaign is None:
+            raise RuntimeError(f"broken attack reference to campaign: {attack.campaign_id}")
+        if campaign.target_snapshot_id != target_snapshot_id:
+            raise ValueError(
+                "execution target snapshot does not match attack campaign target snapshot"
+            )
+        if result.attack_id != attack.case_id:
+            raise ValueError("execution attack_id does not match attack case_id")
+        if result.target_id != target.target_id:
+            raise ValueError("execution target_id does not match target snapshot")
         if session.get(ExecutionRow, result.execution_id) is not None:
             raise ValueError(f"execution already exists: {result.execution_id}")
         session.add(
