@@ -4,7 +4,10 @@ from pathlib import Path
 
 import httpx
 
+from llm_redteam.budget import BudgetLedger
+from llm_redteam.domain import CampaignBudget
 from llm_redteam.model_client import (
+    BudgetedRoleModelClient,
     ModelMessage,
     ModelRequest,
     OpenAICompatibleRoleModelClient,
@@ -46,6 +49,41 @@ def test_scripted_role_client_is_deterministic_and_role_scoped() -> None:
     assert response.text == '{"action":"stop"}'
     assert client.calls[ModelRole.RED_PLANNER] == 1
     assert client.calls[ModelRole.RED_MUTATOR] == 0
+
+
+def test_budgeted_client_accounts_model_calls_by_role() -> None:
+    config = load_models_config(ROOT / "config" / "models.example.yaml")
+    delegate = ScriptedRoleModelClient(
+        {ModelRole.RED_PLANNER: ['{"action":"stop"}']}
+    )
+    ledger = BudgetLedger(
+        CampaignBudget(
+            max_attacks=1,
+            max_generations=1,
+            max_turns_per_attack=1,
+            max_model_calls=2,
+            max_model_calls_by_role={"red_planner": 1},
+            max_total_output_tokens=2000,
+            max_output_tokens_by_role={"red_planner": 1200},
+            max_image_generations=0,
+            wall_clock_seconds=60,
+        )
+    )
+    client = BudgetedRoleModelClient(delegate, models=config, budget=ledger)
+
+    response = asyncio.run(
+        client.complete(
+            ModelRequest(
+                role=ModelRole.RED_PLANNER,
+                messages=(ModelMessage(role="user", content="synthetic test"),),
+            )
+        )
+    )
+
+    assert response.error_kind is None
+    snapshot = ledger.snapshot()
+    assert snapshot.model_calls_by_role == (("red_planner", 1),)
+    assert snapshot.output_tokens_by_role == (("red_planner", 0),)
 
 
 def test_openai_compatible_role_client_uses_configured_role_endpoint() -> None:
