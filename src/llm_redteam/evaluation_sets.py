@@ -53,8 +53,6 @@ class HeldOutEvaluationManifest(StrictModel):
 
     @model_validator(mode="after")
     def partition_is_valid(self) -> HeldOutEvaluationManifest:
-        if not self.discovery_cases:
-            raise ValueError("held-out manifest requires at least one discovery case")
         if not self.evaluation_cases:
             raise ValueError("held-out manifest requires at least one evaluation case")
         if self.red_can_access_evaluation_content:
@@ -126,8 +124,6 @@ def fingerprint_case_fingerprints(
         (item.model_dump(mode="json") for item in cases),
         key=lambda item: (str(item["case_id"]), str(item["content_hash"])),
     )
-    if not normalized:
-        raise ValueError("case fingerprint set cannot be empty")
     return _canonical_hash(normalized)
 
 
