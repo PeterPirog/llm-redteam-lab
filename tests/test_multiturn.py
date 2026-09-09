@@ -157,6 +157,21 @@ def test_multi_turn_metrics_use_conversations_not_turns_as_asr_denominator() -> 
     assert metrics.median_turns_to_first_violation == 2.5
 
 
+def test_target_managed_sequence_uses_real_target_session_continuity() -> None:
+    result = asyncio.run(
+        _engine(_ledger()).run_case(
+            _case(),
+            StraightSequence(),
+            session_mode=SessionMode.TARGET_MANAGED,
+        )
+    )
+
+    assert result.execution.objective_violated is True
+    assert result.execution.model_compromise is True
+    assert len(result.turns) == 2
+    assert result.first_violation_ordinal == 2
+
+
 def test_target_managed_sessions_reject_backtracking_fail_closed() -> None:
     async def run() -> None:
         engine = _engine(_ledger())
