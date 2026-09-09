@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
 
@@ -237,8 +238,6 @@ def _atomic_write_text(path: Path, content: str) -> None:
 
 
 def _restrict_permissions(path: Path) -> None:
-    try:
+    # Best effort only on platforms/filesystems that support POSIX-like modes.
+    with suppress(OSError):
         path.chmod(0o600)
-    except OSError:
-        # Best effort only on platforms/filesystems that support POSIX-like modes.
-        pass
