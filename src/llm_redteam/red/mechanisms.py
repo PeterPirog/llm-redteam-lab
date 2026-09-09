@@ -8,6 +8,7 @@ no target permissions, budgets, judging or raw transcript memory.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping
 from enum import StrEnum
 
@@ -39,6 +40,104 @@ class MechanismGuidance(StrictModel):
     must_change_mechanism: bool = False
     branch_recommended: bool = False
     rationale: str = Field(min_length=1)
+
+
+class MechanismLearningRecord(StrictModel):
+    """Transcript-free outcome for one bounded multi-turn conversation."""
+
+    attack_family: str = Field(min_length=1)
+    mechanisms: tuple[AttackMechanism, ...] = ()
+    successful: bool
+    error: bool
+
+
+class MechanismMemorySnapshot(StrictModel):
+    """Aggregate high-level mechanism evidence safe to reuse across discovery trials."""
+
+    attack_family: str = Field(min_length=1)
+    trials: int = Field(ge=0)
+    successes: int = Field(ge=0)
+    errors: int = Field(ge=0)
+    mechanism_trials: dict[str, int] = Field(default_factory=dict)
+    mechanism_successes: dict[str, int] = Field(default_factory=dict)
+    transition_trials: dict[str, int] = Field(default_factory=dict)
+    transition_successes: dict[str, int] = Field(default_factory=dict)
+
+    def compact_text(self) -> str:
+        mechanisms = self._top_ratios(self.mechanism_trials, self.mechanism_successes, limit=7)
+        transitions = self._top_ratios(self.transition_trials, self.transition_successes, limit=5)
+        return (
+            f"family={self.attack_family}; trials={self.trials}; successes={self.successes}; "
+            f"errors={self.errors}; mechanisms(success/trials)={mechanisms}; "
+            f"transitions(success/trials)={transitions}"
+        )
+
+    @staticmethod
+    def _top_ratios(
+        trials: dict[str, int],
+        successes: dict[str, int],
+        *,
+        limit: int,
+    ) -> str:
+        if not trials:
+            return "none"
+        ordered = sorted(
+            trials,
+            key=lambda key: (
+                successes.get(key, 0) / trials[key],
+                successes.get(key, 0),
+                trials[key],
+                key,
+            ),
+            reverse=True,
+        )[:limit]
+        return ", ".join(
+            f"{key}:{successes.get(key, 0)}/{trials[key]}" for key in ordered
+        )
+
+
+class MechanismCampaignMemory:
+    """Bounded Red discovery memory containing no prompt or Blue response text."""
+
+    def __init__(self, *, max_records: int = 256) -> None:
+        if max_records <= 0:
+            raise ValueError("max_records must be positive")
+        self.max_records = max_records
+        self._records: list[MechanismLearningRecord] = []
+
+    def record(self, record: MechanismLearningRecord) -> None:
+        self._records.append(record)
+        if len(self._records) > self.max_records:
+            del self._records[: len(self._records) - self.max_records]
+
+    def snapshot(self, attack_family: str) -> MechanismMemorySnapshot:
+        rows = [row for row in self._records if row.attack_family == attack_family]
+        mechanism_trials: Counter[str] = Counter()
+        mechanism_successes: Counter[str] = Counter()
+        transition_trials: Counter[str] = Counter()
+        transition_successes: Counter[str] = Counter()
+
+        for row in rows:
+            for mechanism in set(row.mechanisms):
+                mechanism_trials[mechanism.value] += 1
+                if row.successful:
+                    mechanism_successes[mechanism.value] += 1
+            for left, right in zip(row.mechanisms, row.mechanisms[1:], strict=False):
+                transition = f"{left.value}->{right.value}"
+                transition_trials[transition] += 1
+                if row.successful:
+                    transition_successes[transition] += 1
+
+        return MechanismMemorySnapshot(
+            attack_family=attack_family,
+            trials=len(rows),
+            successes=sum(row.successful for row in rows),
+            errors=sum(row.error for row in rows),
+            mechanism_trials=dict(mechanism_trials),
+            mechanism_successes=dict(mechanism_successes),
+            transition_trials=dict(transition_trials),
+            transition_successes=dict(transition_successes),
+        )
 
 
 class MechanismPolicy:
