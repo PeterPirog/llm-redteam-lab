@@ -95,8 +95,8 @@ class LocalImageArtifactStore:
 
     This is intentionally separate from normal experiment persistence. The store
     writes binary content and a small JSON sidecar under an operator-selected
-    directory. Artifact IDs are derived from SHA-256 so tampering is detected on
-    read.
+    directory. Artifact IDs bind content plus generation metadata; content hashes
+    independently detect tampering on read.
     """
 
     def __init__(
@@ -134,8 +134,11 @@ class LocalImageArtifactStore:
         self.root.mkdir(parents=True, exist_ok=True)
         image_path = self.root / f"{provisional.artifact_id}{suffix}"
         metadata_path = self.root / f"{provisional.artifact_id}.json"
+        if not self.policy.overwrite and image_path.exists() and metadata_path.exists():
+            existing, _ = self.get(provisional.artifact_id)
+            return existing
         if not self.policy.overwrite and (image_path.exists() or metadata_path.exists()):
-            raise FileExistsError(f"image artifact already exists: {provisional.artifact_id}")
+            raise FileExistsError(f"partial image artifact exists: {provisional.artifact_id}")
 
         artifact = provisional.model_copy(update={"storage_ref": str(image_path)})
         _atomic_write_bytes(image_path, data)
@@ -173,16 +176,32 @@ def _build_artifact(
 ) -> ImageArtifact:
     from hashlib import sha256
 
-    digest = sha256(data).hexdigest()
+    content_hash = sha256(data).hexdigest()
+    normalized_metadata = metadata or {}
+    identity_payload = {
+        "content_hash": content_hash,
+        "mime_type": mime_type,
+        "width": width,
+        "height": height,
+        "seed": seed,
+        "metadata": normalized_metadata,
+    }
+    identity_hash = sha256(
+        json.dumps(
+            identity_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
     return ImageArtifact(
-        artifact_id=f"image-{digest[:24]}",
-        content_hash=digest,
+        artifact_id=f"image-{identity_hash[:24]}",
+        content_hash=content_hash,
         mime_type=mime_type,
         width=width,
         height=height,
         seed=seed,
         storage_ref=storage_ref,
-        metadata=metadata or {},
+        metadata=normalized_metadata,
     )
 
 
