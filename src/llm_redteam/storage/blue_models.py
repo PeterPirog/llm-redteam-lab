@@ -56,6 +56,7 @@ class ControlObservationRow(Base):
     execution_id: Mapped[str] = mapped_column(
         ForeignKey("executions.execution_id"), nullable=False, index=True
     )
+    control_event_id: Mapped[str | None] = mapped_column(String(255), index=True)
     attack_family: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     experiment_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
     kind: Mapped[str] = mapped_column(String(64), nullable=False)
