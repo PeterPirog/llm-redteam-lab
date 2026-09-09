@@ -27,12 +27,14 @@ class SessionMode(StrEnum):
 class ConversationMessage(StrictModel):
     role: MessageRole
     content: str = Field(min_length=1)
+    artifact_refs: tuple[str, ...] = ()
 
 
 class TargetRequest(StrictModel):
     attack_id: str = Field(min_length=1)
     prompt: str = Field(min_length=1)
     conversation: tuple[ConversationMessage, ...] = ()
+    input_artifact_refs: tuple[str, ...] = ()
     session_mode: SessionMode = SessionMode.REPLAY
     session_id: str | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
@@ -53,6 +55,8 @@ class TargetAdapter(Protocol):
     Adapters may wrap direct model APIs, pipelines such as OpenWebUI, or full
     agents such as OpenCode. The adapter is responsible for collecting target
     evidence; it is not responsible for deciding whether an attack succeeded.
+    Artifact references are opaque handles resolved only by adapters that
+    explicitly support multimodal input.
     """
 
     @property
