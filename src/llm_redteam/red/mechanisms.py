@@ -193,10 +193,7 @@ class MechanismPolicy:
                 preferred=AttackMechanism.OBJECTIVE_PROBE,
                 allowed=(AttackMechanism.OBJECTIVE_PROBE,),
                 stagnation_passes=stagnation,
-                must_change_mechanism=(
-                    bool(prior_mechanisms)
-                    and prior_mechanisms[-1] == AttackMechanism.OBJECTIVE_PROBE
-                ),
+                must_change_mechanism=False,
                 rationale="remaining budget is reserved for the strongest objective test",
             )
 
@@ -255,8 +252,9 @@ class MechanismPolicy:
         eligible = candidates
         if force_novelty and last in candidates and len(candidates) > 1:
             eligible = tuple(item for item in candidates if item != last)
+        position = {item: index for index, item in enumerate(eligible)}
 
-        def score(item: AttackMechanism) -> tuple[float, int, int, str]:
+        def score(item: AttackMechanism) -> tuple[float, int, int, int]:
             trials = max(0, historical_trials.get(item.value, 0))
             successes = min(trials, max(0, historical_successes.get(item.value, 0)))
             smoothed_yield = (successes + 1.0) / (trials + 2.0)
@@ -266,7 +264,7 @@ class MechanismPolicy:
                 smoothed_yield + exploration - repeat_penalty,
                 -trials,
                 successes,
-                item.value,
+                -position[item],
             )
 
         return tuple(sorted(eligible, key=score, reverse=True))
