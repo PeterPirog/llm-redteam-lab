@@ -2,10 +2,13 @@
 
 from .ablation import (
     AblationArm,
+    AblationExecutionOrder,
     PairedRedAblationContract,
     PairedRedAblationReport,
     PairedRedObservation,
+    PairedTrialPlan,
     PairingMode,
+    build_counterbalanced_pair_plan,
     observation_from_run,
     summarize_paired_red_ablation,
 )
@@ -34,6 +37,7 @@ from .sequence_metrics import RedSequenceMetrics, SequenceRate, summarize_red_se
 
 __all__ = [
     "AblationArm",
+    "AblationExecutionOrder",
     "AdaptiveRedEfficiency",
     "AdaptiveRedStrategy",
     "AttackHypothesis",
@@ -50,6 +54,7 @@ __all__ = [
     "PairedRedAblationContract",
     "PairedRedAblationReport",
     "PairedRedObservation",
+    "PairedTrialPlan",
     "PairingMode",
     "RedAction",
     "RedCampaignMemory",
@@ -61,6 +66,7 @@ __all__ = [
     "RedPlanner",
     "RedSequenceMetrics",
     "SequenceRate",
+    "build_counterbalanced_pair_plan",
     "observation_from_run",
     "summarize_adaptive_red",
     "summarize_paired_red_ablation",
