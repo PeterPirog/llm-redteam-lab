@@ -3,11 +3,12 @@
 Adaptive Red search is intentionally optimized from prior outcomes. Its observed
 success rate is useful for attacker-search diagnostics but is not automatically an
 unbiased estimate of Blue vulnerability. Comparative Blue metrics require a frozen
-cross-trial attack policy and held-out evaluation cases.
+cross-trial attack policy, a pinned target and a validated held-out evaluation set.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -15,6 +16,7 @@ from enum import StrEnum
 from pydantic import model_validator
 
 from .domain import CompromiseOutcome, ExecutionResult, StrictModel
+from .evaluation_sets import EvaluationSetExposure, HeldOutEvaluationManifest
 from .metrics import CampaignMetrics, RateEstimate, summarize_campaign, wilson_rate
 
 
@@ -64,10 +66,14 @@ class DiscoveryMetrics:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationMetrics:
-    """Blue security metrics produced under an explicit valid evaluation protocol."""
+    """Blue security metrics produced under a validated held-out protocol."""
 
     protocol: MeasurementProtocol
     campaign: CampaignMetrics
+    evaluation_manifest_hash: str
+    evaluation_exposure: EvaluationSetExposure
+    evaluation_case_count: int
+    replicates_per_case: int
     comparable_blue_estimate: bool = True
 
 
@@ -103,15 +109,56 @@ def summarize_discovery(
 def summarize_evaluation(
     executions: Iterable[ExecutionResult],
     protocol: MeasurementProtocol,
+    manifest: HeldOutEvaluationManifest,
     confidence_level: float = 0.95,
 ) -> EvaluationMetrics:
-    """Produce comparative Blue metrics only under a valid evaluation protocol."""
+    """Produce comparative Blue metrics only after strict measurement-quality gates.
+
+    The held-out set must be fully covered with the same number of attempts per
+    case. Unresolved attempts block a comparative estimate rather than being
+    silently dropped from the denominator. This deliberately favors measurement
+    validity over producing a score from incomplete evidence.
+    """
 
     if protocol.purpose != CampaignPurpose.EVALUATION:
         raise ValueError("comparative Blue metrics require EVALUATION purpose")
+
+    rows = list(executions)
+    if not rows:
+        raise ValueError("comparative Blue metrics require evaluation executions")
+
+    expected_case_ids = {item.case_id for item in manifest.evaluation_cases}
+    attempts_by_case = Counter(row.attack_id for row in rows)
+    unexpected = sorted(set(attempts_by_case) - expected_case_ids)
+    if unexpected:
+        raise ValueError(f"executions contain cases outside held-out evaluation set: {unexpected}")
+    missing = sorted(expected_case_ids - set(attempts_by_case))
+    if missing:
+        raise ValueError(f"held-out evaluation cases were not executed: {missing}")
+
+    replicate_counts = set(attempts_by_case.values())
+    if len(replicate_counts) != 1:
+        raise ValueError("comparative Blue metrics require balanced replicates per case")
+
+    unresolved_outcomes = {
+        CompromiseOutcome.ERROR,
+        CompromiseOutcome.INCONCLUSIVE,
+        CompromiseOutcome.PARTIAL,
+    }
+    unresolved = [row.execution_id for row in rows if row.outcome in unresolved_outcomes]
+    if unresolved:
+        raise ValueError(
+            "comparative Blue metrics require conclusive executions; "
+            f"unresolved execution IDs: {unresolved}"
+        )
+
     return EvaluationMetrics(
         protocol=protocol,
-        campaign=summarize_campaign(executions, confidence_level),
+        campaign=summarize_campaign(rows, confidence_level),
+        evaluation_manifest_hash=manifest.content_hash,
+        evaluation_exposure=manifest.exposure,
+        evaluation_case_count=len(expected_case_ids),
+        replicates_per_case=next(iter(replicate_counts)),
     )
 
 
