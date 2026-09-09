@@ -12,6 +12,7 @@ from ..domain import EvidenceKind, EvidenceRecord, ExecutionResult, TargetIdenti
 from ..forensics import ForensicReport
 from .analysis_models import ForensicReportRow
 from .analysis_repository import AnalysisPersistenceMixin
+from .blue_repository import BlueKnowledgePersistenceMixin
 from .models import (
     AttackRow,
     Base,
@@ -24,7 +25,7 @@ from .models import (
 )
 
 
-class ExperimentRepository(AnalysisPersistenceMixin):
+class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMixin):
     """Persist normalized experiment facts without storing raw prompts by default."""
 
     def __init__(self, engine: Engine) -> None:
