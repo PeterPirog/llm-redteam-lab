@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..campaigns.multiturn import ConversationRunResult
 from ..domain import EvidenceKind, EvidenceRecord, ExecutionResult, TargetIdentity
 from ..forensics import ForensicReport
+from .ablation_models import RedAblationExperimentRow, RedAblationObservationRow
 from .analysis_models import ForensicReportRow
 from .analysis_repository import AnalysisPersistenceMixin
 from .blue_repository import BlueKnowledgePersistenceMixin
@@ -37,9 +38,11 @@ class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMix
         return cls(create_engine(url, echo=echo))
 
     def create_schema(self) -> None:
-        # Explicit reference keeps the measurement table registered even when
-        # callers import ExperimentRepository directly from storage.repository.
+        # Explicit references keep extension tables registered even when callers
+        # import ExperimentRepository directly from storage.repository.
         _ = CampaignMeasurementProtocolRow.__table__
+        _ = RedAblationExperimentRow.__table__
+        _ = RedAblationObservationRow.__table__
         Base.metadata.create_all(self.engine)
 
     def save_target(self, target: TargetIdentity) -> str:
