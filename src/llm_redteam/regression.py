@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -52,7 +53,7 @@ class RegressionArtifact(StrictModel):
     reproduction_status: FindingStatus
     components: tuple[RegressionArtifactComponent, ...]
     content_hash: str = Field(min_length=1)
-    sensitive: bool = True
+    sensitive: Literal[True] = True
 
     @model_validator(mode="after")
     def baseline_is_a_verified_finding(self) -> RegressionArtifact:
@@ -61,12 +62,14 @@ class RegressionArtifact(StrictModel):
             FindingStatus.CONFIRMED,
         }:
             raise ValueError("regression artifact requires a reproducible finding")
-        if self.baseline_outcome not in {
-            CompromiseOutcome.MODEL_COMPROMISE,
-            CompromiseOutcome.SYSTEM_COMPROMISE,
-            CompromiseOutcome.MODEL_AND_SYSTEM_COMPROMISE,
-        }:
-            raise ValueError("regression artifact baseline must be a compromise")
+        expected = {
+            (True, False): CompromiseOutcome.MODEL_COMPROMISE,
+            (False, True): CompromiseOutcome.SYSTEM_COMPROMISE,
+            (True, True): CompromiseOutcome.MODEL_AND_SYSTEM_COMPROMISE,
+        }
+        flags = (self.baseline_model_compromise, self.baseline_system_compromise)
+        if flags not in expected or self.baseline_outcome != expected[flags]:
+            raise ValueError("regression artifact baseline outcome and flags are inconsistent")
         return self
 
 
@@ -159,6 +162,7 @@ def build_regression_artifact(
         "baseline_system_compromise": reference.system_compromise,
         "reproduction_status": reproduction.status.value,
         "components": [component.model_dump(mode="json") for component in components],
+        "sensitive": True,
     }
     content_hash = _canonical_hash(hash_payload)
     artifact_id = f"regression-{content_hash[:24]}"
@@ -303,7 +307,7 @@ class LocalRegressionArtifactStore:
         self.policy = policy or RegressionArtifactStorePolicy()
 
     def save(self, artifact: RegressionArtifact) -> Path:
-        if artifact.sensitive and not self.policy.allow_sensitive_artifacts:
+        if not self.policy.allow_sensitive_artifacts:
             raise PermissionError("sensitive regression artifact storage is disabled")
         _validate_artifact_integrity(artifact)
         path = self._artifact_path(artifact.artifact_id)
@@ -365,9 +369,13 @@ def _validate_artifact_integrity(artifact: RegressionArtifact) -> None:
         "baseline_system_compromise": artifact.baseline_system_compromise,
         "reproduction_status": artifact.reproduction_status.value,
         "components": [component.model_dump(mode="json") for component in artifact.components],
+        "sensitive": artifact.sensitive,
     }
     if _canonical_hash(payload) != artifact.content_hash:
         raise ValueError("regression artifact content hash mismatch")
+    expected_id = f"regression-{artifact.content_hash[:24]}"
+    if artifact.artifact_id != expected_id:
+        raise ValueError("regression artifact ID does not match content hash")
 
 
 def _target_compatibility_error(
