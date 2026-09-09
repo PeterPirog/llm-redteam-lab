@@ -7,6 +7,7 @@ hypothesis units so reports do not imply that every mutation is an independent t
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
 
@@ -118,7 +119,7 @@ def _root_attack_id(
 
 
 def _cluster_counts(
-    clusters,
+    clusters: Iterable[list[AttackObservation]],
 ) -> tuple[int, int]:
     conclusive = 0
     successful = 0
