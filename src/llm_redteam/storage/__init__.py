@@ -6,6 +6,7 @@ from .measurement_repository import (
     build_campaign_measurement_snapshot,
     fingerprint_attack_policy,
     fingerprint_case_set,
+    fingerprint_corpus_snapshot,
     load_campaign_measurement_snapshot,
     save_campaign_measurement_snapshot,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "build_campaign_measurement_snapshot",
     "fingerprint_attack_policy",
     "fingerprint_case_set",
+    "fingerprint_corpus_snapshot",
     "load_campaign_measurement_snapshot",
     "save_campaign_measurement_snapshot",
 ]
