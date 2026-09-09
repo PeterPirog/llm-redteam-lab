@@ -75,17 +75,12 @@ class BlueKnowledgePersistenceMixin:
             if attack.attack_family != observation.attack_family:
                 raise ValueError("control observation attack family does not match execution")
 
-            actual_fingerprint = self.execution_fingerprint(observation.execution_id)
-            if observation.experiment_fingerprint != actual_fingerprint:
+            context = self._execution_context(session, observation.execution_id)
+            if observation.experiment_fingerprint != context.reproduction_fingerprint:
                 raise ValueError("control observation experiment fingerprint mismatch")
 
             if observation.source.authoritative_for_state:
-                valid_refs = self._execution_evidence_refs(session, observation.execution_id)
-                unknown = set(observation.evidence_refs).difference(valid_refs)
-                if unknown:
-                    raise ValueError(
-                        "authoritative control observation cites unknown execution evidence"
-                    )
+                self._validate_authoritative_evidence(session, observation)
 
             session.add(
                 ControlObservationRow(
@@ -180,3 +175,28 @@ class BlueKnowledgePersistenceMixin:
             .order_by(EvidenceRow.evidence_id)
         ).all()
         return {f"evidence:{item.evidence_id}" for item in rows}
+
+    @staticmethod
+    def _validate_authoritative_evidence(
+        session: Session,
+        observation: ControlObservation,
+    ) -> None:
+        rows = session.scalars(
+            select(EvidenceRow)
+            .where(EvidenceRow.execution_id == observation.execution_id)
+            .order_by(EvidenceRow.evidence_id)
+        ).all()
+        by_ref = {f"evidence:{item.evidence_id}": item for item in rows}
+        unknown = set(observation.evidence_refs).difference(by_ref)
+        if unknown:
+            raise ValueError(
+                "authoritative control observation cites unknown execution evidence"
+            )
+        cited = [by_ref[item] for item in observation.evidence_refs]
+        if observation.control_event_id is not None and not any(
+            evidence.data.get("control_event_id") == observation.control_event_id
+            for evidence in cited
+        ):
+            raise ValueError(
+                "authoritative control_event_id is not grounded in cited execution evidence"
+            )
