@@ -15,6 +15,7 @@ from typing import Protocol, runtime_checkable
 import httpx
 from pydantic import Field
 
+from .budget import BudgetLedger
 from .domain import StrictModel
 from .model_roles import ModelRole, ModelsConfig
 
@@ -60,6 +61,37 @@ class ScriptedRoleModelClient:
         if not queue:
             return ModelResponse(error_kind=f"script_exhausted:{request.role.value}")
         return ModelResponse(text=queue.popleft(), output_tokens=0)
+
+
+class BudgetedRoleModelClient:
+    """Decorate any role client with deterministic, role-aware budget accounting."""
+
+    def __init__(
+        self,
+        delegate: RoleModelClient,
+        *,
+        models: ModelsConfig,
+        budget: BudgetLedger,
+    ) -> None:
+        self.delegate = delegate
+        self.models = models
+        self.budget = budget
+
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        config = self.models.role(request.role)
+        reserved = config.max_output_tokens
+        self.budget.reserve_model_call(
+            role=request.role.value,
+            expected_output_tokens=reserved,
+        )
+        response = await self.delegate.complete(request)
+        if response.output_tokens is not None:
+            self.budget.record_actual_output_tokens(
+                role=request.role.value,
+                reserved=reserved,
+                actual=response.output_tokens,
+            )
+        return response
 
 
 class OpenAICompatibleRoleModelClient:
