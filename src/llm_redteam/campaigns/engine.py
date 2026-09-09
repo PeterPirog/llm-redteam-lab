@@ -7,8 +7,7 @@ from uuid import uuid4
 
 from ..budget import BudgetLedger
 from ..domain import AttackCase, CompromiseOutcome, EvidenceKind, EvidenceRecord, ExecutionResult
-from ..judges.base import outcome_from_judgment
-from ..judges.deterministic import DeterministicJudge
+from ..judges.base import Judge, evaluate_judge, outcome_from_judgment
 from ..targets.base import TargetAdapter, TargetRequest
 
 
@@ -35,7 +34,7 @@ class CampaignEngine:
         self,
         *,
         target: TargetAdapter,
-        judge: DeterministicJudge,
+        judge: Judge,
         budget: BudgetLedger | None = None,
     ) -> None:
         self.target = target
@@ -87,7 +86,7 @@ class CampaignEngine:
                 error_kind=response.error_kind,
             )
 
-        judgment = self.judge.evaluate(case, response)
+        judgment = await evaluate_judge(self.judge, case, response)
         outcome = outcome_from_judgment(judgment)
         transcript = EvidenceRecord(
             kind=EvidenceKind.TRANSCRIPT,
