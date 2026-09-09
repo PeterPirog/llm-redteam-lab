@@ -12,6 +12,7 @@ from .ablation import (
     observation_from_run,
     summarize_paired_red_ablation,
 )
+from .ablation_runner import PairedTrialExecutor, execute_paired_red_ablation
 from .adaptive import (
     AdaptiveRedStrategy,
     RedAction,
@@ -54,6 +55,7 @@ __all__ = [
     "PairedRedAblationContract",
     "PairedRedAblationReport",
     "PairedRedObservation",
+    "PairedTrialExecutor",
     "PairedTrialPlan",
     "PairingMode",
     "RedAction",
@@ -67,6 +69,7 @@ __all__ = [
     "RedSequenceMetrics",
     "SequenceRate",
     "build_counterbalanced_pair_plan",
+    "execute_paired_red_ablation",
     "observation_from_run",
     "summarize_adaptive_red",
     "summarize_paired_red_ablation",
