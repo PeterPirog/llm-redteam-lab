@@ -230,6 +230,7 @@ class ExperimentRepository:
                     analysis_version=analysis_version,
                     status=report.status.value,
                     reproduction_status=report.reproduction_status.value,
+                    attack_family=list(report.attack_family),
                     model_compromise=report.model_compromise,
                     system_compromise=report.system_compromise,
                     failure_layer=report.failure_layer,
