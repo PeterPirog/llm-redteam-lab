@@ -28,6 +28,9 @@ class _ExecutionContext:
     execution_id: str
     target_snapshot_id: str
     attack_instance_id: str
+    case_id: str
+    attack_family: str
+    interaction_mode: str
     environment_fingerprint: str
     attack_fingerprint: str
     flow_fingerprint: str | None
@@ -130,11 +133,15 @@ class AnalysisPersistenceMixin:
             reference = self._execution_context(session, reference_execution_id)
             if session.get(MinimizationRunRow, minimization_id) is not None:
                 raise ValueError(f"minimization already exists: {minimization_id}")
+            if result.original.attack_id != reference.case_id:
+                raise ValueError("minimization attack_id does not match reference case_id")
+            if result.minimized.attack_id != reference.case_id:
+                raise ValueError("minimized attack_id does not match reference case_id")
 
-            self._validate_assessment_environments(
+            self._validate_assessment_contexts(
                 session,
                 result.assessments,
-                reference.environment_fingerprint,
+                reference,
             )
             session.add(
                 MinimizationRunRow(
@@ -191,7 +198,7 @@ class AnalysisPersistenceMixin:
         reference_execution_id: str,
         analysis_version: str = "v1",
     ) -> str:
-        """Persist counterfactual interventions after environment compatibility checks."""
+        """Persist counterfactual interventions after context compatibility checks."""
 
         self._require_version(analysis_version)
         counterfactual_id = self._artifact_id(
@@ -201,12 +208,14 @@ class AnalysisPersistenceMixin:
             reference = self._execution_context(session, reference_execution_id)
             if session.get(CounterfactualRunRow, counterfactual_id) is not None:
                 raise ValueError(f"counterfactual result already exists: {counterfactual_id}")
+            if result.attack_id != reference.case_id:
+                raise ValueError("counterfactual attack_id does not match reference case_id")
 
             assessments = self._counterfactual_assessments(result)
-            self._validate_assessment_environments(
+            self._validate_assessment_contexts(
                 session,
                 assessments,
-                reference.environment_fingerprint,
+                reference,
             )
             empty = result.empty_baseline
             session.add(
@@ -290,18 +299,33 @@ class AnalysisPersistenceMixin:
                 rows.append(item.component_alone)
         return tuple(rows)
 
-    def _validate_assessment_environments(
+    def _validate_assessment_contexts(
         self,
         session: Session,
         assessments: tuple[VariantAssessment, ...],
-        expected_environment_fingerprint: str,
+        reference: _ExecutionContext,
     ) -> None:
         for assessment in assessments:
             for execution in assessment.executions:
                 context = self._execution_context(session, execution.execution_id)
-                if context.environment_fingerprint != expected_environment_fingerprint:
+                if context.environment_fingerprint != reference.environment_fingerprint:
                     raise ValueError(
                         "analysis execution does not match reference environment: "
+                        f"{execution.execution_id}"
+                    )
+                if context.case_id != reference.case_id:
+                    raise ValueError(
+                        "analysis execution does not match reference case: "
+                        f"{execution.execution_id}"
+                    )
+                if context.attack_family != reference.attack_family:
+                    raise ValueError(
+                        "analysis execution does not match reference attack family: "
+                        f"{execution.execution_id}"
+                    )
+                if context.interaction_mode != reference.interaction_mode:
+                    raise ValueError(
+                        "analysis execution does not match reference interaction mode: "
                         f"{execution.execution_id}"
                     )
 
@@ -352,6 +376,9 @@ class AnalysisPersistenceMixin:
             execution_id=execution_id,
             target_snapshot_id=execution.target_snapshot_id,
             attack_instance_id=execution.attack_instance_id,
+            case_id=attack.case_id,
+            attack_family=attack.attack_family,
+            interaction_mode=attack.interaction_mode,
             environment_fingerprint=environment_fingerprint,
             attack_fingerprint=attack_fingerprint,
             flow_fingerprint=flow_fingerprint,
