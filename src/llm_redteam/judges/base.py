@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from inspect import isawaitable
+from typing import Awaitable, Protocol, runtime_checkable
+
 from pydantic import Field
 
-from ..domain import CompromiseOutcome, StrictModel
+from ..domain import AttackCase, CompromiseOutcome, StrictModel
+from ..targets.base import TargetResponse
 
 
 class Judgment(StrictModel):
@@ -14,6 +18,30 @@ class Judgment(StrictModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1)
     judge_type: str = Field(min_length=1)
+
+
+@runtime_checkable
+class Judge(Protocol):
+    """A judge may be deterministic/synchronous or model-backed/asynchronous."""
+
+    def evaluate(
+        self,
+        case: AttackCase,
+        response: TargetResponse,
+    ) -> Judgment | Awaitable[Judgment]: ...
+
+
+async def evaluate_judge(
+    judge: Judge,
+    case: AttackCase,
+    response: TargetResponse,
+) -> Judgment:
+    """Normalize synchronous and asynchronous judge implementations."""
+
+    result = judge.evaluate(case, response)
+    if isawaitable(result):
+        return await result
+    return result
 
 
 def outcome_from_judgment(judgment: Judgment) -> CompromiseOutcome:
@@ -29,6 +57,4 @@ def outcome_from_judgment(judgment: Judgment) -> CompromiseOutcome:
         return CompromiseOutcome.SYSTEM_COMPROMISE
     if judgment.model_compromise:
         return CompromiseOutcome.MODEL_COMPROMISE
-    # Objective violation with neither compromise layer identified is evidence of
-    # an unresolved classification problem rather than a valid PASS.
     return CompromiseOutcome.PARTIAL
