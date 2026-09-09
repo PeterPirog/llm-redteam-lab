@@ -34,10 +34,11 @@ def _execution(
     *,
     violated: bool = True,
     target_id: str = TARGET_ID,
+    attack_id: str = CASE_ID,
 ) -> ExecutionResult:
     return ExecutionResult(
         execution_id=execution_id,
-        attack_id=CASE_ID,
+        attack_id=attack_id,
         target_id=target_id,
         outcome=(
             CompromiseOutcome.MODEL_COMPROMISE
@@ -92,13 +93,16 @@ def _record_variant_attack(
     *,
     attack_instance_id: str,
     payload_hash: str,
+    case_id: str = CASE_ID,
+    attack_family: str = "multi_turn_escalation",
+    interaction_mode: str = "single_turn",
 ) -> None:
     repository.record_attack(
         attack_instance_id=attack_instance_id,
         campaign_id="campaign-analysis",
-        case_id=CASE_ID,
-        attack_family="multi_turn_escalation",
-        interaction_mode="single_turn",
+        case_id=case_id,
+        attack_family=attack_family,
+        interaction_mode=interaction_mode,
         payload_hash=payload_hash,
     )
 
@@ -118,7 +122,7 @@ def test_execution_cannot_be_saved_under_snapshot_outside_attack_campaign() -> N
 
 def test_execution_case_and_target_identity_are_checked_against_persistence_context() -> None:
     repository, snapshot_id = _setup_repository()
-    wrong_case = _execution("exec-wrong-case").model_copy(update={"attack_id": "OTHER"})
+    wrong_case = _execution("exec-wrong-case", attack_id="OTHER")
     wrong_target = _execution("exec-wrong-target", target_id="other-target")
 
     with pytest.raises(ValueError, match="attack_id"):
@@ -335,6 +339,53 @@ def test_minimization_rejects_candidate_execution_from_different_environment() -
         )
 
 
+def test_minimization_rejects_candidate_from_different_case_same_environment() -> None:
+    repository, snapshot_id = _setup_repository()
+    reference = _execution("exec-cohort-reference")
+    _save_execution(repository, snapshot_id, reference)
+    _record_variant_attack(
+        repository,
+        attack_instance_id="attack-other-case",
+        payload_hash="payload-other-case",
+        case_id="OTHER-CASE",
+    )
+    candidate = _execution("exec-other-case", attack_id="OTHER-CASE")
+    _save_execution(
+        repository,
+        snapshot_id,
+        candidate,
+        attack_instance_id="attack-other-case",
+    )
+    component = AttackComponent(
+        component_id="a",
+        kind=AttackComponentKind.TEXT_SEGMENT,
+        content="synthetic component",
+    )
+    result = MinimizationResult(
+        status=MinimizationStatus.COMPLETE,
+        original=AttackVariant(attack_id=CASE_ID, components=(component,)),
+        minimized=AttackVariant(attack_id=CASE_ID, components=(component,)),
+        removed_component_ids=(),
+        target_executions=1,
+        assessments=(
+            VariantAssessment(
+                component_ids=("a",),
+                preserved=True,
+                successful_attempts=1,
+                conclusive_failures=0,
+                unresolved_attempts=0,
+                executions=(candidate,),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="reference case"):
+        repository.save_minimization(
+            result,
+            reference_execution_id=reference.execution_id,
+        )
+
+
 def test_counterfactuals_persist_conditional_component_evidence() -> None:
     repository, snapshot_id = _setup_repository()
     reference = _execution("exec-cf-reference")
@@ -421,3 +472,21 @@ def test_counterfactuals_persist_conditional_component_evidence() -> None:
             without_1.execution_id,
             without_2.execution_id,
         ]
+
+
+def test_counterfactuals_reject_result_attack_id_mismatch() -> None:
+    repository, snapshot_id = _setup_repository()
+    reference = _execution("exec-cf-id-reference")
+    _save_execution(repository, snapshot_id, reference)
+    result = CounterfactualResult(
+        attack_id="OTHER-CASE",
+        component_results=(),
+        evaluated_variants=0,
+        target_executions=0,
+    )
+
+    with pytest.raises(ValueError, match="reference case_id"):
+        repository.save_counterfactuals(
+            result,
+            reference_execution_id=reference.execution_id,
+        )
