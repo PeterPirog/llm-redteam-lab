@@ -28,6 +28,8 @@ class CampaignMeasurementProtocolRow(Base):
     protocol: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     protocol_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     attack_policy_fingerprint: Mapped[str | None] = mapped_column(String(128))
+    judge_policy_fingerprint: Mapped[str | None] = mapped_column(String(128), index=True)
+    budget_fingerprint: Mapped[str | None] = mapped_column(String(128), index=True)
     held_out_case_set_hash: Mapped[str | None] = mapped_column(String(128))
     corpus_snapshot_hash: Mapped[str | None] = mapped_column(String(128))
     evaluation_manifest_hash: Mapped[str | None] = mapped_column(String(128), index=True)
