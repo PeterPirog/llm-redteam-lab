@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from ..domain import StrictModel
 from ..evaluation_protocol import CampaignPurpose, MeasurementProtocol
+from ..evaluation_sets import EvaluationSetExposure, HeldOutEvaluationManifest
+from .evaluation_set_models import EvaluationSetManifestRow
 from .measurement_models import CampaignMeasurementProtocolRow
 from .models import CampaignRow
 
@@ -38,6 +40,11 @@ class CampaignMeasurementSnapshot(StrictModel):
         default=None,
         pattern=_HASH_PATTERN,
     )
+    evaluation_manifest_hash: str | None = Field(
+        default=None,
+        pattern=_HASH_PATTERN,
+    )
+    evaluation_set_exposure: EvaluationSetExposure | None = None
     content_hash: str = Field(pattern=_HASH_PATTERN)
 
     @model_validator(mode="after")
@@ -51,10 +58,12 @@ class CampaignMeasurementSnapshot(StrictModel):
             missing.append("held_out_case_set_hash")
         if self.corpus_snapshot_hash is None:
             missing.append("corpus_snapshot_hash")
+        if self.evaluation_manifest_hash is None:
+            missing.append("evaluation_manifest_hash")
+        if self.evaluation_set_exposure is None:
+            missing.append("evaluation_set_exposure")
         if missing:
-            raise ValueError(
-                "EVALUATION requires " + ", ".join(missing)
-            )
+            raise ValueError("EVALUATION requires " + ", ".join(missing))
         return self
 
 
@@ -68,6 +77,8 @@ def build_campaign_measurement_snapshot(
     attack_policy_fingerprint: str | None = None,
     held_out_case_set_hash: str | None = None,
     corpus_snapshot_hash: str | None = None,
+    evaluation_manifest_hash: str | None = None,
+    evaluation_set_exposure: EvaluationSetExposure | None = None,
 ) -> CampaignMeasurementSnapshot:
     """Build a canonical hash-bound snapshot before any database write."""
 
@@ -81,11 +92,43 @@ def build_campaign_measurement_snapshot(
         "attack_policy_fingerprint": attack_policy_fingerprint,
         "held_out_case_set_hash": held_out_case_set_hash,
         "corpus_snapshot_hash": corpus_snapshot_hash,
+        "evaluation_manifest_hash": evaluation_manifest_hash,
+        "evaluation_set_exposure": (
+            evaluation_set_exposure.value if evaluation_set_exposure is not None else None
+        ),
     }
     content_hash = _canonical_hash(payload)
     return CampaignMeasurementSnapshot(
         **payload,
         content_hash=content_hash,
+    )
+
+
+def build_evaluation_campaign_measurement_snapshot(
+    *,
+    campaign_id: str,
+    target_snapshot_id: str,
+    campaign_configuration_hash: str,
+    metric_definition_version: str,
+    protocol: MeasurementProtocol,
+    attack_policy_fingerprint: str,
+    manifest: HeldOutEvaluationManifest,
+) -> CampaignMeasurementSnapshot:
+    """Bind an evaluation campaign to one exact held-out manifest without manual hashes."""
+
+    if protocol.purpose != CampaignPurpose.EVALUATION:
+        raise ValueError("evaluation manifest binding requires EVALUATION purpose")
+    return build_campaign_measurement_snapshot(
+        campaign_id=campaign_id,
+        target_snapshot_id=target_snapshot_id,
+        campaign_configuration_hash=campaign_configuration_hash,
+        metric_definition_version=metric_definition_version,
+        protocol=protocol,
+        attack_policy_fingerprint=attack_policy_fingerprint,
+        held_out_case_set_hash=manifest.evaluation_case_set_hash,
+        corpus_snapshot_hash=manifest.corpus_snapshot_hash,
+        evaluation_manifest_hash=manifest.content_hash,
+        evaluation_set_exposure=manifest.exposure,
     )
 
 
@@ -100,6 +143,9 @@ def save_campaign_measurement_snapshot(
         if campaign is None:
             raise ValueError(f"unknown campaign: {snapshot.campaign_id}")
         _verify_campaign_binding(campaign, snapshot)
+        if snapshot.protocol.purpose == CampaignPurpose.EVALUATION:
+            _verify_evaluation_manifest_binding(session, snapshot)
+
         existing = session.get(CampaignMeasurementProtocolRow, snapshot.campaign_id)
         if existing is not None:
             if existing.protocol_hash == snapshot.content_hash:
@@ -117,6 +163,12 @@ def save_campaign_measurement_snapshot(
                 attack_policy_fingerprint=snapshot.attack_policy_fingerprint,
                 held_out_case_set_hash=snapshot.held_out_case_set_hash,
                 corpus_snapshot_hash=snapshot.corpus_snapshot_hash,
+                evaluation_manifest_hash=snapshot.evaluation_manifest_hash,
+                evaluation_set_exposure=(
+                    snapshot.evaluation_set_exposure.value
+                    if snapshot.evaluation_set_exposure is not None
+                    else None
+                ),
             )
         )
     return snapshot.content_hash
@@ -145,6 +197,12 @@ def load_campaign_measurement_snapshot(
             attack_policy_fingerprint=row.attack_policy_fingerprint,
             held_out_case_set_hash=row.held_out_case_set_hash,
             corpus_snapshot_hash=row.corpus_snapshot_hash,
+            evaluation_manifest_hash=row.evaluation_manifest_hash,
+            evaluation_set_exposure=(
+                EvaluationSetExposure(row.evaluation_set_exposure)
+                if row.evaluation_set_exposure is not None
+                else None
+            ),
         )
         if snapshot.schema_version != row.schema_version:
             raise ValueError("measurement snapshot schema version mismatch")
@@ -152,6 +210,8 @@ def load_campaign_measurement_snapshot(
             raise ValueError("measurement snapshot content hash mismatch")
         if snapshot.protocol.purpose.value != row.purpose:
             raise ValueError("measurement snapshot purpose mismatch")
+        if snapshot.protocol.purpose == CampaignPurpose.EVALUATION:
+            _verify_evaluation_manifest_binding(session, snapshot)
         return snapshot
 
 
@@ -187,6 +247,27 @@ def _verify_campaign_binding(
         raise ValueError("measurement configuration hash does not match campaign")
     if campaign.metric_definition_version != snapshot.metric_definition_version:
         raise ValueError("measurement metric definition version does not match campaign")
+
+
+def _verify_evaluation_manifest_binding(
+    session: Session,
+    snapshot: CampaignMeasurementSnapshot,
+) -> None:
+    if snapshot.evaluation_manifest_hash is None:
+        raise ValueError("EVALUATION requires evaluation_manifest_hash")
+    manifest = session.get(EvaluationSetManifestRow, snapshot.evaluation_manifest_hash)
+    if manifest is None:
+        raise ValueError("evaluation measurement references an unpersisted manifest")
+    if manifest.evaluation_case_set_hash != snapshot.held_out_case_set_hash:
+        raise ValueError("measurement held-out case hash does not match evaluation manifest")
+    if manifest.corpus_snapshot_hash != snapshot.corpus_snapshot_hash:
+        raise ValueError("measurement corpus hash does not match evaluation manifest")
+    if manifest.exposure != (
+        snapshot.evaluation_set_exposure.value
+        if snapshot.evaluation_set_exposure is not None
+        else None
+    ):
+        raise ValueError("measurement exposure does not match evaluation manifest")
 
 
 def _canonical_hash(value: object) -> str:
