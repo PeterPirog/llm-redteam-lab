@@ -108,7 +108,9 @@ class MechanismPolicy:
             must_change = True
 
         if must_change and branch_available and phase == "planner":
-            allowed = (AttackMechanism.BRANCH_DIVERSIFICATION, *candidates)
+            last = prior_mechanisms[-1] if prior_mechanisms else None
+            alternatives = tuple(item for item in candidates if item != last)
+            allowed = (AttackMechanism.BRANCH_DIVERSIFICATION, *alternatives)
             return MechanismGuidance(
                 preferred=AttackMechanism.BRANCH_DIVERSIFICATION,
                 allowed=allowed,
