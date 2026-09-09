@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
+from hashlib import sha256
 from math import comb
 from statistics import fmean, median
 
@@ -43,6 +44,21 @@ class PairingMode(StrEnum):
     CASE_REPLICATE_SEED = "CASE_REPLICATE_SEED"
 
 
+class AblationExecutionOrder(StrEnum):
+    """Order policy used to limit systematic temporal/runtime bias."""
+
+    COUNTERBALANCED = "COUNTERBALANCED"
+
+
+class PairedTrialPlan(StrictModel):
+    """Deterministic execution order and optional shared seed for one matched pair."""
+
+    case_id: str = Field(min_length=1)
+    replicate: int = Field(ge=0)
+    first_arm: AblationArm
+    pair_seed: int | None = Field(default=None, ge=0)
+
+
 class PairedRedAblationContract(StrictModel):
     """Controlled conditions that must be identical across both Red arms."""
 
@@ -57,6 +73,7 @@ class PairedRedAblationContract(StrictModel):
     baseline_policy_fingerprint: str = Field(pattern=_HASH_PATTERN)
     treatment_policy_fingerprint: str = Field(pattern=_HASH_PATTERN)
     pairing_mode: PairingMode = PairingMode.CASE_REPLICATE
+    execution_order_policy: AblationExecutionOrder = AblationExecutionOrder.COUNTERBALANCED
 
     @model_validator(mode="after")
     def policies_must_differ(self) -> PairedRedAblationContract:
@@ -121,6 +138,55 @@ class PairedRedAblationReport:
     mean_output_token_delta: float
     median_first_violation_ordinal_delta_on_joint_success: float | None
     comparable_red_component_estimate: bool = True
+
+
+def build_counterbalanced_pair_plan(
+    *,
+    contract: PairedRedAblationContract,
+    manifest: HeldOutEvaluationManifest,
+    replicates_per_case: int,
+) -> tuple[PairedTrialPlan, ...]:
+    """Build a deterministic alternating execution schedule for matched pairs.
+
+    The first arm alternates across sorted case/replicate keys. Which arm starts the
+    sequence is derived from ``experiment_id`` so separate experiments do not always
+    privilege the baseline. In seed-pairing mode, a stable per-pair seed is derived
+    from the experiment and pair identity and must be reused by both arms.
+    """
+
+    if contract.evaluation_manifest_hash != manifest.content_hash:
+        raise ValueError("ablation contract does not match held-out evaluation manifest")
+    if replicates_per_case <= 0:
+        raise ValueError("replicates_per_case must be positive")
+
+    case_ids = sorted(item.case_id for item in manifest.evaluation_cases)
+    pair_keys = [
+        (case_id, replicate)
+        for case_id in case_ids
+        for replicate in range(replicates_per_case)
+    ]
+    experiment_parity = int(sha256(contract.experiment_id.encode()).hexdigest()[-1], 16) % 2
+
+    plans: list[PairedTrialPlan] = []
+    for index, (case_id, replicate) in enumerate(pair_keys):
+        baseline_first = (index + experiment_parity) % 2 == 0
+        pair_seed = None
+        if contract.pairing_mode == PairingMode.CASE_REPLICATE_SEED:
+            raw_seed = sha256(
+                f"{contract.experiment_id}:{case_id}:{replicate}".encode()
+            ).hexdigest()
+            pair_seed = int(raw_seed[:8], 16)
+        plans.append(
+            PairedTrialPlan(
+                case_id=case_id,
+                replicate=replicate,
+                first_arm=(
+                    AblationArm.BASELINE if baseline_first else AblationArm.TREATMENT
+                ),
+                pair_seed=pair_seed,
+            )
+        )
+    return tuple(plans)
 
 
 def observation_from_run(
