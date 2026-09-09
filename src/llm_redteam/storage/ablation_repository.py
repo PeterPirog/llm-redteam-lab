@@ -50,6 +50,12 @@ class RedAblationExperimentSnapshot(StrictModel):
             raise ValueError("paired ablation requires distinct baseline/treatment campaigns")
         return self
 
+    @model_validator(mode="after")
+    def content_hash_matches_snapshot(self) -> RedAblationExperimentSnapshot:
+        if _experiment_content_hash(self) != self.content_hash:
+            raise ValueError("Red ablation experiment content_hash does not match snapshot")
+        return self
+
 
 def build_red_ablation_experiment_snapshot(
     *,
@@ -81,6 +87,9 @@ def save_red_ablation_experiment(
     snapshot: RedAblationExperimentSnapshot,
 ) -> str:
     """Persist one immutable paired experiment after verifying both campaign snapshots."""
+
+    if _experiment_content_hash(snapshot) != snapshot.content_hash:
+        raise ValueError("Red ablation experiment content_hash does not match snapshot")
 
     baseline = _required_measurement(engine, snapshot.baseline_campaign_id)
     treatment = _required_measurement(engine, snapshot.treatment_campaign_id)
@@ -507,6 +516,10 @@ def _expected_campaign(
         if arm == AblationArm.BASELINE
         else experiment.treatment_campaign_id
     )
+
+
+def _experiment_content_hash(snapshot: RedAblationExperimentSnapshot) -> str:
+    return _canonical_hash(snapshot.model_dump(mode="json", exclude={"content_hash"}))
 
 
 def _canonical_hash(value: object) -> str:
