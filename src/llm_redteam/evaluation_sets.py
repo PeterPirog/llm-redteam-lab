@@ -32,12 +32,7 @@ class EvaluationSetExposure(StrEnum):
 
 
 class EvaluationDependencyFingerprint(StrictModel):
-    """Hash-only identity of attack input bytes stored outside the AttackCase.
-
-    ``reference_hash`` identifies the declared locator without persisting a local path,
-    URL or other potentially sensitive reference. ``content_hash`` identifies the exact
-    bytes/state that the evaluator resolved from that reference.
-    """
+    """Hash-only identity of attack input bytes stored outside the AttackCase."""
 
     kind: str = Field(min_length=1)
     reference_hash: str = Field(pattern=_HASH_PATTERN)
@@ -62,12 +57,7 @@ class EvaluationCaseFingerprint(StrictModel):
 
 
 class HeldOutEvaluationManifest(StrictModel):
-    """Immutable partition declaration used to gate comparative Blue metrics.
-
-    Schema v1 binds normalized AttackCase content only. Schema v2 additionally binds
-    external attack inputs such as immutable environment fixture bundles. Existing v1
-    manifests remain byte/hash compatible and cannot silently claim v2 guarantees.
-    """
+    """Immutable partition declaration used to gate comparative Blue metrics."""
 
     schema_version: int = Field(ge=_MANIFEST_SCHEMA_V1, le=_MANIFEST_SCHEMA_V2, default=1)
     manifest_id: str = Field(min_length=1)
@@ -101,9 +91,7 @@ class HeldOutEvaluationManifest(StrictModel):
             raise ValueError("duplicate discovery case IDs are not allowed")
         if len(evaluation_ids) != len(set(evaluation_ids)):
             raise ValueError("duplicate evaluation case IDs are not allowed")
-
-        id_overlap = set(discovery_ids) & set(evaluation_ids)
-        if id_overlap:
+        if set(discovery_ids) & set(evaluation_ids):
             raise ValueError("discovery and evaluation case IDs must be disjoint")
 
         discovery_hashes = {item.content_hash for item in self.discovery_cases}
@@ -123,9 +111,7 @@ class HeldOutEvaluationManifest(StrictModel):
             raise ValueError("discovery_case_set_hash does not match manifest cases")
         if self.evaluation_case_set_hash != expected_evaluation_hash:
             raise ValueError("evaluation_case_set_hash does not match manifest cases")
-
-        expected_content_hash = _canonical_hash(self._hash_payload())
-        if self.content_hash != expected_content_hash:
+        if self.content_hash != _canonical_hash(self._hash_payload()):
             raise ValueError("held-out manifest content_hash does not match manifest content")
         return self
 
@@ -212,11 +198,7 @@ def build_held_out_evaluation_manifest(
         str, Iterable[EvaluationDependencyFingerprint]
     ] | None = None,
 ) -> HeldOutEvaluationManifest:
-    """Build a canonical immutable split manifest from normalized attack inputs.
-
-    Supplying ``dependency_fingerprints`` upgrades the manifest to schema v2 and binds
-    external attack-input bytes to their case. Unknown case IDs fail closed.
-    """
+    """Build a canonical immutable split manifest from normalized attack inputs."""
 
     discovery_cases = tuple(discovery_cases)
     evaluation_cases = tuple(evaluation_cases)
@@ -270,8 +252,6 @@ def build_held_out_evaluation_manifest(
     }
     return HeldOutEvaluationManifest(
         **payload,
-        discovery_cases=discovery,
-        evaluation_cases=evaluation,
         content_hash=_canonical_hash(payload),
     )
 
