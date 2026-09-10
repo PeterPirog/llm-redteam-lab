@@ -10,8 +10,9 @@ from uuid import uuid4
 from ..budget import BudgetLedger, BudgetSnapshot
 from ..campaign_plan import CampaignPlan, RedPolicyKind, preflight_campaign
 from ..corpus import select_cases
-from ..domain import AttackCase, ExecutionResult
+from ..domain import AttackCase, CampaignBudget, ExecutionResult
 from ..evaluation_protocol import (
+    CampaignPurpose,
     DiscoveryMetrics,
     EvaluationMetrics,
     discovery_protocol,
@@ -25,7 +26,9 @@ from ..evaluation_sets import (
     select_manifest_cases,
 )
 from ..judges.base import Judge
+from ..model_client import RoleModelClient
 from ..model_roles import ModelsConfig
+from ..red.runtime import RedRuntimeDiagnostics, RedStrategyRuntime
 from ..red.scripted import ScriptedPayloadStrategy
 from ..runtime_config import BudgetConfigDocument
 from ..storage.campaign_status import CampaignTerminalStatus, finish_campaign
@@ -41,7 +44,12 @@ from ..storage.measurement_repository import (
 from ..storage.repository import ExperimentRepository
 from ..targets.base import TargetAdapter
 from .engine import CampaignEngine
-from .multiturn import ConversationBudget, ConversationRunResult, MultiTurnCampaignEngine
+from .multiturn import (
+    ConversationBudget,
+    ConversationRunResult,
+    MultiTurnCampaignEngine,
+    MultiTurnStrategy,
+)
 
 METRIC_DEFINITION_VERSION = "v2"
 _STATIC_POLICY_VERSION = 1
@@ -58,6 +66,7 @@ class CampaignLifecycleResult:
     executions: tuple[ExecutionResult, ...]
     conversations: tuple[ConversationRunResult, ...]
     metrics: DiscoveryMetrics | EvaluationMetrics | None
+    red_diagnostics: RedRuntimeDiagnostics | None
     measurement_error: str | None
     budget: BudgetSnapshot
 
@@ -86,11 +95,12 @@ def deterministic_judge_policy_descriptor(*, canary: str) -> dict[str, object]:
 
 
 class CampaignLifecycleExecutor:
-    """Execute only a currently valid campaign plan and persist measurement truth.
+    """Execute a valid campaign plan through one auditable lifecycle boundary.
 
-    The executor intentionally supports static Red first. Adaptive/model-backed Red
-    will be wired through this same boundary after the deterministic lifecycle is
-    proven. This prevents inference code from bypassing preflight or provenance.
+    Static and model-backed Red both pass through the same preflight, budget,
+    target-snapshot, persistence and measurement-provenance gates. Model-backed Red
+    is currently limited to first-class multi-turn cases so generated attack
+    sequences cannot bypass the conversation accounting contract.
     """
 
     def __init__(
@@ -102,6 +112,7 @@ class CampaignLifecycleExecutor:
         budgets: BudgetConfigDocument,
         judge_policy_descriptor: object,
         models: ModelsConfig | None = None,
+        red_model_client: RoleModelClient | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -109,6 +120,7 @@ class CampaignLifecycleExecutor:
         self.budgets = budgets
         self.judge_policy_descriptor = judge_policy_descriptor
         self.models = models
+        self.red_model_client = red_model_client
 
     async def run(
         self,
@@ -119,12 +131,6 @@ class CampaignLifecycleExecutor:
         campaign_id: str | None = None,
     ) -> CampaignLifecycleResult:
         """Run one campaign after recomputing all deterministic preflight gates."""
-
-        if plan.red_policy != RedPolicyKind.STATIC:
-            raise ValueError(
-                "campaign lifecycle currently accepts only red_policy=static; "
-                "model-backed Red must not bypass the lifecycle integration gate"
-            )
 
         preflight = preflight_campaign(
             plan=plan,
@@ -144,12 +150,21 @@ class CampaignLifecycleExecutor:
         selected = self._selected_cases(plan, cases, evaluation_manifest)
         profile_name, effective_budget = self.budgets.profile(plan.budget_profile)
         ledger = BudgetLedger(effective_budget)
+        red_runtime = self._build_red_runtime(
+            plan=plan,
+            effective_budget=effective_budget,
+            ledger=ledger,
+        )
 
         target_snapshot_id = self.repository.target_snapshot_id(self.target.identity)
         if plan.target_snapshot_id is not None and plan.target_snapshot_id != target_snapshot_id:
             raise ValueError("configured target_snapshot_id does not match actual Blue target")
 
-        attack_descriptor = static_attack_policy_descriptor(plan)
+        attack_descriptor = (
+            static_attack_policy_descriptor(plan)
+            if red_runtime is None
+            else red_runtime.descriptor()
+        )
         attack_fingerprint = fingerprint_attack_policy(attack_descriptor)
         judge_fingerprint = fingerprint_judge_policy(self.judge_policy_descriptor)
         budget_fingerprint = fingerprint_budget(effective_budget.model_dump(mode="json"))
@@ -216,21 +231,48 @@ class CampaignLifecycleExecutor:
                         payload_hash=fingerprint_attack_case(case).content_hash,
                     )
                     if case.interaction_mode == "multi_turn":
-                        conversation = await self._run_static_conversation(
-                            case=case,
-                            ledger=ledger,
-                            plan=plan,
-                            campaign_id=resolved_campaign_id,
-                            replicate=replicate,
-                        )
+                        strategy: MultiTurnStrategy | None = None
+                        if red_runtime is None:
+                            conversation = await self._run_static_conversation(
+                                case=case,
+                                ledger=ledger,
+                                plan=plan,
+                                campaign_id=resolved_campaign_id,
+                                replicate=replicate,
+                            )
+                        else:
+                            strategy = red_runtime.strategy_for(case)
+                            conversation = await self._run_model_conversation(
+                                case=case,
+                                ledger=ledger,
+                                plan=plan,
+                                campaign_id=resolved_campaign_id,
+                                replicate=replicate,
+                                red_runtime=red_runtime,
+                                strategy=strategy,
+                            )
                         self.repository.save_conversation(
                             conversation,
                             attack_instance_id=attack_instance_id,
                             target_snapshot_id=target_snapshot_id,
                         )
+                        if red_runtime is not None:
+                            if strategy is None:
+                                raise RuntimeError(
+                                    "adaptive Red strategy disappeared after execution"
+                                )
+                            red_runtime.observe(
+                                case=case,
+                                strategy=strategy,
+                                result=conversation,
+                            )
                         conversations.append(conversation)
                         executions.append(conversation.execution)
                     else:
+                        if red_runtime is not None:
+                            raise RuntimeError(
+                                "model-backed Red reached a non-multi-turn case after preflight"
+                            )
                         execution = await self._run_static_single_turn(
                             case=case,
                             ledger=ledger,
@@ -253,7 +295,7 @@ class CampaignLifecycleExecutor:
 
         metrics: DiscoveryMetrics | EvaluationMetrics | None
         measurement_error: str | None = None
-        if plan.purpose.value == "DISCOVERY":
+        if plan.purpose == CampaignPurpose.DISCOVERY:
             metrics = summarize_discovery(executions)
             status = CampaignTerminalStatus.COMPLETED
         else:
@@ -283,8 +325,34 @@ class CampaignLifecycleExecutor:
             executions=tuple(executions),
             conversations=tuple(conversations),
             metrics=metrics,
+            red_diagnostics=red_runtime.diagnostics() if red_runtime is not None else None,
             measurement_error=measurement_error,
             budget=ledger.snapshot(),
+        )
+
+    def _build_red_runtime(
+        self,
+        *,
+        plan: CampaignPlan,
+        effective_budget: CampaignBudget,
+        ledger: BudgetLedger,
+    ) -> RedStrategyRuntime | None:
+        if not plan.red_policy.model_backed:
+            return None
+        if self.models is None:
+            raise ValueError("model-backed Red requires models configuration")
+        if self.red_model_client is None:
+            raise ValueError("model-backed Red requires an injected RoleModelClient")
+        return RedStrategyRuntime(
+            policy=plan.red_policy,
+            purpose=plan.purpose,
+            target_class=plan.target_class,
+            target_mode=plan.target_mode,
+            session_mode=plan.session_mode,
+            campaign_budget=effective_budget,
+            models=self.models,
+            model_client=self.red_model_client,
+            budget=ledger,
         )
 
     async def _run_static_single_turn(
@@ -330,6 +398,30 @@ class CampaignLifecycleExecutor:
             conversation_id=_conversation_id(campaign_id, case.id, replicate),
         )
 
+    async def _run_model_conversation(
+        self,
+        *,
+        case: AttackCase,
+        ledger: BudgetLedger,
+        plan: CampaignPlan,
+        campaign_id: str,
+        replicate: int,
+        red_runtime: RedStrategyRuntime,
+        strategy: MultiTurnStrategy,
+    ) -> ConversationRunResult:
+        engine = MultiTurnCampaignEngine(
+            target=self.target,
+            judge=self.judge,
+            conversation_budget=red_runtime.conversation_budget,
+            budget=ledger,
+        )
+        return await engine.run_case(
+            case,
+            strategy,
+            session_mode=plan.session_mode,
+            conversation_id=_conversation_id(campaign_id, case.id, replicate),
+        )
+
     def _persist_measurement_snapshot(
         self,
         *,
@@ -342,7 +434,7 @@ class CampaignLifecycleExecutor:
         budget_fingerprint: str,
         manifest: HeldOutEvaluationManifest | None,
     ) -> str:
-        if plan.purpose.value == "EVALUATION":
+        if plan.purpose == CampaignPurpose.EVALUATION:
             if manifest is None:
                 raise ValueError("EVALUATION requires a held-out manifest")
             snapshot = build_evaluation_campaign_measurement_snapshot(
@@ -375,7 +467,7 @@ class CampaignLifecycleExecutor:
         cases: tuple[AttackCase, ...],
         manifest: HeldOutEvaluationManifest | None,
     ) -> tuple[AttackCase, ...]:
-        if plan.purpose.value == "EVALUATION":
+        if plan.purpose == CampaignPurpose.EVALUATION:
             if manifest is None:
                 raise ValueError("EVALUATION requires a held-out manifest")
             return select_manifest_cases(cases, manifest=manifest, evaluation=True)
@@ -393,7 +485,7 @@ class CampaignLifecycleExecutor:
         attack_fingerprint: str,
         judge_fingerprint: str,
     ) -> None:
-        if plan.purpose.value != "EVALUATION":
+        if plan.purpose != CampaignPurpose.EVALUATION:
             return
         if plan.attack_policy_fingerprint != attack_fingerprint:
             raise ValueError("attack_policy_fingerprint does not match actual Red policy")

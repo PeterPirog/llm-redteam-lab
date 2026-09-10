@@ -284,6 +284,8 @@ class CampaignBudget(StrictModel):
     max_attacks: int = Field(gt=0)
     max_generations: int = Field(gt=0)
     max_turns_per_attack: int = Field(gt=0)
+    max_backtracks_per_attack: int = Field(ge=0, default=0)
+    max_branches_per_attack: int = Field(gt=0, default=1)
     max_model_calls: int = Field(gt=0)
     max_model_calls_by_role: dict[str, int] = Field(default_factory=dict)
     max_total_output_tokens: int = Field(gt=0)
@@ -294,7 +296,11 @@ class CampaignBudget(StrictModel):
     max_non_progress_attempts: int = Field(gt=0, default=3)
 
     @model_validator(mode="after")
-    def role_budgets_are_positive(self) -> CampaignBudget:
+    def budget_limits_are_valid(self) -> CampaignBudget:
+        if self.max_backtracks_per_attack > self.max_branches_per_attack - 1:
+            raise ValueError(
+                "max_backtracks_per_attack cannot exceed max_branches_per_attack - 1"
+            )
         for field_name, values in (
             ("max_model_calls_by_role", self.max_model_calls_by_role),
             ("max_output_tokens_by_role", self.max_output_tokens_by_role),
