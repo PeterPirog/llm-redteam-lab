@@ -25,8 +25,9 @@ def save_judge_calibration(
 ) -> str:
     """Persist calibration results immutably after recomputing all report metrics."""
 
+    normalized = _sorted_observations(observations)
     expected = summarize_judge_calibration(
-        observations,
+        normalized,
         judge_policy_fingerprint=report.judge_policy_fingerprint,
         judge_kind=report.judge_kind,
         confidence_level=report.overall.coverage_rate.confidence_level,
@@ -38,7 +39,7 @@ def save_judge_calibration(
         existing = session.get(JudgeCalibrationRunRow, report.content_hash)
         if existing is not None:
             restored = _load_from_session(session, report.content_hash)
-            if restored is not None and restored[0] == report and restored[1] == observations:
+            if restored is not None and restored[0] == report and restored[1] == normalized:
                 return report.content_hash
             raise ValueError("Judge calibration hash collision or corrupted stored report")
 
@@ -66,7 +67,7 @@ def save_judge_calibration(
                 comparable_blue_estimate=report.comparable_blue_estimate,
             )
         )
-        for item in observations:
+        for item in normalized:
             session.add(
                 JudgeCalibrationObservationRow(
                     observation_id=_observation_id(report.content_hash, item),
@@ -144,6 +145,12 @@ def _load_from_session(
     if recomputed != stored_report:
         raise ValueError("persisted Judge calibration does not match observation evidence")
     return stored_report, observations
+
+
+def _sorted_observations(
+    observations: tuple[JudgeCalibrationObservation, ...],
+) -> tuple[JudgeCalibrationObservation, ...]:
+    return tuple(sorted(observations, key=lambda item: (item.case_id, item.stress_condition)))
 
 
 def _observation_id(calibration_hash: str, item: JudgeCalibrationObservation) -> str:
