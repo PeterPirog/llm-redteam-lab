@@ -34,17 +34,28 @@ from .coverage import (
     eligible_mechanisms_for_runtime,
     summarize_mechanism_coverage,
 )
+from .fixture_adaptive import (
+    FixturePrimer,
+    FixturePrimedAgentAdaptiveRedStrategy,
+    FixturePrimedAgentMechanismAwareAdaptiveRedStrategy,
+)
 from .live_feedback import (
     LIVE_FEEDBACK_SCOPE,
     POST_RUN_DISCOVERY_FEEDBACK,
     TargetVisibleAdaptiveRedStrategy,
     TargetVisibleMechanismAwareAdaptiveRedStrategy,
 )
-from .mechanisms import MechanismCampaignMemory, MechanismMemorySnapshot, MechanismPolicy
+from .mechanisms import (
+    AttackMechanism,
+    MechanismCampaignMemory,
+    MechanismMemorySnapshot,
+    MechanismPolicy,
+)
 from .portfolio import RiskAwarePortfolioPolicy
 
 _RED_RUNTIME_VERSION = 2
 _AGENT_RED_RUNTIME_VERSION = 3
+_AGENT_FIXTURE_RED_RUNTIME_VERSION = 4
 
 
 class RedRuntimeDiagnostics(StrictModel):
@@ -66,6 +77,7 @@ def build_model_backed_red_policy_descriptor(
     campaign_budget: CampaignBudget,
     models: ModelsConfig,
     duplicate_similarity_threshold: float = 0.92,
+    fixture_priming_enabled: bool = False,
 ) -> dict[str, object]:
     """Build the exact campaign-start Red identity without making an inference call."""
 
@@ -73,6 +85,8 @@ def build_model_backed_red_policy_descriptor(
         raise ValueError("model-backed Red descriptor requires a model-backed policy")
     if not 0.0 <= duplicate_similarity_threshold <= 1.0:
         raise ValueError("duplicate_similarity_threshold must be between 0 and 1")
+    if fixture_priming_enabled and target_mode != TargetMode.AGENT:
+        raise ValueError("fixture-primed adaptive Red currently requires target_mode=AGENT")
 
     planner = models.role(
         ModelRole.RED_PLANNER,
@@ -115,6 +129,10 @@ def build_model_backed_red_policy_descriptor(
     if target_mode == TargetMode.AGENT:
         descriptor["runtime_version"] = _AGENT_RED_RUNTIME_VERSION
         descriptor["threat_lens"] = "agent-system-v1"
+    if fixture_priming_enabled:
+        descriptor["runtime_version"] = _AGENT_FIXTURE_RED_RUNTIME_VERSION
+        descriptor["fixture_priming"] = "immutable-environment-fixture-v1"
+        descriptor["first_turn_source"] = "fixture_legitimate_task"
     return descriptor
 
 
@@ -134,6 +152,7 @@ class RedStrategyRuntime:
         model_client: RoleModelClient,
         budget: BudgetLedger,
         duplicate_similarity_threshold: float = 0.92,
+        fixture_priming_enabled: bool = False,
     ) -> None:
         self._descriptor = build_model_backed_red_policy_descriptor(
             policy=policy,
@@ -144,6 +163,7 @@ class RedStrategyRuntime:
             campaign_budget=campaign_budget,
             models=models,
             duplicate_similarity_threshold=duplicate_similarity_threshold,
+            fixture_priming_enabled=fixture_priming_enabled,
         )
 
         self.policy = policy
@@ -159,6 +179,7 @@ class RedStrategyRuntime:
             budget=budget,
         )
         self.duplicate_similarity_threshold = duplicate_similarity_threshold
+        self.fixture_priming_enabled = fixture_priming_enabled
         self.tactic_memory = RedCampaignMemory()
         self.mechanism_memory = MechanismCampaignMemory()
         self._observed_families: set[str] = set()
@@ -173,13 +194,23 @@ class RedStrategyRuntime:
 
         return dict(self._descriptor)
 
-    def strategy_for(self, case: AttackCase) -> MultiTurnStrategy:
-        """Create one per-conversation strategy sharing only transcript-free campaign memory."""
+    def strategy_for(
+        self,
+        case: AttackCase,
+        *,
+        fixture_primer: FixturePrimer | None = None,
+    ) -> MultiTurnStrategy:
+        """Create one strategy while sharing only transcript-free campaign memory."""
 
         if case.interaction_mode != "multi_turn":
             raise ValueError(
                 f"model-backed Red currently requires multi_turn case, got {case.interaction_mode}"
             )
+        if fixture_primer is not None and not self.fixture_priming_enabled:
+            raise ValueError("fixture primer supplied to a runtime without fixture priming")
+        if fixture_primer is not None and self.target_mode != TargetMode.AGENT:
+            raise ValueError("fixture primer requires an AGENT target")
+
         common = {
             "case": case,
             "target_class": self.target_class,
@@ -189,36 +220,49 @@ class RedStrategyRuntime:
             "memory": self.tactic_memory,
             "duplicate_similarity_threshold": self.duplicate_similarity_threshold,
         }
-        adaptive_cls = (
-            TargetVisibleAgentAdaptiveRedStrategy
-            if self.target_mode == TargetMode.AGENT
-            else TargetVisibleAdaptiveRedStrategy
-        )
-        mechanism_cls = (
-            TargetVisibleAgentMechanismAwareAdaptiveRedStrategy
-            if self.target_mode == TargetMode.AGENT
-            else TargetVisibleMechanismAwareAdaptiveRedStrategy
-        )
+        if fixture_primer is not None:
+            adaptive_cls = FixturePrimedAgentAdaptiveRedStrategy
+            mechanism_cls = FixturePrimedAgentMechanismAwareAdaptiveRedStrategy
+        else:
+            adaptive_cls = (
+                TargetVisibleAgentAdaptiveRedStrategy
+                if self.target_mode == TargetMode.AGENT
+                else TargetVisibleAdaptiveRedStrategy
+            )
+            mechanism_cls = (
+                TargetVisibleAgentMechanismAwareAdaptiveRedStrategy
+                if self.target_mode == TargetMode.AGENT
+                else TargetVisibleMechanismAwareAdaptiveRedStrategy
+            )
+
         if self.policy == RedPolicyKind.ADAPTIVE:
+            if fixture_primer is not None:
+                return adaptive_cls(**common, fixture_primer=fixture_primer)
             return adaptive_cls(**common)
         if self.policy == RedPolicyKind.MECHANISM:
-            return mechanism_cls(
+            mechanism_kwargs = {
                 **common,
-                mechanism_memory=self.mechanism_memory,
-                mechanism_policy=MechanismPolicy(
+                "mechanism_memory": self.mechanism_memory,
+                "mechanism_policy": MechanismPolicy(
                     conversation_budget=self.conversation_budget
                 ),
-                cross_trial_learning_enabled=self.cross_trial_learning_enabled,
-            )
+                "cross_trial_learning_enabled": self.cross_trial_learning_enabled,
+            }
+            if fixture_primer is not None:
+                mechanism_kwargs["fixture_primer"] = fixture_primer
+            return mechanism_cls(**mechanism_kwargs)
         if self.policy == RedPolicyKind.PORTFOLIO:
-            return mechanism_cls(
+            portfolio_kwargs = {
                 **common,
-                mechanism_memory=self.mechanism_memory,
-                mechanism_policy=RiskAwarePortfolioPolicy(
+                "mechanism_memory": self.mechanism_memory,
+                "mechanism_policy": RiskAwarePortfolioPolicy(
                     conversation_budget=self.conversation_budget
                 ),
-                cross_trial_learning_enabled=self.cross_trial_learning_enabled,
-            )
+                "cross_trial_learning_enabled": self.cross_trial_learning_enabled,
+            }
+            if fixture_primer is not None:
+                portfolio_kwargs["fixture_primer"] = fixture_primer
+            return mechanism_cls(**portfolio_kwargs)
         raise ValueError(f"unsupported model-backed Red policy: {self.policy.value}")
 
     def observe(
@@ -257,12 +301,15 @@ class RedStrategyRuntime:
         )
         mechanism_coverage = None
         if mechanism_memory:
+            eligible = eligible_mechanisms_for_runtime(
+                session_mode=self.session_mode,
+                conversation_budget=self.conversation_budget,
+            )
+            if self.fixture_priming_enabled:
+                eligible = (AttackMechanism.FIXTURE_TRIGGER, *eligible)
             mechanism_coverage = summarize_mechanism_coverage(
                 tuple(mechanism_memory.values()),
-                eligible_mechanisms=eligible_mechanisms_for_runtime(
-                    session_mode=self.session_mode,
-                    conversation_budget=self.conversation_budget,
-                ),
+                eligible_mechanisms=eligible,
             )
         return RedRuntimeDiagnostics(
             tactic_memory=tactic_memory,
