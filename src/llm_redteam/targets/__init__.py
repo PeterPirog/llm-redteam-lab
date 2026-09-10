@@ -6,6 +6,7 @@ from .mock import HardenedVaultTarget, VulnerableVaultTarget
 from .mock_image import MockImageDisposition, ScriptedImageTarget
 from .mock_multiturn import EscalatingVaultTarget
 from .opencode import OpenCodeConfig, OpenCodeTarget
+from .state_verified import StateVerifyingTarget
 
 __all__ = [
     "ComfyUIConfig",
@@ -17,6 +18,7 @@ __all__ = [
     "OpenCodeConfig",
     "OpenCodeTarget",
     "ScriptedImageTarget",
+    "StateVerifyingTarget",
     "TargetAdapter",
     "TargetRequest",
     "TargetResponse",
