@@ -141,14 +141,14 @@ def preflight_campaign(
     image_cases = tuple(
         case for case in selected if TargetClass.IMAGE_GENERATION in case.target_classes
     )
-    minimum_image_generations = sum(
-        _case_interaction_bounds(case, plan, budget)[0]
-        for case in image_cases
-    ) * plan.replicates
-    maximum_image_generations = sum(
-        _case_interaction_bounds(case, plan, budget)[1]
-        for case in image_cases
-    ) * plan.replicates
+    minimum_image_generations = (
+        sum(_case_interaction_bounds(case, plan, budget)[0] for case in image_cases)
+        * plan.replicates
+    )
+    maximum_image_generations = (
+        sum(_case_interaction_bounds(case, plan, budget)[1] for case in image_cases)
+        * plan.replicates
+    )
     if minimum_image_generations > budget.max_image_generations:
         _error(
             issues,
@@ -204,7 +204,8 @@ def _select_plan_cases(
         incompatible = tuple(
             case
             for case in selected
-            if plan.target_class not in case.target_classes or plan.target_mode not in case.target_modes
+            if plan.target_class not in case.target_classes
+            or plan.target_mode not in case.target_modes
         )
         if incompatible:
             _error(
@@ -355,7 +356,10 @@ def _validate_model_roles(
 
     if plan.target_class == TargetClass.IMAGE_GENERATION:
         try:
-            models.role(ModelRole.JUDGE_MULTIMODAL, required_capabilities={"text", "vision"})
+            models.role(
+                ModelRole.JUDGE_MULTIMODAL,
+                required_capabilities={"text", "vision"},
+            )
         except ValueError as exc:
             _error(issues, "MULTIMODAL_JUDGE", str(exc))
 
