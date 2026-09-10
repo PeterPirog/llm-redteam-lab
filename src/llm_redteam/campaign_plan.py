@@ -75,6 +75,19 @@ class CampaignPlan(StrictModel):
         return self
 
 
+class CampaignRuntimeCapabilities(StrictModel):
+    """Execution surfaces that are actually available to this campaign runtime.
+
+    Empty defaults preserve fail-closed behavior. A fixture or environment role is
+    executable only when an injected runner explicitly advertises that exact
+    capability.
+    """
+
+    supported_fixture_refs: frozenset[str] = frozenset()
+    supported_artifact_refs: frozenset[str] = frozenset()
+    supported_environment_roles: frozenset[PayloadTurnRole] = frozenset()
+
+
 class CampaignPreflight(StrictModel):
     purpose: CampaignPurpose
     target_class: TargetClass
@@ -114,10 +127,12 @@ def preflight_campaign(
     budgets: BudgetConfigDocument,
     models: ModelsConfig | None = None,
     evaluation_manifest: HeldOutEvaluationManifest | None = None,
+    runtime_capabilities: CampaignRuntimeCapabilities | None = None,
 ) -> CampaignPreflight:
     """Validate a campaign before execution without making any inference call."""
 
     issues: list[PreflightIssue] = []
+    capabilities = runtime_capabilities or CampaignRuntimeCapabilities()
     if budgets.policy.require_explicit_profile and plan.budget_profile is None:
         _error(
             issues,
@@ -141,7 +156,7 @@ def preflight_campaign(
             f"planned trials={planned_trials} exceed max_attacks={budget.max_attacks}",
         )
 
-    _validate_payload_execution(plan, selected, budget, issues)
+    _validate_payload_execution(plan, selected, budget, capabilities, issues)
     _validate_security_objectives(selected, issues)
     min_interactions, max_interactions = _interaction_bounds(plan, selected, budget)
 
@@ -253,6 +268,7 @@ def _validate_payload_execution(
     plan: CampaignPlan,
     selected: tuple[AttackCase, ...],
     budget: CampaignBudget,
+    capabilities: CampaignRuntimeCapabilities,
     issues: list[PreflightIssue],
 ) -> None:
     for case in selected:
@@ -266,11 +282,23 @@ def _validate_payload_execution(
                 ),
             )
 
-        if case.payload.fixture is not None or case.payload.artifact is not None:
+        if (
+            case.payload.fixture is not None
+            and case.payload.fixture not in capabilities.supported_fixture_refs
+        ):
             _error(
                 issues,
                 "LIFECYCLE_RUNNER_REQUIRED",
-                f"case {case.id} requires a fixture/artifact-aware lifecycle runner",
+                f"case {case.id} fixture is not supported by the active lifecycle runner",
+            )
+        if (
+            case.payload.artifact is not None
+            and case.payload.artifact not in capabilities.supported_artifact_refs
+        ):
+            _error(
+                issues,
+                "LIFECYCLE_RUNNER_REQUIRED",
+                f"case {case.id} artifact is not supported by the active lifecycle runner",
             )
 
         if case.payload.turns is not None:
@@ -279,12 +307,15 @@ def _validate_payload_execution(
                 for turn in case.payload.turns
                 if turn.role != PayloadTurnRole.USER
             }
-            if environment_roles:
-                roles = ", ".join(sorted(role.value for role in environment_roles))
+            unsupported_roles = (
+                environment_roles - capabilities.supported_environment_roles
+            )
+            if unsupported_roles:
+                roles = ", ".join(sorted(role.value for role in unsupported_roles))
                 _error(
                     issues,
                     "ENVIRONMENT_RUNNER_REQUIRED",
-                    f"case {case.id} requires an environment-aware runner for roles: {roles}",
+                    f"case {case.id} requires unsupported environment roles: {roles}",
                 )
             if case.interaction_mode == "multi_turn" and plan.red_policy != RedPolicyKind.STATIC:
                 _error(
