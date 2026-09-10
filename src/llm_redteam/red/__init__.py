@@ -35,6 +35,7 @@ from .mechanisms import (
     MechanismPolicy,
 )
 from .portfolio import PortfolioCandidateScore, RiskAwarePortfolioPolicy
+from .scripted import ScriptedPayloadStrategy
 from .sequence_metrics import RedSequenceMetrics, SequenceRate, summarize_red_sequences
 
 __all__ = [
@@ -70,6 +71,7 @@ __all__ = [
     "RedPlanner",
     "RedSequenceMetrics",
     "RiskAwarePortfolioPolicy",
+    "ScriptedPayloadStrategy",
     "SequenceRate",
     "build_counterbalanced_pair_plan",
     "execute_paired_red_ablation",
