@@ -4,6 +4,10 @@ Adaptive Red search is intentionally optimized from prior outcomes. Its observed
 success rate is useful for attacker-search diagnostics but is not automatically an
 unbiased estimate of Blue vulnerability. Comparative Blue metrics require a frozen
 cross-trial attack policy, a pinned target and a validated held-out evaluation set.
+
+The evaluation layer also distinguishes fixed-corpus evidence from generalized
+population claims. The standard summarizer intentionally supports only fixed-corpus
+inference; broader claims require an explicit statistical-model/sampling backend.
 """
 
 from __future__ import annotations
@@ -17,6 +21,12 @@ from pydantic import model_validator
 
 from .domain import CompromiseOutcome, ExecutionResult, StrictModel
 from .evaluation_sets import EvaluationSetExposure, HeldOutEvaluationManifest
+from .inference_contract import (
+    EvaluationInferenceContract,
+    InferenceScope,
+    build_fixed_corpus_inference_contract,
+    require_supported_inference_scope,
+)
 from .metrics import CampaignMetrics, RateEstimate, summarize_campaign, wilson_rate
 
 
@@ -74,6 +84,7 @@ class EvaluationMetrics:
     evaluation_exposure: EvaluationSetExposure
     evaluation_case_count: int
     replicates_per_case: int
+    inference_contract: EvaluationInferenceContract
     comparable_blue_estimate: bool = True
 
 
@@ -111,6 +122,8 @@ def summarize_evaluation(
     protocol: MeasurementProtocol,
     manifest: HeldOutEvaluationManifest,
     confidence_level: float = 0.95,
+    *,
+    inference_scope: InferenceScope = InferenceScope.FIXED_CORPUS,
 ) -> EvaluationMetrics:
     """Produce comparative Blue metrics only after strict measurement-quality gates.
 
@@ -118,10 +131,15 @@ def summarize_evaluation(
     case. Unresolved attempts block a comparative estimate rather than being
     silently dropped from the denominator. This deliberately favors measurement
     validity over producing a score from incomplete evidence.
+
+    The default result is explicitly conditioned on the exact evaluation manifest.
+    Requesting ``GENERALIZED_POPULATION`` fails closed because the conventional
+    Wilson/binomial summary does not establish a population sampling model.
     """
 
     if protocol.purpose != CampaignPurpose.EVALUATION:
         raise ValueError("comparative Blue metrics require EVALUATION purpose")
+    require_supported_inference_scope(inference_scope)
 
     rows = list(executions)
     if not rows:
@@ -152,6 +170,11 @@ def summarize_evaluation(
             f"unresolved execution IDs: {unresolved}"
         )
 
+    inference_contract = build_fixed_corpus_inference_contract(
+        rows,
+        manifest,
+        confidence_level=confidence_level,
+    )
     return EvaluationMetrics(
         protocol=protocol,
         campaign=summarize_campaign(rows, confidence_level),
@@ -159,6 +182,7 @@ def summarize_evaluation(
         evaluation_exposure=manifest.exposure,
         evaluation_case_count=len(expected_case_ids),
         replicates_per_case=next(iter(replicate_counts)),
+        inference_contract=inference_contract,
     )
 
 
