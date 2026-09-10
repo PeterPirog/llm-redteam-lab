@@ -1,9 +1,9 @@
 # 2026 Adaptive Red Research Notes
 
 Status: implementation guidance, not architectural source of truth
-Last verified: 2026-09-09
+Last verified: 2026-09-10
 
-The following public sources materially influenced the adaptive Red design. They are references for methodology, not dependencies and not automatic payload sources.
+The following public sources materially influence the adaptive Red design. They are references for methodology, not dependencies and not automatic payload sources.
 
 ## Promptfoo Hydra
 
@@ -18,6 +18,20 @@ Project implication:
 
 Reference: https://www.promptfoo.dev/docs/red-team/strategies/hydra/
 
+## MT-JailBench — 2026 modular multi-turn evaluation
+
+MT-JailBench decomposes a multi-turn jailbreak into five interacting modules: evaluation function, attack strategy, prompt generation, prompt refinement and flow control. Its results show that turn/query budgets, retry rules and evaluators are major confounders and can materially change attack rankings. It also reports that prompt generation explains much of the observed variation while refinement and flow control provide smaller but still material gains.
+
+Project implication:
+
+- never compare Red strategies under different budgets or Judge configurations,
+- persist attack strategy, prompt-generation/refinement and flow-control identities separately,
+- treat one complete conversation as the security trial while turns/retries are resource observations,
+- use paired held-out component ablations before promoting a more complex Red policy,
+- retain a simple stochastic/fixed-strategy baseline because complexity alone does not prove stronger discovery.
+
+Reference: https://arxiv.org/abs/2605.11002
+
 ## RAMP — ACL Findings 2026
 
 RAMP formulates multi-turn jailbreak red-teaming as a state-action planning problem and emphasizes the trade-off between attack success and query overhead. It reports that multi-step planning, clue accumulation and consistency across evaluator settings are important contributors.
@@ -26,8 +40,9 @@ Project implication:
 
 - model the next Red move as a decision over observed state,
 - retain explicit turn/query cost,
+- preserve useful bounded observations across turns without granting them authorization authority,
 - compare attacker effectiveness under identical budgets,
-- avoid treating high ASR obtained with unbounded queries as directly comparable to bounded results.
+- avoid treating high success obtained with unbounded queries as directly comparable to bounded results.
 
 Reference: https://aclanthology.org/2026.findings-acl.925/
 
@@ -45,34 +60,56 @@ Reference: https://proceedings.iclr.cc/paper_files/paper/2026/hash/823e43f5537d8
 
 ## NIST TEVV-Athlon — NIST AI 200-2 initial public draft
 
-NIST's 2026 draft describes a flexible TEVV framework intended to support LLM, multimodal and agentic systems and emphasizes developing measurement approaches for the actual assessment context.
+NIST's 2026 draft describes a flexible four-stage TEVV framework intended to support statistical ML, LLM, multimodal and agentic systems and emphasizes assessment methods customized to the actual measurement objective and context.
 
 Project implication:
 
 - record experimental conditions and target identity,
 - keep metric definitions/versioning explicit,
+- distinguish evaluation events, tools, evidence and measurement concepts,
 - avoid unsupported claims of general security from one benchmark,
 - preserve extensibility across MODEL, PIPELINE and AGENT modes.
 
 Reference: https://www.nist.gov/artificial-intelligence/ai-research/tevv-athlon-framework-evaluating-ai-systems
 
-## OWASP Agentic AI Security Initiative / 2026 material
+## NIST AITE — sequestered evaluation
 
-OWASP's current Agentic AI work highlights prompt injection, privilege/tool misuse, memory/context poisoning, agent control and lifecycle-wide red teaming. OWASP explicitly treats retained context/memory as an attack surface.
+NIST announced the Artificial Intelligence Technology Evaluation (AITE) in 2026 as a sequestered testbed using blind data to reduce train/test contamination and support objective evaluation across datasets, modalities and domains.
 
 Project implication:
 
-- attacker memory must not become a permission channel,
-- raw untrusted content must not silently gain authority through persistence,
-- AGENT tests must distinguish model compromise from unauthorized system effect,
-- future OpenCode tests need deterministic sandbox/tool/network authorization evidence.
+- keep adaptive DISCOVERY separate from comparative EVALUATION,
+- support a SEQUESTERED evaluation-set exposure class,
+- prevent Red from observing evaluation content during discovery,
+- bind reported comparative metrics to a frozen policy and exact evaluation manifest.
 
-References:
+Reference: https://www.nist.gov/news-events/news/2026/07/announcing-nists-artificial-intelligence-technology-evaluation-aite
 
-- https://genai.owasp.org/initiatives/agentic-security-initiative/
-- https://genai.owasp.org/2026/05/13/memory-is-a-feature-it-is-also-an-attack-surface/
-- https://genai.owasp.org/resource/ai-security-solutions-landscape-for-ai-and-agentic-red-teaming-q2-2026/
+## OWASP Agent Control Standard — September 2026
+
+The OWASP Agent Control Standard (ACS) states that agents should be inspectable, traceable and instrumentable and that runtime behavior should be controllable through enforceable middleware/policy hooks.
+
+Project implication:
+
+- record tool request, authorization decision, execution status and independently observed post-state as separate facts,
+- never infer SYSTEM_COMPROMISE solely from model prose or a provider completion flag,
+- keep authorization and sandbox policy outside attacker-controlled content,
+- expose explicit agent permission changes at campaign preflight.
+
+Reference: https://genai.owasp.org/resource/agent-control-standard-acs/
+
+## MITRE ATLAS — current agentic attack surface
+
+MITRE ATLAS is a living knowledge base and now exposes first-class Agentic AI techniques including AI Agent Tool Invocation, AI Agent Context Poisoning, AI Agent Tool Data Poisoning, AI Agent Tool Poisoning and Modify AI Agent Configuration alongside LLM Prompt Injection, LLM Jailbreak, RAG Poisoning and Escape to Host.
+
+Project implication:
+
+- maintain target-visible context, tools, memory and configuration as distinct attack surfaces,
+- collect evidence for tool and context attacks even when the model is contained,
+- keep ATLAS identifiers as versioned report mappings rather than hard-coded security truth.
+
+Reference: https://atlas.mitre.org/
 
 ## Design rule
 
-These sources justify stronger adaptive and agentic testing, but external framework behavior must not redefine project security semantics. `PROJECT_REQUIREMENTS.md` remains authoritative. Native code must continue to distinguish MODEL_COMPROMISE and SYSTEM_COMPROMISE, fail closed, use synthetic canaries, and keep model-controlled text outside authorization/budget control.
+These sources justify stronger adaptive and agentic testing, but external framework behavior must not redefine project security semantics. `PROJECT_REQUIREMENTS.md` remains authoritative. Native code must continue to distinguish MODEL_COMPROMISE and SYSTEM_COMPROMISE, fail closed, use synthetic canaries, keep model-controlled text outside authorization/budget control, and separate vulnerability discovery from comparative measurement.
