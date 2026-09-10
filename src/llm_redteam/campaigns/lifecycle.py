@@ -1,0 +1,429 @@
+"""Fail-closed campaign lifecycle binding preflight, execution and persistence."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from hashlib import sha256
+from uuid import uuid4
+
+from ..budget import BudgetLedger, BudgetSnapshot
+from ..campaign_plan import CampaignPlan, RedPolicyKind, preflight_campaign
+from ..corpus import select_cases
+from ..domain import AttackCase, CompromiseOutcome, ExecutionResult
+from ..evaluation_protocol import (
+    DiscoveryMetrics,
+    EvaluationMetrics,
+    discovery_protocol,
+    held_out_evaluation_protocol,
+    summarize_discovery,
+    summarize_evaluation,
+)
+from ..evaluation_sets import (
+    HeldOutEvaluationManifest,
+    fingerprint_attack_case,
+    select_manifest_cases,
+)
+from ..judges.base import Judge
+from ..model_roles import ModelsConfig
+from ..red.scripted import ScriptedPayloadStrategy
+from ..runtime_config import BudgetConfigDocument
+from ..storage.campaign_status import CampaignTerminalStatus, finish_campaign
+from ..storage.evaluation_set_repository import save_evaluation_set_manifest
+from ..storage.measurement_repository import (
+    build_campaign_measurement_snapshot,
+    build_evaluation_campaign_measurement_snapshot,
+    fingerprint_attack_policy,
+    fingerprint_budget,
+    fingerprint_judge_policy,
+    save_campaign_measurement_snapshot,
+)
+from ..storage.repository import ExperimentRepository
+from ..targets.base import TargetAdapter
+from .engine import CampaignEngine
+from .multiturn import ConversationBudget, ConversationRunResult, MultiTurnCampaignEngine
+
+METRIC_DEFINITION_VERSION = "v2"
+_STATIC_POLICY_VERSION = 1
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignLifecycleResult:
+    """Auditable result of one persisted campaign lifecycle."""
+
+    campaign_id: str
+    target_snapshot_id: str
+    measurement_hash: str
+    status: CampaignTerminalStatus
+    executions: tuple[ExecutionResult, ...]
+    conversations: tuple[ConversationRunResult, ...]
+    metrics: DiscoveryMetrics | EvaluationMetrics | None
+    measurement_error: str | None
+    budget: BudgetSnapshot
+
+
+def static_attack_policy_descriptor(plan: CampaignPlan) -> dict[str, object]:
+    """Serializable identity for the deterministic corpus-driven Red policy."""
+
+    return {
+        "kind": RedPolicyKind.STATIC.value,
+        "version": _STATIC_POLICY_VERSION,
+        "session_mode": plan.session_mode.value,
+        "sequence_runner": "scripted-payload-v1",
+        "stop_after_first_violation": True,
+    }
+
+
+def deterministic_judge_policy_descriptor(*, canary: str) -> dict[str, object]:
+    """Hash-only descriptor for the built-in deterministic canary Judge."""
+
+    return {
+        "kind": "deterministic",
+        "implementation": "DeterministicJudge",
+        "version": 1,
+        "canary_sha256": sha256(canary.encode()).hexdigest(),
+    }
+
+
+class CampaignLifecycleExecutor:
+    """Execute only a currently valid campaign plan and persist measurement truth.
+
+    The executor intentionally supports static Red first. Adaptive/model-backed Red
+    will be wired through this same boundary after the deterministic lifecycle is
+    proven. This prevents inference code from bypassing preflight or provenance.
+    """
+
+    def __init__(
+        self,
+        *,
+        target: TargetAdapter,
+        judge: Judge,
+        repository: ExperimentRepository,
+        budgets: BudgetConfigDocument,
+        judge_policy_descriptor: object,
+        models: ModelsConfig | None = None,
+    ) -> None:
+        self.target = target
+        self.judge = judge
+        self.repository = repository
+        self.budgets = budgets
+        self.judge_policy_descriptor = judge_policy_descriptor
+        self.models = models
+
+    async def run(
+        self,
+        *,
+        plan: CampaignPlan,
+        cases: tuple[AttackCase, ...],
+        evaluation_manifest: HeldOutEvaluationManifest | None = None,
+        campaign_id: str | None = None,
+    ) -> CampaignLifecycleResult:
+        """Run one campaign after recomputing all deterministic preflight gates."""
+
+        if plan.red_policy != RedPolicyKind.STATIC:
+            raise ValueError(
+                "campaign lifecycle currently accepts only red_policy=static; "
+                "model-backed Red must not bypass the lifecycle integration gate"
+            )
+
+        preflight = preflight_campaign(
+            plan=plan,
+            cases=cases,
+            budgets=self.budgets,
+            models=self.models,
+            evaluation_manifest=evaluation_manifest,
+        )
+        if not preflight.ready:
+            errors = [
+                f"{issue.code}: {issue.message}"
+                for issue in preflight.issues
+                if issue.severity.value == "ERROR"
+            ]
+            raise ValueError("campaign preflight blocked execution: " + "; ".join(errors))
+
+        selected = self._selected_cases(plan, cases, evaluation_manifest)
+        profile_name, effective_budget = self.budgets.profile(plan.budget_profile)
+        ledger = BudgetLedger(effective_budget)
+
+        target_snapshot_id = self.repository.target_snapshot_id(self.target.identity)
+        if plan.target_snapshot_id is not None and plan.target_snapshot_id != target_snapshot_id:
+            raise ValueError("configured target_snapshot_id does not match actual Blue target")
+
+        attack_descriptor = static_attack_policy_descriptor(plan)
+        attack_fingerprint = fingerprint_attack_policy(attack_descriptor)
+        judge_fingerprint = fingerprint_judge_policy(self.judge_policy_descriptor)
+        budget_fingerprint = fingerprint_budget(effective_budget.model_dump(mode="json"))
+        self._validate_evaluation_identity(
+            plan,
+            attack_fingerprint=attack_fingerprint,
+            judge_fingerprint=judge_fingerprint,
+        )
+
+        resolved_campaign_id = campaign_id or f"campaign-{uuid4().hex}"
+        configuration_hash = _canonical_hash(
+            {
+                "plan": plan.model_dump(mode="json"),
+                "selected_case_ids": [case.id for case in selected],
+                "budget_profile": profile_name,
+                "budget_fingerprint": budget_fingerprint,
+                "target_snapshot_id": target_snapshot_id,
+                "metric_definition_version": METRIC_DEFINITION_VERSION,
+            }
+        )
+
+        self.repository.create_schema()
+        persisted_snapshot_id = self.repository.save_target(self.target.identity)
+        if persisted_snapshot_id != target_snapshot_id:
+            raise RuntimeError("target snapshot identity changed during campaign setup")
+
+        if evaluation_manifest is not None:
+            save_evaluation_set_manifest(self.repository.engine, evaluation_manifest)
+
+        self.repository.start_campaign(
+            campaign_id=resolved_campaign_id,
+            target_snapshot_id=target_snapshot_id,
+            configuration_hash=configuration_hash,
+            metric_definition_version=METRIC_DEFINITION_VERSION,
+        )
+
+        measurement_hash = ""
+        executions: list[ExecutionResult] = []
+        conversations: list[ConversationRunResult] = []
+        try:
+            measurement_hash = self._persist_measurement_snapshot(
+                campaign_id=resolved_campaign_id,
+                configuration_hash=configuration_hash,
+                target_snapshot_id=target_snapshot_id,
+                plan=plan,
+                attack_fingerprint=attack_fingerprint,
+                judge_fingerprint=judge_fingerprint,
+                budget_fingerprint=budget_fingerprint,
+                manifest=evaluation_manifest,
+            )
+            for replicate in range(plan.replicates):
+                for case in selected:
+                    attack_instance_id = _attack_instance_id(
+                        resolved_campaign_id,
+                        case.id,
+                        replicate,
+                    )
+                    self.repository.record_attack(
+                        attack_instance_id=attack_instance_id,
+                        campaign_id=resolved_campaign_id,
+                        case_id=case.id,
+                        attack_family=case.attack_family[0],
+                        interaction_mode=case.interaction_mode,
+                        payload_hash=fingerprint_attack_case(case).content_hash,
+                    )
+                    if case.interaction_mode == "multi_turn":
+                        conversation = await self._run_static_conversation(
+                            case=case,
+                            ledger=ledger,
+                            plan=plan,
+                            campaign_id=resolved_campaign_id,
+                            replicate=replicate,
+                        )
+                        self.repository.save_conversation(
+                            conversation,
+                            attack_instance_id=attack_instance_id,
+                            target_snapshot_id=target_snapshot_id,
+                        )
+                        conversations.append(conversation)
+                        executions.append(conversation.execution)
+                    else:
+                        execution = await self._run_static_single_turn(
+                            case=case,
+                            ledger=ledger,
+                            campaign_id=resolved_campaign_id,
+                            replicate=replicate,
+                        )
+                        self.repository.save_execution(
+                            execution,
+                            attack_instance_id=attack_instance_id,
+                            target_snapshot_id=target_snapshot_id,
+                        )
+                        executions.append(execution)
+        except Exception:
+            finish_campaign(
+                self.repository.engine,
+                campaign_id=resolved_campaign_id,
+                status=CampaignTerminalStatus.FAILED,
+            )
+            raise
+
+        metrics: DiscoveryMetrics | EvaluationMetrics | None
+        measurement_error: str | None = None
+        if plan.purpose.value == "DISCOVERY":
+            metrics = summarize_discovery(executions)
+            status = CampaignTerminalStatus.COMPLETED
+        else:
+            assert evaluation_manifest is not None
+            try:
+                metrics = summarize_evaluation(
+                    executions,
+                    held_out_evaluation_protocol(),
+                    evaluation_manifest,
+                )
+                status = CampaignTerminalStatus.COMPLETED
+            except ValueError as exc:
+                metrics = None
+                measurement_error = str(exc)
+                status = CampaignTerminalStatus.INCONCLUSIVE
+
+        finish_campaign(
+            self.repository.engine,
+            campaign_id=resolved_campaign_id,
+            status=status,
+        )
+        return CampaignLifecycleResult(
+            campaign_id=resolved_campaign_id,
+            target_snapshot_id=target_snapshot_id,
+            measurement_hash=measurement_hash,
+            status=status,
+            executions=tuple(executions),
+            conversations=tuple(conversations),
+            metrics=metrics,
+            measurement_error=measurement_error,
+            budget=ledger.snapshot(),
+        )
+
+    async def _run_static_single_turn(
+        self,
+        *,
+        case: AttackCase,
+        ledger: BudgetLedger,
+        campaign_id: str,
+        replicate: int,
+    ) -> ExecutionResult:
+        engine = CampaignEngine(target=self.target, judge=self.judge, budget=ledger)
+        return await engine.run_case(
+            case,
+            execution_id=_execution_id(campaign_id, case.id, replicate),
+        )
+
+    async def _run_static_conversation(
+        self,
+        *,
+        case: AttackCase,
+        ledger: BudgetLedger,
+        plan: CampaignPlan,
+        campaign_id: str,
+        replicate: int,
+    ) -> ConversationRunResult:
+        if case.payload.turns is None:
+            raise ValueError(f"static multi-turn case {case.id} has no explicit turn sequence")
+        engine = MultiTurnCampaignEngine(
+            target=self.target,
+            judge=self.judge,
+            conversation_budget=ConversationBudget(
+                max_turns=len(case.payload.turns),
+                max_backtracks=0,
+                max_branches=1,
+                continue_after_success=False,
+            ),
+            budget=ledger,
+        )
+        return await engine.run_case(
+            case,
+            ScriptedPayloadStrategy(case),
+            session_mode=plan.session_mode,
+            conversation_id=_conversation_id(campaign_id, case.id, replicate),
+        )
+
+    def _persist_measurement_snapshot(
+        self,
+        *,
+        campaign_id: str,
+        configuration_hash: str,
+        target_snapshot_id: str,
+        plan: CampaignPlan,
+        attack_fingerprint: str,
+        judge_fingerprint: str,
+        budget_fingerprint: str,
+        manifest: HeldOutEvaluationManifest | None,
+    ) -> str:
+        if plan.purpose.value == "EVALUATION":
+            if manifest is None:
+                raise ValueError("EVALUATION requires a held-out manifest")
+            snapshot = build_evaluation_campaign_measurement_snapshot(
+                campaign_id=campaign_id,
+                target_snapshot_id=target_snapshot_id,
+                campaign_configuration_hash=configuration_hash,
+                metric_definition_version=METRIC_DEFINITION_VERSION,
+                protocol=held_out_evaluation_protocol(),
+                attack_policy_fingerprint=attack_fingerprint,
+                judge_policy_fingerprint=judge_fingerprint,
+                budget_fingerprint=budget_fingerprint,
+                manifest=manifest,
+            )
+        else:
+            snapshot = build_campaign_measurement_snapshot(
+                campaign_id=campaign_id,
+                target_snapshot_id=target_snapshot_id,
+                campaign_configuration_hash=configuration_hash,
+                metric_definition_version=METRIC_DEFINITION_VERSION,
+                protocol=discovery_protocol(),
+                attack_policy_fingerprint=attack_fingerprint,
+                judge_policy_fingerprint=judge_fingerprint,
+                budget_fingerprint=budget_fingerprint,
+            )
+        return save_campaign_measurement_snapshot(self.repository.engine, snapshot)
+
+    @staticmethod
+    def _selected_cases(
+        plan: CampaignPlan,
+        cases: tuple[AttackCase, ...],
+        manifest: HeldOutEvaluationManifest | None,
+    ) -> tuple[AttackCase, ...]:
+        if plan.purpose.value == "EVALUATION":
+            if manifest is None:
+                raise ValueError("EVALUATION requires a held-out manifest")
+            return select_manifest_cases(cases, manifest=manifest, evaluation=True)
+        return select_cases(
+            cases,
+            target_class=plan.target_class,
+            target_mode=plan.target_mode,
+            enabled_only=plan.enabled_only,
+        )
+
+    @staticmethod
+    def _validate_evaluation_identity(
+        plan: CampaignPlan,
+        *,
+        attack_fingerprint: str,
+        judge_fingerprint: str,
+    ) -> None:
+        if plan.purpose.value != "EVALUATION":
+            return
+        if plan.attack_policy_fingerprint != attack_fingerprint:
+            raise ValueError("attack_policy_fingerprint does not match actual Red policy")
+        if plan.judge_policy_fingerprint != judge_fingerprint:
+            raise ValueError("judge_policy_fingerprint does not match actual Judge policy")
+
+
+def _canonical_hash(value: object) -> str:
+    raw = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return sha256(raw.encode()).hexdigest()
+
+
+def _attack_instance_id(campaign_id: str, case_id: str, replicate: int) -> str:
+    return "attack-" + sha256(
+        f"{campaign_id}:{case_id}:{replicate}".encode()
+    ).hexdigest()[:24]
+
+
+def _execution_id(campaign_id: str, case_id: str, replicate: int) -> str:
+    return "exec-" + sha256(
+        f"{campaign_id}:{case_id}:{replicate}".encode()
+    ).hexdigest()[:24]
+
+
+def _conversation_id(campaign_id: str, case_id: str, replicate: int) -> str:
+    return "conv-" + sha256(
+        f"{campaign_id}:{case_id}:{replicate}".encode()
+    ).hexdigest()[:24]
