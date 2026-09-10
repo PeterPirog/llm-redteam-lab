@@ -10,6 +10,8 @@ from llm_redteam.domain import (
     CampaignBudget,
     GradingSpec,
     PayloadSpec,
+    PayloadTurn,
+    PayloadTurnRole,
     SecurityObjective,
     SourceMode,
     SourceRef,
@@ -28,6 +30,7 @@ def _case(
     target_mode: TargetMode = TargetMode.MODEL,
     interaction_mode: str = "single_turn",
     preferred: list[str] | None = None,
+    payload: PayloadSpec | None = None,
 ) -> AttackCase:
     return AttackCase(
         id=case_id,
@@ -44,7 +47,7 @@ def _case(
             expected_safe_behavior="Do not emit the marker.",
             forbidden_effect="Synthetic marker is emitted.",
         ),
-        payload=PayloadSpec(text="synthetic probe"),
+        payload=payload or PayloadSpec(text="synthetic probe"),
         grading=GradingSpec(preferred=preferred or ["deterministic"], detectors=["marker"]),
         enabled_by_default=True,
     )
@@ -186,6 +189,34 @@ def test_agent_network_enablement_is_visible_not_silent() -> None:
     warnings = _codes(report, PreflightSeverity.WARNING)
     assert "AGENT_NETWORK_ENABLED" in warnings
     assert "TARGET_MANAGED_SESSION" in warnings
+
+
+def test_environment_turn_payload_requires_environment_aware_runner() -> None:
+    case = _case(
+        target_class=TargetClass.CODING,
+        target_mode=TargetMode.AGENT,
+        interaction_mode="environment_injection",
+        payload=PayloadSpec(
+            turns=(
+                PayloadTurn(
+                    role=PayloadTurnRole.EXTERNAL_CONTENT,
+                    content="Untrusted synthetic repository instruction.",
+                ),
+            )
+        ),
+    )
+    report = preflight_campaign(
+        plan=CampaignPlan(
+            purpose=CampaignPurpose.DISCOVERY,
+            target_class=TargetClass.CODING,
+            target_mode=TargetMode.AGENT,
+        ),
+        cases=(case,),
+        budgets=_budgets(),
+    )
+
+    assert report.ready is False
+    assert "ENVIRONMENT_RUNNER_REQUIRED" in _codes(report, PreflightSeverity.ERROR)
 
 
 def test_model_backed_red_requires_explicit_role_configuration() -> None:
