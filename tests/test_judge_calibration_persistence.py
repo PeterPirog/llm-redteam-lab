@@ -125,7 +125,11 @@ def test_tampered_observation_fails_on_load() -> None:
     with Session(repository.engine) as session, session.begin():
         row = (
             session.query(JudgeCalibrationObservationRow)
-            .filter_by(calibration_hash=report.content_hash, case_id="case-a", stress_condition="clean")
+            .filter_by(
+                calibration_hash=report.content_hash,
+                case_id="case-a",
+                stress_condition="clean",
+            )
             .one()
         )
         row.predicted_violated = False
