@@ -18,10 +18,16 @@ class ScriptedPayloadStrategy:
     def __init__(self, case: AttackCase) -> None:
         if case.interaction_mode != "multi_turn" or case.payload.turns is None:
             raise ValueError("ScriptedPayloadStrategy requires a multi_turn turns payload")
-        unsupported = {turn.role for turn in case.payload.turns if turn.role != PayloadTurnRole.USER}
+        unsupported = {
+            turn.role
+            for turn in case.payload.turns
+            if turn.role != PayloadTurnRole.USER
+        }
         if unsupported:
             roles = ", ".join(sorted(role.value for role in unsupported))
-            raise ValueError(f"environment-aware payload roles require a fixture runner: {roles}")
+            raise ValueError(
+                f"environment-aware payload roles require a fixture runner: {roles}"
+            )
         self.case = case
 
     async def next_turn(self, state: ConversationState) -> TurnProposal | None:
