@@ -3,6 +3,7 @@ from hashlib import sha256
 
 import pytest
 
+from llm_redteam.budget import BudgetLedger
 from llm_redteam.campaign_plan import CampaignPlan, RedPolicyKind, preflight_campaign
 from llm_redteam.campaigns.lifecycle import (
     CampaignLifecycleExecutor,
@@ -39,7 +40,7 @@ from llm_redteam.storage.measurement_repository import (
     load_campaign_measurement_snapshot,
 )
 from llm_redteam.storage.repository import ExperimentRepository
-from llm_redteam.targets.base import TargetRequest, TargetResponse
+from llm_redteam.targets.base import SessionMode, TargetRequest, TargetResponse
 from llm_redteam.targets.mock_multiturn import EscalatingVaultTarget
 
 CANARY = "RT_CANARY_PINEAPPLE_739"
@@ -213,7 +214,7 @@ def test_adaptive_discovery_runs_through_persisted_lifecycle() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=plan.session_mode,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=models,
     )
@@ -242,11 +243,7 @@ def test_held_out_adaptive_evaluation_freezes_cross_trial_learning() -> None:
         purpose=CampaignPurpose.EVALUATION,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=CampaignPlan(
-            purpose=CampaignPurpose.DISCOVERY,
-            target_class=TargetClass.WRITING,
-            target_mode=TargetMode.MODEL,
-        ).session_mode,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=budget,
         models=models,
     )
@@ -294,11 +291,7 @@ def test_adaptive_policy_descriptor_changes_with_model_or_flow_budget() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=CampaignPlan(
-            purpose=CampaignPurpose.DISCOVERY,
-            target_class=TargetClass.WRITING,
-            target_mode=TargetMode.MODEL,
-        ).session_mode,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=_models(),
     )
@@ -307,11 +300,7 @@ def test_adaptive_policy_descriptor_changes_with_model_or_flow_budget() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=CampaignPlan(
-            purpose=CampaignPurpose.DISCOVERY,
-            target_class=TargetClass.WRITING,
-            target_mode=TargetMode.MODEL,
-        ).session_mode,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=_models(planner_model="planner-local-v2"),
     )
@@ -320,11 +309,7 @@ def test_adaptive_policy_descriptor_changes_with_model_or_flow_budget() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=CampaignPlan(
-            purpose=CampaignPurpose.DISCOVERY,
-            target_class=TargetClass.WRITING,
-            target_mode=TargetMode.MODEL,
-        ).session_mode,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(max_backtracks=0, max_branches=1),
         models=_models(),
     )
@@ -335,21 +320,13 @@ def test_adaptive_policy_descriptor_changes_with_model_or_flow_budget() -> None:
 
 def test_portfolio_runtime_uses_risk_aware_policy_without_extra_model_call() -> None:
     budget = _budget()
-    ledger_repository = ExperimentRepository.from_url("sqlite+pysqlite:///:memory:")
-    del ledger_repository
-    from llm_redteam.budget import BudgetLedger
-
     scripts = _scripts()
     runtime = RedStrategyRuntime(
         policy=RedPolicyKind.PORTFOLIO,
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=CampaignPlan(
-            purpose=CampaignPurpose.DISCOVERY,
-            target_class=TargetClass.WRITING,
-            target_mode=TargetMode.MODEL,
-        ).session_mode,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=budget,
         models=_models(),
         model_client=scripts,
