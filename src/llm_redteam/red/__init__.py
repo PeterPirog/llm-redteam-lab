@@ -25,6 +25,12 @@ from .adaptive import (
 from .base import AttackHypothesis, AttackObservation, RedPlan, RedPlanner
 from .efficiency import AdaptiveRedEfficiency, summarize_adaptive_red
 from .heuristic import HeuristicRedPlanner
+from .live_feedback import (
+    LIVE_FEEDBACK_SCOPE,
+    TargetVisibleAdaptiveRedStrategy,
+    TargetVisibleMechanismAwareAdaptiveRedStrategy,
+    target_visible_conversation_state,
+)
 from .mechanism_adaptive import MechanismAwareAdaptiveRedStrategy, MechanismRedDecision
 from .mechanisms import (
     AttackMechanism,
@@ -53,6 +59,7 @@ __all__ = [
     "AttackMechanism",
     "AttackObservation",
     "HeuristicRedPlanner",
+    "LIVE_FEEDBACK_SCOPE",
     "MechanismAwareAdaptiveRedStrategy",
     "MechanismCampaignMemory",
     "MechanismGuidance",
@@ -82,6 +89,8 @@ __all__ = [
     "RiskAwarePortfolioPolicy",
     "ScriptedPayloadStrategy",
     "SequenceRate",
+    "TargetVisibleAdaptiveRedStrategy",
+    "TargetVisibleMechanismAwareAdaptiveRedStrategy",
     "build_counterbalanced_pair_plan",
     "execute_paired_red_ablation",
     "observation_from_run",
@@ -89,4 +98,5 @@ __all__ = [
     "summarize_adaptive_red",
     "summarize_paired_red_ablation",
     "summarize_red_sequences",
+    "target_visible_conversation_state",
 ]
