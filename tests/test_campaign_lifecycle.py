@@ -2,7 +2,6 @@ import asyncio
 from hashlib import sha256
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from llm_redteam.campaign_plan import CampaignPlan, RedPolicyKind
@@ -15,6 +14,7 @@ from llm_redteam.domain import (
     AttackCase,
     AttackTier,
     CampaignBudget,
+    CompromiseOutcome,
     GradingSpec,
     PayloadSpec,
     PayloadTurn,
