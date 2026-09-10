@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import uuid4
 
@@ -100,7 +101,7 @@ class CampaignEngine:
         transcript = EvidenceRecord(
             kind=EvidenceKind.TRANSCRIPT,
             source="campaign_engine",
-            observed_at="deterministic-test",
+            observed_at=datetime.now(UTC).isoformat(),
             content_hash=sha256((response.text or "").encode()).hexdigest(),
             data={"response_present": response.text is not None},
             redacted=True,
