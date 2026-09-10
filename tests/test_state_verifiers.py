@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,7 +22,11 @@ from llm_redteam.domain import (
     TargetMode,
 )
 from llm_redteam.judges import AgentActionPolicy, SystemStateJudge
-from llm_redteam.state_verifiers import FilesystemTreeVerifier, LocalGitRefVerifier
+from llm_redteam.state_verifiers import (
+    FilesystemTreeVerifier,
+    LocalGitRefVerifier,
+    VerifierSnapshot,
+)
 from llm_redteam.targets.base import TargetRequest, TargetResponse
 from llm_redteam.targets.state_verified import StateVerifyingTarget
 
@@ -116,15 +121,20 @@ def _judge() -> SystemStateJudge:
     )
 
 
-@pytest.mark.asyncio
-async def test_state_verifying_target_proves_workspace_effect(tmp_path: Path) -> None:
+def _execute(wrapped: StateVerifyingTarget) -> TargetResponse:
+    return asyncio.run(
+        wrapped.execute(TargetRequest(attack_id="STATE-001", prompt="test"))
+    )
+
+
+def test_state_verifying_target_proves_workspace_effect(tmp_path: Path) -> None:
     (tmp_path / "protected.txt").write_text("before", encoding="utf-8")
     wrapped = StateVerifyingTarget(
         _FilesystemMutationTarget(tmp_path, mutate=True),
         (FilesystemTreeVerifier(tmp_path, verifier_id=WORKSPACE_VERIFIER),),
     )
 
-    response = await wrapped.execute(TargetRequest(attack_id="STATE-001", prompt="test"))
+    response = _execute(wrapped)
     state_evidence = [item for item in response.evidence if item.kind == EvidenceKind.SYSTEM_STATE]
 
     assert len(state_evidence) == 1
@@ -138,15 +148,14 @@ async def test_state_verifying_target_proves_workspace_effect(tmp_path: Path) ->
     assert judgment.system_compromise is True
 
 
-@pytest.mark.asyncio
-async def test_state_verifying_target_proves_absence_of_workspace_effect(tmp_path: Path) -> None:
+def test_state_verifying_target_proves_absence_of_workspace_effect(tmp_path: Path) -> None:
     (tmp_path / "protected.txt").write_text("unchanged", encoding="utf-8")
     wrapped = StateVerifyingTarget(
         _FilesystemMutationTarget(tmp_path, mutate=False),
         (FilesystemTreeVerifier(tmp_path, verifier_id=WORKSPACE_VERIFIER),),
     )
 
-    response = await wrapped.execute(TargetRequest(attack_id="STATE-001", prompt="test"))
+    response = _execute(wrapped)
     judgment = _judge().evaluate(_case(), response)
 
     assert judgment.objective_violated is True
@@ -156,14 +165,13 @@ async def test_state_verifying_target_proves_absence_of_workspace_effect(tmp_pat
     assert state_evidence[0].data["state"] == AgentEffectState.ABSENT.value
 
 
-@pytest.mark.asyncio
-async def test_untraced_workspace_mutation_is_system_only_compromise(tmp_path: Path) -> None:
+def test_untraced_workspace_mutation_is_system_only_compromise(tmp_path: Path) -> None:
     wrapped = StateVerifyingTarget(
         _FilesystemMutationTarget(tmp_path, mutate=True, emit_action=False),
         (FilesystemTreeVerifier(tmp_path, verifier_id=WORKSPACE_VERIFIER),),
     )
 
-    response = await wrapped.execute(TargetRequest(attack_id="STATE-001", prompt="test"))
+    response = _execute(wrapped)
     judgment = _judge().evaluate(_case(), response)
 
     assert judgment.objective_violated is True
@@ -173,8 +181,7 @@ async def test_untraced_workspace_mutation_is_system_only_compromise(tmp_path: P
     assert state_evidence[0].data["control_event_id"].startswith("orphan-state-")
 
 
-@pytest.mark.asyncio
-async def test_incomplete_workspace_verifier_prevents_pass(tmp_path: Path) -> None:
+def test_incomplete_workspace_verifier_prevents_pass(tmp_path: Path) -> None:
     missing_root = tmp_path / "missing"
     target_root = tmp_path / "target"
     target_root.mkdir()
@@ -183,7 +190,7 @@ async def test_incomplete_workspace_verifier_prevents_pass(tmp_path: Path) -> No
         (FilesystemTreeVerifier(missing_root, verifier_id=WORKSPACE_VERIFIER),),
     )
 
-    response = await wrapped.execute(TargetRequest(attack_id="STATE-001", prompt="test"))
+    response = _execute(wrapped)
     judgment = _judge().evaluate(_case(), response)
 
     assert response.provider_metadata["state_verification_complete"] is False
@@ -191,8 +198,7 @@ async def test_incomplete_workspace_verifier_prevents_pass(tmp_path: Path) -> No
     assert judgment.system_compromise is False
 
 
-@pytest.mark.asyncio
-async def test_changed_state_with_multiple_candidate_actions_is_not_over_attributed(
+def test_changed_state_with_multiple_candidate_actions_is_not_over_attributed(
     tmp_path: Path,
 ) -> None:
     wrapped = StateVerifyingTarget(
@@ -200,7 +206,7 @@ async def test_changed_state_with_multiple_candidate_actions_is_not_over_attribu
         (FilesystemTreeVerifier(tmp_path, verifier_id=WORKSPACE_VERIFIER),),
     )
 
-    response = await wrapped.execute(TargetRequest(attack_id="STATE-001", prompt="test"))
+    response = _execute(wrapped)
     states = [
         item.data["state"]
         for item in response.evidence
@@ -229,10 +235,9 @@ def test_filesystem_snapshot_is_hash_first_and_integrity_bound(tmp_path: Path) -
     assert secret_value not in serialized
     assert len(snapshot.components) == 1
 
+    forged = snapshot.model_copy(update={"state_hash": "f" * 64})
     with pytest.raises(ValueError, match="state_hash"):
-        snapshot.model_copy(update={"state_hash": "f" * 64}).model_validate(
-            snapshot.model_copy(update={"state_hash": "f" * 64}).model_dump()
-        )
+        VerifierSnapshot.model_validate(forged.model_dump())
 
 
 def test_filesystem_snapshot_detects_content_change(tmp_path: Path) -> None:
