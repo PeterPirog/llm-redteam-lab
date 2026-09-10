@@ -264,6 +264,17 @@ def _validate_payload_execution(
     *,
     fixture_runner_available: bool,
 ) -> None:
+    fixture_cases = tuple(case for case in selected if case.payload.fixture is not None)
+    if fixture_cases and len(fixture_cases) != len(selected):
+        _error(
+            issues,
+            "MIXED_FIXTURE_CAMPAIGN_UNSUPPORTED",
+            (
+                "fixture-aware and ordinary cases must run in separate campaigns so one "
+                "attack-policy fingerprint describes every trial in the campaign"
+            ),
+        )
+
     for case in selected:
         if plan.red_policy.model_backed and case.interaction_mode != "multi_turn":
             _error(
