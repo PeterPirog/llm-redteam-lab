@@ -1,4 +1,4 @@
-version: 6
+version: 7
 corpus_id: llm-redteam-lab-corpus-v1
 last_verified: 2026-09-10
 
@@ -24,6 +24,7 @@ native_case_sets:
   - native/baseline/inert-techniques-v1.yaml
   - native/multiturn/reference-discovery-v1.yaml
   - native/multiturn/synthetic-sequences-v1.yaml
+  - native/agent/adaptive-system-boundaries-v1.yaml
 
 native_fixtures:
   - fixtures/coding/repo_injection_canary/fixture.yaml
