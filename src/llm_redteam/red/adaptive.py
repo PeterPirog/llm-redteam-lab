@@ -27,6 +27,11 @@ from ..domain import AttackCase, CompromiseOutcome, StrictModel, TargetClass, Ta
 from ..model_client import ModelMessage, ModelRequest, RoleModelClient
 from ..model_roles import ModelRole
 from ..targets.base import SessionMode
+from .lineage import (
+    branch_transition_turn_ids,
+    logical_path_turn_ids,
+    path_transition_turn_ids,
+)
 
 
 class RedPhase(StrEnum):
@@ -68,9 +73,22 @@ class RedDecision(StrictModel):
 
 
 class RedLearningRecord(StrictModel):
+    """Transcript-free outcome and branch-aware search-credit record.
+
+    ``tactics`` / ``phase_tactics`` preserve chronological attempts for exploration
+    accounting. Logical-path and transition fields prevent backtracking from
+    fabricating sibling transitions or rewarding an abandoned branch after a later
+    sibling succeeds. Defaults preserve compatibility with legacy records.
+    """
+
     attack_family: str = Field(min_length=1)
     tactics: tuple[str, ...] = ()
     phase_tactics: tuple[str, ...] = ()
+    logical_tactics: tuple[str, ...] = ()
+    logical_phase_tactics: tuple[str, ...] = ()
+    successful_tactics: tuple[str, ...] = ()
+    attempted_transitions: tuple[str, ...] = ()
+    successful_transitions: tuple[str, ...] = ()
     successful: bool
     error: bool
     target_interactions: int = Field(ge=0)
@@ -178,18 +196,48 @@ class RedCampaignMemory:
         for row in rows:
             for tactic in set(row.tactics):
                 tactic_trials[tactic] += 1
-                if row.successful:
-                    tactic_successes[tactic] += 1
 
-            steps = row.phase_tactics or row.tactics
-            for left, right in zip(steps, steps[1:], strict=False):
-                transition = f"{left}->{right}"
-                transition_trials[transition] += 1
-                if row.successful:
-                    transition_successes[transition] += 1
+            credited_tactics = row.successful_tactics
+            if row.successful and not credited_tactics:
+                credited_tactics = row.logical_tactics or row.tactics
+            for tactic in set(credited_tactics):
+                tactic_successes[tactic] += 1
 
-            if steps:
-                sequence = ">".join(steps)
+            attempted_transitions = row.attempted_transitions
+            if not attempted_transitions:
+                chronological_steps = row.phase_tactics or row.tactics
+                attempted_transitions = tuple(
+                    f"{left}->{right}"
+                    for left, right in zip(
+                        chronological_steps,
+                        chronological_steps[1:],
+                        strict=False,
+                    )
+                )
+            transition_trials.update(attempted_transitions)
+
+            credited_transitions = row.successful_transitions
+            if row.successful and not credited_transitions:
+                path_steps = (
+                    row.logical_phase_tactics
+                    or row.logical_tactics
+                    or row.phase_tactics
+                    or row.tactics
+                )
+                credited_transitions = tuple(
+                    f"{left}->{right}"
+                    for left, right in zip(path_steps, path_steps[1:], strict=False)
+                )
+            transition_successes.update(credited_transitions)
+
+            path_steps = (
+                row.logical_phase_tactics
+                or row.logical_tactics
+                or row.phase_tactics
+                or row.tactics
+            )
+            if path_steps:
+                sequence = ">".join(path_steps)
                 sequence_trials[sequence] += 1
                 if row.successful:
                     sequence_successes[sequence] += 1
@@ -282,7 +330,7 @@ class AdaptiveRedStrategy:
         )
 
     def learn(self, result: ConversationRunResult) -> None:
-        """Convert one completed conversation into transcript-free campaign memory."""
+        """Convert one completed conversation into branch-aware campaign memory."""
 
         execution = result.execution
         successful = execution.objective_violated is True
@@ -291,11 +339,45 @@ class AdaptiveRedStrategy:
         phase_tactics = tuple(
             self._phase_tactics_by_conversation.pop(result.conversation_id, [])
         )
+        if not (len(result.turns) == len(tactics) == len(phase_tactics)):
+            raise ValueError("Red learning trace is not aligned with executed conversation turns")
+
+        if result.turns:
+            endpoint = (
+                result.first_violation_turn_id
+                if successful and result.first_violation_turn_id is not None
+                else result.turns[-1].turn_id
+            )
+            path_ids = logical_path_turn_ids(result.turns, endpoint_turn_id=endpoint)
+        else:
+            path_ids = ()
+
+        position = {turn.turn_id: index for index, turn in enumerate(result.turns)}
+        logical_tactics = tuple(tactics[position[turn_id]] for turn_id in path_ids)
+        logical_phase_tactics = tuple(
+            phase_tactics[position[turn_id]] for turn_id in path_ids
+        )
+        attempted_transitions = tuple(
+            f"{phase_tactics[position[parent_id]]}->{phase_tactics[position[child_id]]}"
+            for parent_id, child_id in branch_transition_turn_ids(result.turns)
+        )
+        successful_transitions = ()
+        if successful:
+            successful_transitions = tuple(
+                f"{phase_tactics[position[parent_id]]}->{phase_tactics[position[child_id]]}"
+                for parent_id, child_id in path_transition_turn_ids(path_ids)
+            )
+
         self.memory.record(
             RedLearningRecord(
                 attack_family=self.case.attack_family[0],
                 tactics=tactics,
                 phase_tactics=phase_tactics,
+                logical_tactics=logical_tactics,
+                logical_phase_tactics=logical_phase_tactics,
+                successful_tactics=logical_tactics if successful else (),
+                attempted_transitions=attempted_transitions,
+                successful_transitions=successful_transitions,
                 successful=successful,
                 error=error,
                 target_interactions=len(result.turns),
@@ -458,6 +540,11 @@ class AdaptiveRedStrategy:
                     "validation_error": "unknown_branch_from_turn_id",
                     "needs_mutation": True,
                 }
+            if decision.branch_from_turn_id == conversation.active_leaf_turn_id:
+                return {
+                    "validation_error": "backtrack_must_move_to_an_ancestor_turn",
+                    "needs_mutation": True,
+                }
             if conversation.backtracks >= self.conversation_budget.max_backtracks:
                 return {
                     "validation_error": "backtrack_budget_exhausted",
@@ -568,11 +655,25 @@ class AdaptiveRedStrategy:
 
     @staticmethod
     def _conversation_summary(conversation: ConversationState) -> str:
-        recent_turns: list[dict[str, object]] = []
-        for turn in conversation.turns[-4:]:
-            recent_turns.append(
+        """Expose active logical context while omitting abandoned-branch content."""
+
+        if conversation.turns:
+            path_ids = logical_path_turn_ids(
+                conversation.turns,
+                endpoint_turn_id=conversation.active_leaf_turn_id,
+            )
+        else:
+            path_ids = ()
+        path_set = set(path_ids)
+        by_id = {turn.turn_id: turn for turn in conversation.turns}
+
+        active_path: list[dict[str, object]] = []
+        for turn_id in path_ids[-6:]:
+            turn = by_id[turn_id]
+            active_path.append(
                 {
                     "turn_id": turn.turn_id,
+                    "ordinal": turn.ordinal,
                     "depth": turn.depth,
                     "outcome": turn.outcome.value,
                     "attacker_message": turn.attacker_message[:500],
@@ -582,15 +683,33 @@ class AdaptiveRedStrategy:
                     },
                 }
             )
+
+        off_path = [turn for turn in conversation.turns if turn.turn_id not in path_set]
+        off_path_outcomes = Counter(turn.outcome.value for turn in off_path)
         payload = {
-            "schema": "llm-redteam-target-evidence-v1",
+            "schema": "llm-redteam-target-evidence-v2",
             "conversation_id": conversation.conversation_id,
             "session_mode": conversation.session_mode.value,
             "turn_count": len(conversation.turns),
             "backtracks": conversation.backtracks,
             "branches": conversation.branches,
             "active_leaf_turn_id": conversation.active_leaf_turn_id,
-            "recent_turns": recent_turns,
+            "active_path": active_path,
+            "off_path_summary": {
+                "count": len(off_path),
+                "outcomes": dict(sorted(off_path_outcomes.items())),
+                "recent": [
+                    {
+                        "turn_id": turn.turn_id,
+                        "parent_turn_id": turn.parent_turn_id,
+                        "ordinal": turn.ordinal,
+                        "depth": turn.depth,
+                        "outcome": turn.outcome.value,
+                    }
+                    for turn in off_path[-4:]
+                ],
+                "content_omitted": True,
+            },
         }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
