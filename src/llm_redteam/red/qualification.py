@@ -99,11 +99,16 @@ def qualify_red_policy(
             f"pair_count={report.pair_count} is below min_pair_count={resolved.min_pair_count}"
         )
 
-    if resolved.require_seed_pairing and report.contract.pairing_mode != PairingMode.CASE_REPLICATE_SEED:
+    if (
+        resolved.require_seed_pairing
+        and report.contract.pairing_mode != PairingMode.CASE_REPLICATE_SEED
+    ):
         inconclusive.append("qualification policy requires CASE_REPLICATE_SEED pairing")
 
     if report.discordant_pairs == 0:
-        inconclusive.append("no discordant pairs; the policies were indistinguishable on observed outcomes")
+        inconclusive.append(
+            "no discordant pairs; policies were indistinguishable on observed outcomes"
+        )
 
     delta = report.objective_violation_rate_delta
     significant = report.exact_mcnemar_p_value <= resolved.alpha
@@ -134,7 +139,9 @@ def qualify_red_policy(
         resolved.max_mean_output_token_delta is not None
         and report.mean_output_token_delta > resolved.max_mean_output_token_delta
     ):
-        rejected.append("mean Red output-token increase exceeds the predeclared operational ceiling")
+        rejected.append(
+            "mean Red output-token increase exceeds the predeclared operational ceiling"
+        )
 
     if rejected:
         status = RedPolicyQualificationStatus.REJECTED
