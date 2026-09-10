@@ -1,6 +1,6 @@
-version: 7
+version: 8
 corpus_id: llm-redteam-lab-corpus-v1
-last_verified: 2026-09-10
+last_verified: 2026-09-11
 
 authoritative_files:
   sources:
@@ -25,6 +25,7 @@ native_case_sets:
   - native/multiturn/reference-discovery-v1.yaml
   - native/multiturn/synthetic-sequences-v1.yaml
   - native/agent/adaptive-system-boundaries-v1.yaml
+  - native/agent/fixture-adaptive-injection-v1.yaml
 
 native_fixtures:
   - fixtures/coding/repo_injection_canary/fixture.yaml
@@ -53,6 +54,7 @@ principles:
   external_datasets_are_not_implicitly_vendored: true
   benign_controls_are_mandatory_for_safety_claims: true
   mechanism_taxonomy_is_separate_from_attack_complexity: true
+  environment_fixtures_are_separate_attack_inputs: true
 
 supported_target_classes:
   - coding
@@ -75,3 +77,4 @@ validation_requirements:
   - safety scores must include benign/overrefusal controls where applicable
   - native and imported case IDs are globally unique
   - a concrete prompt-only case maps to at most one MLCommons v0.7 leaf when within that taxonomy scope
+  - environment-originated attacks preserve fixture origin, bundle fingerprint and per-trial isolation identity
