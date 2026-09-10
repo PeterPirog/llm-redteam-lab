@@ -44,6 +44,7 @@ from ..storage.measurement_repository import (
 from ..storage.repository import ExperimentRepository
 from ..targets.base import TargetAdapter
 from .engine import CampaignEngine
+from .environment import EnvironmentCaseRunner
 from .multiturn import (
     ConversationBudget,
     ConversationRunResult,
@@ -71,16 +72,23 @@ class CampaignLifecycleResult:
     budget: BudgetSnapshot
 
 
-def static_attack_policy_descriptor(plan: CampaignPlan) -> dict[str, object]:
+def static_attack_policy_descriptor(
+    plan: CampaignPlan,
+    *,
+    environment_runner_descriptor: object | None = None,
+) -> dict[str, object]:
     """Serializable identity for the deterministic corpus-driven Red policy."""
 
-    return {
+    descriptor: dict[str, object] = {
         "kind": RedPolicyKind.STATIC.value,
         "version": _STATIC_POLICY_VERSION,
         "session_mode": plan.session_mode.value,
         "sequence_runner": "scripted-payload-v1",
         "stop_after_first_violation": True,
     }
+    if environment_runner_descriptor is not None:
+        descriptor["environment_runner"] = environment_runner_descriptor
+    return descriptor
 
 
 def deterministic_judge_policy_descriptor(*, canary: str) -> dict[str, object]:
@@ -113,6 +121,7 @@ class CampaignLifecycleExecutor:
         judge_policy_descriptor: object,
         models: ModelsConfig | None = None,
         red_model_client: RoleModelClient | None = None,
+        environment_runner: EnvironmentCaseRunner | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -121,6 +130,7 @@ class CampaignLifecycleExecutor:
         self.judge_policy_descriptor = judge_policy_descriptor
         self.models = models
         self.red_model_client = red_model_client
+        self.environment_runner = environment_runner
 
     async def run(
         self,
@@ -138,6 +148,11 @@ class CampaignLifecycleExecutor:
             budgets=self.budgets,
             models=self.models,
             evaluation_manifest=evaluation_manifest,
+            runtime_capabilities=(
+                self.environment_runner.capabilities
+                if self.environment_runner is not None
+                else None
+            ),
         )
         if not preflight.ready:
             errors = [
@@ -160,8 +175,19 @@ class CampaignLifecycleExecutor:
         if plan.target_snapshot_id is not None and plan.target_snapshot_id != target_snapshot_id:
             raise ValueError("configured target_snapshot_id does not match actual Blue target")
 
+        uses_environment_runner = any(
+            case.interaction_mode == "environment_injection" for case in selected
+        )
+        environment_descriptor = (
+            self.environment_runner.descriptor()
+            if uses_environment_runner and self.environment_runner is not None
+            else None
+        )
         attack_descriptor = (
-            static_attack_policy_descriptor(plan)
+            static_attack_policy_descriptor(
+                plan,
+                environment_runner_descriptor=environment_descriptor,
+            )
             if red_runtime is None
             else red_runtime.descriptor()
         )
@@ -230,7 +256,33 @@ class CampaignLifecycleExecutor:
                         interaction_mode=case.interaction_mode,
                         payload_hash=fingerprint_attack_case(case).content_hash,
                     )
-                    if case.interaction_mode == "multi_turn":
+                    if case.interaction_mode == "environment_injection":
+                        if red_runtime is not None:
+                            raise RuntimeError(
+                                "model-backed Red reached environment injection after preflight"
+                            )
+                        if self.environment_runner is None:
+                            raise RuntimeError(
+                                "environment injection reached execution without a runner"
+                            )
+                        execution = await self.environment_runner.run_case(
+                            case,
+                            target=self.target,
+                            judge=self.judge,
+                            budget=ledger,
+                            execution_id=_execution_id(
+                                resolved_campaign_id,
+                                case.id,
+                                replicate,
+                            ),
+                        )
+                        self.repository.save_execution(
+                            execution,
+                            attack_instance_id=attack_instance_id,
+                            target_snapshot_id=target_snapshot_id,
+                        )
+                        executions.append(execution)
+                    elif case.interaction_mode == "multi_turn":
                         strategy: MultiTurnStrategy | None = None
                         if red_runtime is None:
                             conversation = await self._run_static_conversation(
