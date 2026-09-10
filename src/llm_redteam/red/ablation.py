@@ -60,7 +60,12 @@ class PairedTrialPlan(StrictModel):
 
 
 class PairedRedAblationContract(StrictModel):
-    """Controlled conditions that must be identical across both Red arms."""
+    """Controlled conditions that must be identical across both Red arms.
+
+    The two optional shared-stack fingerprints were added after the original
+    contract. Legacy persisted experiments remain readable, while new strict
+    mechanism-policy experiments require both through their executor/builder.
+    """
 
     experiment_id: str = Field(min_length=1)
     target_snapshot_id: str = Field(min_length=1)
@@ -72,6 +77,8 @@ class PairedRedAblationContract(StrictModel):
     changed_component: str = Field(min_length=1)
     baseline_policy_fingerprint: str = Field(pattern=_HASH_PATTERN)
     treatment_policy_fingerprint: str = Field(pattern=_HASH_PATTERN)
+    red_model_config_fingerprint: str | None = Field(default=None, pattern=_HASH_PATTERN)
+    shared_red_stack_fingerprint: str | None = Field(default=None, pattern=_HASH_PATTERN)
     pairing_mode: PairingMode = PairingMode.CASE_REPLICATE
     execution_order_policy: AblationExecutionOrder = AblationExecutionOrder.COUNTERBALANCED
 
