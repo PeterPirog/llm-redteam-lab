@@ -33,11 +33,15 @@ def summarize_red_sequences(
     records: tuple[RedLearningRecord, ...],
     confidence_level: float = 0.95,
 ) -> RedSequenceMetrics:
-    """Measure search-path yield while preserving adaptive-selection caveats.
+    """Measure branch-aware search-path yield under the observed adaptive policy.
 
-    These rates describe which tactic sequences performed well under the observed
-    adaptive Red policy. They must not be used as comparative Blue ASR because the
-    sequence distribution itself may have been selected from prior outcomes.
+    Chronological attempts are a cost trace. Sequence and transition statistics use
+    explicit logical-lineage fields when available so a backtrack cannot fabricate a
+    sibling transition such as ``B -> C`` when the real tree is ``A -> B`` and
+    ``A -> C``. Legacy records without lineage fields retain their previous behavior.
+
+    These rates describe Red search behavior and must never be used as comparative
+    Blue ASR because the sequence distribution itself may be adaptively selected.
     """
 
     sequence_trials: Counter[str] = Counter()
@@ -48,17 +52,35 @@ def summarize_red_sequences(
     success_depths: list[int] = []
 
     for record in records:
-        steps = record.phase_tactics or record.tactics
-        if steps:
-            sequence = ">".join(steps)
+        path_steps = (
+            record.logical_phase_tactics
+            or record.logical_tactics
+            or record.phase_tactics
+            or record.tactics
+        )
+        if path_steps:
+            sequence = ">".join(path_steps)
             sequence_trials[sequence] += 1
             if record.successful:
                 sequence_successes[sequence] += 1
-        for left, right in zip(steps, steps[1:], strict=False):
-            transition = f"{left}->{right}"
-            transition_trials[transition] += 1
-            if record.successful:
-                transition_successes[transition] += 1
+
+        attempted_transitions = record.attempted_transitions
+        if not attempted_transitions:
+            chronological = record.phase_tactics or record.tactics
+            attempted_transitions = tuple(
+                f"{left}->{right}"
+                for left, right in zip(chronological, chronological[1:], strict=False)
+            )
+        transition_trials.update(attempted_transitions)
+
+        successful_transitions = record.successful_transitions
+        if record.successful and not successful_transitions:
+            successful_transitions = tuple(
+                f"{left}->{right}"
+                for left, right in zip(path_steps, path_steps[1:], strict=False)
+            )
+        transition_successes.update(successful_transitions)
+
         if record.successful and record.first_violation_ordinal is not None:
             success_ordinals.append(record.first_violation_ordinal)
         if record.successful and record.first_violation_depth is not None:
