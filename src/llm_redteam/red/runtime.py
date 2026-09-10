@@ -25,6 +25,11 @@ from ..model_client import BudgetedRoleModelClient, RoleModelClient
 from ..model_roles import ModelRole, ModelRoleConfig, ModelsConfig
 from ..targets.base import SessionMode
 from .adaptive import RedCampaignMemory, RedMemorySnapshot
+from .coverage import (
+    RedMechanismCoverage,
+    eligible_mechanisms_for_runtime,
+    summarize_mechanism_coverage,
+)
 from .live_feedback import (
     LIVE_FEEDBACK_SCOPE,
     POST_RUN_DISCOVERY_FEEDBACK,
@@ -42,6 +47,7 @@ class RedRuntimeDiagnostics(StrictModel):
 
     tactic_memory: dict[str, RedMemorySnapshot] = Field(default_factory=dict)
     mechanism_memory: dict[str, MechanismMemorySnapshot] = Field(default_factory=dict)
+    mechanism_coverage: RedMechanismCoverage | None = None
     comparable_blue_estimate: bool = False
 
 
@@ -219,18 +225,30 @@ class RedStrategyRuntime:
         if not self.cross_trial_learning_enabled:
             return None
         families = sorted(self._observed_families)
+        tactic_memory = {
+            family: self.tactic_memory.snapshot(family) for family in families
+        }
+        mechanism_memory = (
+            {
+                family: self.mechanism_memory.snapshot(family)
+                for family in families
+            }
+            if self.policy in {RedPolicyKind.MECHANISM, RedPolicyKind.PORTFOLIO}
+            else {}
+        )
+        mechanism_coverage = None
+        if mechanism_memory:
+            mechanism_coverage = summarize_mechanism_coverage(
+                tuple(mechanism_memory.values()),
+                eligible_mechanisms=eligible_mechanisms_for_runtime(
+                    session_mode=self.session_mode,
+                    conversation_budget=self.conversation_budget,
+                ),
+            )
         return RedRuntimeDiagnostics(
-            tactic_memory={
-                family: self.tactic_memory.snapshot(family) for family in families
-            },
-            mechanism_memory=(
-                {
-                    family: self.mechanism_memory.snapshot(family)
-                    for family in families
-                }
-                if self.policy in {RedPolicyKind.MECHANISM, RedPolicyKind.PORTFOLIO}
-                else {}
-            ),
+            tactic_memory=tactic_memory,
+            mechanism_memory=mechanism_memory,
+            mechanism_coverage=mechanism_coverage,
         )
 
 
