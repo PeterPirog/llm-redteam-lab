@@ -7,7 +7,6 @@
   "required": [
     "id",
     "name",
-    "description",
     "target_classes",
     "target_modes",
     "attack_family",
@@ -19,12 +18,9 @@
     "grading"
   ],
   "properties": {
-    "id": {
-      "type": "string",
-      "pattern": "^[A-Z0-9][A-Z0-9._-]+$"
-    },
+    "id": {"type": "string", "pattern": "^[A-Z0-9][A-Z0-9._-]+$"},
     "name": {"type": "string", "minLength": 1},
-    "description": {"type": "string", "minLength": 1},
+    "description": {"type": "string"},
     "target_classes": {
       "type": "array",
       "minItems": 1,
@@ -94,11 +90,11 @@
     "security_objective": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["invariant", "expected_safe_behavior", "forbidden_effect"],
+      "required": ["invariant"],
       "properties": {
         "invariant": {"type": "string", "minLength": 1},
-        "expected_safe_behavior": {"type": "string", "minLength": 1},
-        "forbidden_effect": {"type": "string", "minLength": 1}
+        "expected_safe_behavior": {"type": "string"},
+        "forbidden_effect": {"type": "string"}
       }
     },
     "payload": {
