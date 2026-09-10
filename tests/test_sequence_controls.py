@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from llm_redteam.campaigns.multiturn import (
     ConversationBudget,
     ConversationState,
@@ -19,6 +21,8 @@ from llm_redteam.domain import (
 from llm_redteam.judges.deterministic import DeterministicJudge
 from llm_redteam.sequence_controls import (
     SequenceContextArm,
+    SequenceTargetFixture,
+    SequenceTargetIsolationMode,
     run_sequence_context_pair,
     summarize_sequence_context_comparison,
 )
@@ -68,15 +72,24 @@ class FeedbackAwareSequence:
         return None
 
 
-def test_reset_each_turn_isolates_blue_context_without_removing_red_feedback() -> None:
-    target = EscalatingVaultTarget(canary=CANARY)
-    judge = DeterministicJudge(canary=CANARY)
+def _isolated_target_factory(
+    arm: SequenceContextArm,
+    case_id: str,
+    replicate: int,
+) -> SequenceTargetFixture:
+    return SequenceTargetFixture(
+        target=EscalatingVaultTarget(canary=CANARY),
+        isolation_id=f"{case_id}:{replicate}:{arm.value}",
+        isolation_mode=SequenceTargetIsolationMode.FRESH_ISOLATED_INSTANCE,
+    )
 
+
+def test_reset_each_turn_isolates_blue_context_without_removing_red_feedback() -> None:
     retained, reset = asyncio.run(
         run_sequence_context_pair(
             case=_case(),
-            target=target,
-            judge=judge,
+            target_fixture_factory=_isolated_target_factory,
+            judge=DeterministicJudge(canary=CANARY),
             conversation_budget=ConversationBudget(max_turns=2),
             strategy_factory=FeedbackAwareSequence,
         )
@@ -89,13 +102,18 @@ def test_reset_each_turn_isolates_blue_context_without_removing_red_feedback() -
     assert len(retained.run.turns) == 2
     assert len(reset.run.turns) == 2
     assert retained.run.flow_fingerprint == reset.run.flow_fingerprint
+    assert retained.target_isolation_id != reset.target_isolation_id
+    assert (
+        retained.target_isolation_mode
+        == SequenceTargetIsolationMode.FRESH_ISOLATED_INSTANCE
+    )
 
 
 def test_sequence_context_summary_uses_matched_pair_statistics() -> None:
     retained, reset = asyncio.run(
         run_sequence_context_pair(
             case=_case(),
-            target=EscalatingVaultTarget(canary=CANARY),
+            target_fixture_factory=_isolated_target_factory,
             judge=DeterministicJudge(canary=CANARY),
             conversation_budget=ConversationBudget(max_turns=2),
             strategy_factory=FeedbackAwareSequence,
@@ -117,13 +135,14 @@ def test_sequence_context_summary_uses_matched_pair_statistics() -> None:
     assert report.mean_target_interaction_delta == 0.0
     assert report.retained_time_to_violation.events == 1
     assert report.reset_each_turn_time_to_violation.censored == 1
+    assert report.target_isolation_mode == SequenceTargetIsolationMode.FRESH_ISOLATED_INSTANCE
 
 
 def test_sequence_context_summary_rejects_flow_mismatch() -> None:
     retained, reset = asyncio.run(
         run_sequence_context_pair(
             case=_case(),
-            target=EscalatingVaultTarget(canary=CANARY),
+            target_fixture_factory=_isolated_target_factory,
             judge=DeterministicJudge(canary=CANARY),
             conversation_budget=ConversationBudget(max_turns=2),
             strategy_factory=FeedbackAwareSequence,
@@ -135,9 +154,81 @@ def test_sequence_context_summary_rejects_flow_mismatch() -> None:
         }
     )
 
-    try:
+    with pytest.raises(ValueError, match="flow fingerprint mismatch"):
         summarize_sequence_context_comparison((retained, mismatched))
-    except ValueError as exc:
-        assert "flow fingerprint mismatch" in str(exc)
-    else:
-        raise AssertionError("mismatched flow controls must fail closed")
+
+
+def test_sequence_context_pair_rejects_same_target_object_before_execution() -> None:
+    shared = EscalatingVaultTarget(canary=CANARY)
+
+    def unsafe_factory(
+        arm: SequenceContextArm,
+        case_id: str,
+        replicate: int,
+    ) -> SequenceTargetFixture:
+        return SequenceTargetFixture(
+            target=shared,
+            isolation_id=f"{case_id}:{replicate}:{arm.value}",
+            isolation_mode=SequenceTargetIsolationMode.FRESH_ISOLATED_INSTANCE,
+        )
+
+    with pytest.raises(ValueError, match="must not reuse the same target object"):
+        asyncio.run(
+            run_sequence_context_pair(
+                case=_case(),
+                target_fixture_factory=unsafe_factory,
+                judge=DeterministicJudge(canary=CANARY),
+                conversation_budget=ConversationBudget(max_turns=2),
+                strategy_factory=FeedbackAwareSequence,
+            )
+        )
+
+
+def test_sequence_context_pair_rejects_reused_state_domain() -> None:
+    def unsafe_factory(
+        arm: SequenceContextArm,
+        case_id: str,
+        replicate: int,
+    ) -> SequenceTargetFixture:
+        del arm
+        return SequenceTargetFixture(
+            target=EscalatingVaultTarget(canary=CANARY),
+            isolation_id=f"{case_id}:{replicate}:shared-state",
+            isolation_mode=SequenceTargetIsolationMode.FRESH_ISOLATED_INSTANCE,
+        )
+
+    with pytest.raises(ValueError, match="distinct target isolation IDs"):
+        asyncio.run(
+            run_sequence_context_pair(
+                case=_case(),
+                target_fixture_factory=unsafe_factory,
+                judge=DeterministicJudge(canary=CANARY),
+                conversation_budget=ConversationBudget(max_turns=2),
+                strategy_factory=FeedbackAwareSequence,
+            )
+        )
+
+
+def test_sequence_context_pair_rejects_target_configuration_mismatch() -> None:
+    def mismatched_factory(
+        arm: SequenceContextArm,
+        case_id: str,
+        replicate: int,
+    ) -> SequenceTargetFixture:
+        canary = CANARY if arm == SequenceContextArm.RETAINED_CONTEXT else "OTHER_CANARY"
+        return SequenceTargetFixture(
+            target=EscalatingVaultTarget(canary=canary),
+            isolation_id=f"{case_id}:{replicate}:{arm.value}",
+            isolation_mode=SequenceTargetIsolationMode.FRESH_ISOLATED_INSTANCE,
+        )
+
+    with pytest.raises(ValueError, match="identical target identities"):
+        asyncio.run(
+            run_sequence_context_pair(
+                case=_case(),
+                target_fixture_factory=mismatched_factory,
+                judge=DeterministicJudge(canary=CANARY),
+                conversation_budget=ConversationBudget(max_turns=2),
+                strategy_factory=FeedbackAwareSequence,
+            )
+        )
