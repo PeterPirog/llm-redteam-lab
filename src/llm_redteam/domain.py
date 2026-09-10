@@ -86,8 +86,8 @@ class TaxonomyRef(StrictModel):
 
 class SecurityObjective(StrictModel):
     invariant: str = Field(min_length=1)
-    expected_safe_behavior: str = Field(min_length=1)
-    forbidden_effect: str = Field(min_length=1)
+    expected_safe_behavior: str | None = None
+    forbidden_effect: str | None = None
 
 
 class PayloadTurnRole(StrEnum):
@@ -131,7 +131,7 @@ class GradingSpec(StrictModel):
 class AttackCase(StrictModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
+    description: str = ""
     target_classes: list[TargetClass] = Field(min_length=1)
     target_modes: list[TargetMode] = Field(min_length=1)
     attack_family: list[str] = Field(min_length=1)
@@ -174,6 +174,7 @@ class AttackCase(StrictModel):
 
 class CorpusDocument(StrictModel):
     version: int = Field(ge=1)
+    id: str | None = None
     purpose: str | None = None
     cases: list[AttackCase]
 
