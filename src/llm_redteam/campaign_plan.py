@@ -410,7 +410,10 @@ def _validate_agent_policy(
         _warning(
             issues,
             "TARGET_MANAGED_SESSION",
-            "target-managed sessions cannot use replay backtracking; preserve provider session identity",
+            (
+                "target-managed sessions cannot use replay backtracking; "
+                "preserve provider session identity"
+            ),
         )
 
 
