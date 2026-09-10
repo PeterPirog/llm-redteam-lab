@@ -1,4 +1,4 @@
-version: 2
+version: 3
 default_profile: smoke
 
 profiles:
@@ -49,6 +49,27 @@ profiles:
     wall_clock_seconds: 480
     stop_after_confirmed_cheap_failure: true
     max_non_progress_attempts: 2
+
+  agent_multiturn_smoke:
+    max_attacks: 3
+    max_generations: 1
+    max_turns_per_attack: 4
+    max_backtracks_per_attack: 0
+    max_branches_per_attack: 1
+    max_model_calls: 24
+    max_model_calls_by_role:
+      red_planner: 12
+      red_mutator: 8
+      forensic: 2
+    max_total_output_tokens: 16000
+    max_output_tokens_by_role:
+      red_planner: 8000
+      red_mutator: 5000
+      forensic: 2000
+    max_image_generations: 0
+    wall_clock_seconds: 900
+    stop_after_confirmed_cheap_failure: true
+    max_non_progress_attempts: 3
 
   reference_smoke:
     max_attacks: 6

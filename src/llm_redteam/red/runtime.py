@@ -25,6 +25,10 @@ from ..model_client import BudgetedRoleModelClient, RoleModelClient
 from ..model_roles import ModelRole, ModelRoleConfig, ModelsConfig
 from ..targets.base import SessionMode
 from .adaptive import RedCampaignMemory, RedMemorySnapshot
+from .agent_adaptive import (
+    TargetVisibleAgentAdaptiveRedStrategy,
+    TargetVisibleAgentMechanismAwareAdaptiveRedStrategy,
+)
 from .coverage import (
     RedMechanismCoverage,
     eligible_mechanisms_for_runtime,
@@ -40,6 +44,7 @@ from .mechanisms import MechanismCampaignMemory, MechanismMemorySnapshot, Mechan
 from .portfolio import RiskAwarePortfolioPolicy
 
 _RED_RUNTIME_VERSION = 2
+_AGENT_RED_RUNTIME_VERSION = 3
 
 
 class RedRuntimeDiagnostics(StrictModel):
@@ -86,7 +91,7 @@ def build_model_backed_red_policy_descriptor(
             conversation_budget=conversation_budget
         ).descriptor()
 
-    return {
+    descriptor: dict[str, object] = {
         "kind": policy.value,
         "runtime_version": _RED_RUNTIME_VERSION,
         "target_class": target_class.value,
@@ -107,6 +112,10 @@ def build_model_backed_red_policy_descriptor(
         "mechanism_policy": mechanism_policy,
         "initial_learning_memory": "empty-v1",
     }
+    if target_mode == TargetMode.AGENT:
+        descriptor["runtime_version"] = _AGENT_RED_RUNTIME_VERSION
+        descriptor["threat_lens"] = "agent-system-v1"
+    return descriptor
 
 
 class RedStrategyRuntime:
@@ -180,10 +189,20 @@ class RedStrategyRuntime:
             "memory": self.tactic_memory,
             "duplicate_similarity_threshold": self.duplicate_similarity_threshold,
         }
+        adaptive_cls = (
+            TargetVisibleAgentAdaptiveRedStrategy
+            if self.target_mode == TargetMode.AGENT
+            else TargetVisibleAdaptiveRedStrategy
+        )
+        mechanism_cls = (
+            TargetVisibleAgentMechanismAwareAdaptiveRedStrategy
+            if self.target_mode == TargetMode.AGENT
+            else TargetVisibleMechanismAwareAdaptiveRedStrategy
+        )
         if self.policy == RedPolicyKind.ADAPTIVE:
-            return TargetVisibleAdaptiveRedStrategy(**common)
+            return adaptive_cls(**common)
         if self.policy == RedPolicyKind.MECHANISM:
-            return TargetVisibleMechanismAwareAdaptiveRedStrategy(
+            return mechanism_cls(
                 **common,
                 mechanism_memory=self.mechanism_memory,
                 mechanism_policy=MechanismPolicy(
@@ -192,7 +211,7 @@ class RedStrategyRuntime:
                 cross_trial_learning_enabled=self.cross_trial_learning_enabled,
             )
         if self.policy == RedPolicyKind.PORTFOLIO:
-            return TargetVisibleMechanismAwareAdaptiveRedStrategy(
+            return mechanism_cls(
                 **common,
                 mechanism_memory=self.mechanism_memory,
                 mechanism_policy=RiskAwarePortfolioPolicy(
