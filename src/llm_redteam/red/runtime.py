@@ -36,6 +36,58 @@ class RedRuntimeDiagnostics(StrictModel):
     comparable_blue_estimate: bool = False
 
 
+def build_model_backed_red_policy_descriptor(
+    *,
+    policy: RedPolicyKind,
+    purpose: CampaignPurpose,
+    target_class: TargetClass,
+    target_mode: TargetMode,
+    session_mode: SessionMode,
+    campaign_budget: CampaignBudget,
+    models: ModelsConfig,
+    duplicate_similarity_threshold: float = 0.92,
+) -> dict[str, object]:
+    """Build the exact campaign-start Red identity without making an inference call."""
+
+    if not policy.model_backed:
+        raise ValueError("model-backed Red descriptor requires a model-backed policy")
+    if not 0.0 <= duplicate_similarity_threshold <= 1.0:
+        raise ValueError("duplicate_similarity_threshold must be between 0 and 1")
+
+    planner = models.role(
+        ModelRole.RED_PLANNER,
+        required_capabilities={"text", "reasoning"},
+    )
+    mutator = models.role(ModelRole.RED_MUTATOR, required_capabilities={"text"})
+    conversation_budget = _conversation_budget(campaign_budget, session_mode)
+
+    mechanism_policy: dict[str, object] | None = None
+    if policy == RedPolicyKind.MECHANISM:
+        mechanism_policy = MechanismPolicy(
+            conversation_budget=conversation_budget
+        ).descriptor()
+    elif policy == RedPolicyKind.PORTFOLIO:
+        mechanism_policy = RiskAwarePortfolioPolicy(
+            conversation_budget=conversation_budget
+        ).descriptor()
+
+    return {
+        "kind": policy.value,
+        "runtime_version": _RED_RUNTIME_VERSION,
+        "target_class": target_class.value,
+        "target_mode": target_mode.value,
+        "session_mode": session_mode.value,
+        "within_conversation_adaptation": True,
+        "cross_trial_learning_enabled": purpose == CampaignPurpose.DISCOVERY,
+        "duplicate_similarity_threshold": duplicate_similarity_threshold,
+        "conversation_budget": conversation_budget.model_dump(mode="json"),
+        "red_planner": _model_role_descriptor(planner),
+        "red_mutator": _model_role_descriptor(mutator),
+        "mechanism_policy": mechanism_policy,
+        "initial_learning_memory": "empty-v1",
+    }
+
+
 class RedStrategyRuntime:
     """Create and learn campaign-scoped Red strategies under one immutable contract."""
 
@@ -53,16 +105,16 @@ class RedStrategyRuntime:
         budget: BudgetLedger,
         duplicate_similarity_threshold: float = 0.92,
     ) -> None:
-        if not policy.model_backed:
-            raise ValueError("RedStrategyRuntime requires a model-backed Red policy")
-        if not 0.0 <= duplicate_similarity_threshold <= 1.0:
-            raise ValueError("duplicate_similarity_threshold must be between 0 and 1")
-
-        models.role(
-            ModelRole.RED_PLANNER,
-            required_capabilities={"text", "reasoning"},
+        self._descriptor = build_model_backed_red_policy_descriptor(
+            policy=policy,
+            purpose=purpose,
+            target_class=target_class,
+            target_mode=target_mode,
+            session_mode=session_mode,
+            campaign_budget=campaign_budget,
+            models=models,
+            duplicate_similarity_threshold=duplicate_similarity_threshold,
         )
-        models.role(ModelRole.RED_MUTATOR, required_capabilities={"text"})
 
         self.policy = policy
         self.purpose = purpose
@@ -87,43 +139,9 @@ class RedStrategyRuntime:
         return self.purpose == CampaignPurpose.DISCOVERY
 
     def descriptor(self) -> dict[str, object]:
-        """Return the exact starting Red policy identity used for measurement binding."""
+        """Return the exact immutable campaign-start Red identity."""
 
-        mechanism_policy: dict[str, object] | None = None
-        if self.policy == RedPolicyKind.MECHANISM:
-            mechanism_policy = MechanismPolicy(
-                conversation_budget=self.conversation_budget
-            ).descriptor()
-        elif self.policy == RedPolicyKind.PORTFOLIO:
-            mechanism_policy = RiskAwarePortfolioPolicy(
-                conversation_budget=self.conversation_budget
-            ).descriptor()
-
-        return {
-            "kind": self.policy.value,
-            "runtime_version": _RED_RUNTIME_VERSION,
-            "target_class": self.target_class.value,
-            "target_mode": self.target_mode.value,
-            "session_mode": self.session_mode.value,
-            "within_conversation_adaptation": True,
-            "cross_trial_learning_enabled": self.cross_trial_learning_enabled,
-            "duplicate_similarity_threshold": self.duplicate_similarity_threshold,
-            "conversation_budget": self.conversation_budget.model_dump(mode="json"),
-            "red_planner": _model_role_descriptor(
-                self.models_config.role(
-                    ModelRole.RED_PLANNER,
-                    required_capabilities={"text", "reasoning"},
-                )
-            ),
-            "red_mutator": _model_role_descriptor(
-                self.models_config.role(
-                    ModelRole.RED_MUTATOR,
-                    required_capabilities={"text"},
-                )
-            ),
-            "mechanism_policy": mechanism_policy,
-            "initial_learning_memory": "empty-v1",
-        }
+        return dict(self._descriptor)
 
     def strategy_for(self, case: AttackCase) -> MultiTurnStrategy:
         """Create one per-conversation strategy sharing only transcript-free campaign memory."""
