@@ -23,7 +23,13 @@ from .domain import (
     TargetMode,
 )
 from .evaluation_protocol import CampaignPurpose
-from .evaluation_sets import HeldOutEvaluationManifest, select_manifest_cases
+from .evaluation_sets import (
+    HeldOutEvaluationManifest,
+    fingerprint_external_dependency,
+    select_manifest_cases,
+    validate_manifest_case_dependencies,
+)
+from .fixture_runtime import FixtureRuntime
 from .model_roles import ModelRole, ModelsConfig
 from .runtime_config import BudgetConfigDocument
 from .targets.base import SessionMode
@@ -115,8 +121,14 @@ def preflight_campaign(
     models: ModelsConfig | None = None,
     evaluation_manifest: HeldOutEvaluationManifest | None = None,
     fixture_runner_available: bool = False,
+    fixture_runtime: FixtureRuntime | None = None,
 ) -> CampaignPreflight:
-    """Validate a campaign before execution without making any inference call."""
+    """Validate a campaign before execution without making any inference call.
+
+    ``fixture_runner_available`` remains a lightweight discovery capability flag for
+    callers that do not own a runtime object. Held-out fixture EVALUATION is stricter:
+    it requires the concrete runtime so preflight can resolve and hash the exact bundle.
+    """
 
     issues: list[PreflightIssue] = []
     if budgets.policy.require_explicit_profile and plan.budget_profile is None:
@@ -147,7 +159,9 @@ def preflight_campaign(
         selected,
         budget,
         issues,
-        fixture_runner_available=fixture_runner_available,
+        evaluation_manifest=evaluation_manifest,
+        fixture_runner_available=fixture_runner_available or fixture_runtime is not None,
+        fixture_runtime=fixture_runtime,
     )
     _validate_security_objectives(selected, issues)
     min_interactions, max_interactions = _interaction_bounds(plan, selected, budget)
@@ -262,7 +276,9 @@ def _validate_payload_execution(
     budget: CampaignBudget,
     issues: list[PreflightIssue],
     *,
+    evaluation_manifest: HeldOutEvaluationManifest | None,
     fixture_runner_available: bool,
+    fixture_runtime: FixtureRuntime | None,
 ) -> None:
     fixture_cases = tuple(case for case in selected if case.payload.fixture is not None)
     if fixture_cases and len(fixture_cases) != len(selected):
@@ -312,13 +328,11 @@ def _validate_payload_execution(
                     f"case {case.id} fixture execution currently requires multi_turn mode",
                 )
             if plan.purpose == CampaignPurpose.EVALUATION:
-                _error(
-                    issues,
-                    "FIXTURE_EVALUATION_NOT_HASH_BOUND",
-                    (
-                        f"case {case.id} fixture bundle is not yet bound into the held-out "
-                        "evaluation manifest; run it only as DISCOVERY"
-                    ),
+                _validate_fixture_evaluation_binding(
+                    case,
+                    evaluation_manifest=evaluation_manifest,
+                    fixture_runtime=fixture_runtime,
+                    issues=issues,
                 )
 
         if case.payload.artifact is not None:
@@ -378,6 +392,46 @@ def _validate_payload_execution(
                 "RUNNER_UNAVAILABLE",
                 f"case {case.id} uses multi_attempt, which has no lifecycle runner yet",
             )
+
+
+def _validate_fixture_evaluation_binding(
+    case: AttackCase,
+    *,
+    evaluation_manifest: HeldOutEvaluationManifest | None,
+    fixture_runtime: FixtureRuntime | None,
+    issues: list[PreflightIssue],
+) -> None:
+    if evaluation_manifest is None:
+        return
+    if fixture_runtime is None:
+        _error(
+            issues,
+            "FIXTURE_EVALUATION_DEPENDENCY_RUNTIME_REQUIRED",
+            (
+                f"case {case.id} requires the concrete fixture runtime during EVALUATION "
+                "so the exact external input can be hashed and compared with the held-out manifest"
+            ),
+        )
+        return
+    try:
+        descriptor = fixture_runtime.describe(case)
+        dependency = fingerprint_external_dependency(
+            kind="fixture_bundle",
+            reference=descriptor.fixture_ref,
+            content_hash=descriptor.bundle_sha256,
+        )
+        validate_manifest_case_dependencies(
+            evaluation_manifest,
+            case_id=case.id,
+            observed_dependencies=(dependency,),
+            evaluation=True,
+        )
+    except (ValueError, RuntimeError) as exc:
+        _error(
+            issues,
+            "FIXTURE_EVALUATION_DEPENDENCY_MISMATCH",
+            f"case {case.id} held-out fixture binding failed: {exc}",
+        )
 
 
 def _validate_security_objectives(

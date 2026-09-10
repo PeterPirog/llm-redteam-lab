@@ -147,6 +147,7 @@ class CampaignLifecycleExecutor:
             models=self.models,
             evaluation_manifest=evaluation_manifest,
             fixture_runner_available=self.fixture_runtime is not None,
+            fixture_runtime=self.fixture_runtime,
         )
         if not preflight.ready:
             errors = [

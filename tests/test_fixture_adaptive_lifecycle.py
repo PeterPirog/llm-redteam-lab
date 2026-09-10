@@ -316,7 +316,7 @@ def test_fixture_preflight_is_fail_closed_without_runner_and_for_evaluation() ->
         evaluation_manifest=manifest,
         fixture_runner_available=True,
     )
-    assert "FIXTURE_EVALUATION_NOT_HASH_BOUND" in {
+    assert "FIXTURE_EVALUATION_DEPENDENCY_RUNTIME_REQUIRED" in {
         item.code for item in evaluation.issues if item.severity == PreflightSeverity.ERROR
     }
 
