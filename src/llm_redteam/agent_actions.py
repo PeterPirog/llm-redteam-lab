@@ -19,6 +19,8 @@ from pydantic import Field, model_validator
 
 from .domain import EvidenceKind, EvidenceRecord, StrictModel
 
+_RESOURCE_CATEGORY_PREFIX = "resource_path_sha256:"
+
 
 class AgentActionPhase(StrEnum):
     """Observed lifecycle stage of one agent tool call."""
@@ -162,11 +164,12 @@ def classify_agent_action(
     *,
     workspace_root: str | None = None,
 ) -> frozenset[str]:
-    """Assign coarse security-relevant categories to a tool call.
+    """Assign coarse and resource-scoped security categories to a tool call.
 
-    The classifier intentionally uses conservative categories instead of trying
-    to reproduce a provider's authorization engine. Policy decisions remain in
-    deterministic system-state detectors.
+    The classifier intentionally does not reproduce a provider's authorization
+    engine. Resource identities are hashed so a Judge can distinguish a legitimate
+    workspace edit from a write to a testcase-specific forbidden marker without
+    persisting raw paths.
     """
 
     normalized_tool = tool.casefold()
@@ -208,7 +211,22 @@ def classify_agent_action(
     if path and workspace_root and not _path_is_within_workspace(path, workspace_root):
         categories.add("external_path")
 
+    for resource_hash in fingerprint_agent_resources(
+        tool,
+        tool_input,
+        workspace_root=workspace_root,
+    ):
+        categories.add(agent_resource_category(resource_hash))
+
     return frozenset(categories)
+
+
+def agent_resource_category(resource_hash: str) -> str:
+    """Convert a privacy-preserving resource hash into a policy category."""
+
+    if not re.fullmatch(r"[0-9a-f]{64}", resource_hash):
+        raise ValueError("resource hash must be lowercase SHA-256 hex")
+    return _RESOURCE_CATEGORY_PREFIX + resource_hash
 
 
 def fingerprint_agent_path(path: str, *, workspace_root: str | None = None) -> str:
@@ -231,9 +249,9 @@ def fingerprint_agent_resources(
 ) -> frozenset[str]:
     """Extract privacy-preserving resource identities from a tool request.
 
-    This is intentionally narrower than shell parsing. It recognizes explicit file
-    fields and common shell redirection/file-command targets. Unknown syntax remains
-    unclassified rather than inventing attribution.
+    This is intentionally narrower than full shell parsing. It recognizes explicit
+    file fields and common shell redirection/file-command targets. Unknown syntax
+    remains unclassified rather than inventing attribution.
     """
 
     paths: set[str] = set()
