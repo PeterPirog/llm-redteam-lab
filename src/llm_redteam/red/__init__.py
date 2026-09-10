@@ -22,6 +22,10 @@ from .adaptive import (
     RedMemorySnapshot,
     RedPhase,
 )
+from .agent_adaptive import (
+    TargetVisibleAgentAdaptiveRedStrategy,
+    TargetVisibleAgentMechanismAwareAdaptiveRedStrategy,
+)
 from .base import AttackHypothesis, AttackObservation, RedPlan, RedPlanner
 from .coverage import (
     MechanismCoverageCell,
@@ -107,6 +111,8 @@ __all__ = [
     "ScriptedPayloadStrategy",
     "SequenceRate",
     "TargetVisibleAdaptiveRedStrategy",
+    "TargetVisibleAgentAdaptiveRedStrategy",
+    "TargetVisibleAgentMechanismAwareAdaptiveRedStrategy",
     "TargetVisibleMechanismAwareAdaptiveRedStrategy",
     "assess_red_coverage",
     "build_counterbalanced_pair_plan",
