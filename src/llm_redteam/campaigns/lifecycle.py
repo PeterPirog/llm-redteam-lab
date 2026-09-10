@@ -10,8 +10,9 @@ from uuid import uuid4
 from ..budget import BudgetLedger, BudgetSnapshot
 from ..campaign_plan import CampaignPlan, RedPolicyKind, preflight_campaign
 from ..corpus import select_cases
-from ..domain import AttackCase, ExecutionResult
+from ..domain import AttackCase, CampaignBudget, ExecutionResult
 from ..evaluation_protocol import (
+    CampaignPurpose,
     DiscoveryMetrics,
     EvaluationMetrics,
     discovery_protocol,
@@ -43,7 +44,12 @@ from ..storage.measurement_repository import (
 from ..storage.repository import ExperimentRepository
 from ..targets.base import TargetAdapter
 from .engine import CampaignEngine
-from .multiturn import ConversationBudget, ConversationRunResult, MultiTurnCampaignEngine
+from .multiturn import (
+    ConversationBudget,
+    ConversationRunResult,
+    MultiTurnCampaignEngine,
+    MultiTurnStrategy,
+)
 
 METRIC_DEFINITION_VERSION = "v2"
 _STATIC_POLICY_VERSION = 1
@@ -225,6 +231,7 @@ class CampaignLifecycleExecutor:
                         payload_hash=fingerprint_attack_case(case).content_hash,
                     )
                     if case.interaction_mode == "multi_turn":
+                        strategy: MultiTurnStrategy | None = None
                         if red_runtime is None:
                             conversation = await self._run_static_conversation(
                                 case=case,
@@ -250,6 +257,8 @@ class CampaignLifecycleExecutor:
                             target_snapshot_id=target_snapshot_id,
                         )
                         if red_runtime is not None:
+                            if strategy is None:
+                                raise RuntimeError("adaptive Red strategy disappeared after execution")
                             red_runtime.observe(
                                 case=case,
                                 strategy=strategy,
@@ -284,7 +293,7 @@ class CampaignLifecycleExecutor:
 
         metrics: DiscoveryMetrics | EvaluationMetrics | None
         measurement_error: str | None = None
-        if plan.purpose == plan.purpose.DISCOVERY:
+        if plan.purpose == CampaignPurpose.DISCOVERY:
             metrics = summarize_discovery(executions)
             status = CampaignTerminalStatus.COMPLETED
         else:
@@ -323,7 +332,7 @@ class CampaignLifecycleExecutor:
         self,
         *,
         plan: CampaignPlan,
-        effective_budget,
+        effective_budget: CampaignBudget,
         ledger: BudgetLedger,
     ) -> RedStrategyRuntime | None:
         if not plan.red_policy.model_backed:
@@ -396,7 +405,7 @@ class CampaignLifecycleExecutor:
         campaign_id: str,
         replicate: int,
         red_runtime: RedStrategyRuntime,
-        strategy,
+        strategy: MultiTurnStrategy,
     ) -> ConversationRunResult:
         engine = MultiTurnCampaignEngine(
             target=self.target,
@@ -423,7 +432,7 @@ class CampaignLifecycleExecutor:
         budget_fingerprint: str,
         manifest: HeldOutEvaluationManifest | None,
     ) -> str:
-        if plan.purpose.value == "EVALUATION":
+        if plan.purpose == CampaignPurpose.EVALUATION:
             if manifest is None:
                 raise ValueError("EVALUATION requires a held-out manifest")
             snapshot = build_evaluation_campaign_measurement_snapshot(
@@ -456,7 +465,7 @@ class CampaignLifecycleExecutor:
         cases: tuple[AttackCase, ...],
         manifest: HeldOutEvaluationManifest | None,
     ) -> tuple[AttackCase, ...]:
-        if plan.purpose.value == "EVALUATION":
+        if plan.purpose == CampaignPurpose.EVALUATION:
             if manifest is None:
                 raise ValueError("EVALUATION requires a held-out manifest")
             return select_manifest_cases(cases, manifest=manifest, evaluation=True)
@@ -474,7 +483,7 @@ class CampaignLifecycleExecutor:
         attack_fingerprint: str,
         judge_fingerprint: str,
     ) -> None:
-        if plan.purpose.value != "EVALUATION":
+        if plan.purpose != CampaignPurpose.EVALUATION:
             return
         if plan.attack_policy_fingerprint != attack_fingerprint:
             raise ValueError("attack_policy_fingerprint does not match actual Red policy")
