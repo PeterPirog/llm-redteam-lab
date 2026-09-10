@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from ..domain import AttackCase
@@ -13,6 +14,7 @@ from .ablation import (
     PairedRedAblationContract,
     PairedRedAblationReport,
     PairedRedObservation,
+    PairedTrialPlan,
     PairingMode,
     build_counterbalanced_pair_plan,
     summarize_paired_red_ablation,
@@ -38,7 +40,16 @@ class PairedTrialExecutor(Protocol):
     ) -> PairedRedObservation: ...
 
 
-async def execute_paired_red_ablation(
+@dataclass(frozen=True, slots=True)
+class PairedRedAblationExecution:
+    """Complete execution artifact needed for reporting and immutable persistence."""
+
+    plan: tuple[PairedTrialPlan, ...]
+    observations: tuple[PairedRedObservation, ...]
+    report: PairedRedAblationReport
+
+
+async def execute_paired_red_ablation_with_observations(
     *,
     cases: Iterable[AttackCase],
     contract: PairedRedAblationContract,
@@ -47,8 +58,8 @@ async def execute_paired_red_ablation(
     run_trial: PairedTrialExecutor,
     protocol: MeasurementProtocol | None = None,
     confidence_level: float = 0.95,
-) -> PairedRedAblationReport:
-    """Execute a counterbalanced matched-pair ablation and summarize it strictly."""
+) -> PairedRedAblationExecution:
+    """Execute a matched-pair ablation and retain its persistence-grade observations."""
 
     selected = select_manifest_cases(cases, manifest=manifest, evaluation=True)
     cases_by_id = {case.id: case for case in selected}
@@ -82,13 +93,43 @@ async def execute_paired_red_ablation(
             )
             observations.append(observation)
 
-    return summarize_paired_red_ablation(
-        observations,
+    frozen_observations = tuple(observations)
+    report = summarize_paired_red_ablation(
+        frozen_observations,
         contract=contract,
         manifest=manifest,
         protocol=protocol,
         confidence_level=confidence_level,
     )
+    return PairedRedAblationExecution(
+        plan=plan,
+        observations=frozen_observations,
+        report=report,
+    )
+
+
+async def execute_paired_red_ablation(
+    *,
+    cases: Iterable[AttackCase],
+    contract: PairedRedAblationContract,
+    manifest: HeldOutEvaluationManifest,
+    replicates_per_case: int,
+    run_trial: PairedTrialExecutor,
+    protocol: MeasurementProtocol | None = None,
+    confidence_level: float = 0.95,
+) -> PairedRedAblationReport:
+    """Backward-compatible report-only wrapper around the persistence-grade runner."""
+
+    execution = await execute_paired_red_ablation_with_observations(
+        cases=cases,
+        contract=contract,
+        manifest=manifest,
+        replicates_per_case=replicates_per_case,
+        run_trial=run_trial,
+        protocol=protocol,
+        confidence_level=confidence_level,
+    )
+    return execution.report
 
 
 def _validate_executor_observation(
