@@ -8,10 +8,9 @@ that a target is vulnerable or safe.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterable
 from enum import StrEnum
 from math import exp, log
-from typing import Iterable
 
 from pydantic import Field
 
@@ -142,30 +141,12 @@ def summarize_mechanism_coverage(
     sequence_signatures: set[str] = set()
 
     for snapshot in rows:
-        unknown = {
-            AttackMechanism(name)
-            for name in snapshot.mechanism_trials
-            if name in AttackMechanism._value2member_map_ and AttackMechanism(name) not in eligible
-        }
-        # A snapshot may come from a runtime whose structural eligibility differs from
-        # the report. Known-but-ineligible mechanisms make the report incomparable.
-        if unknown:
-            names = ", ".join(sorted(item.value for item in unknown))
-            raise ValueError(f"snapshot contains mechanisms outside eligibility scope: {names}")
-        invalid_names = {
-            name
-            for name in snapshot.mechanism_trials
-            if name not in AttackMechanism._value2member_map_
-        }
-        if invalid_names:
-            raise ValueError(
-                "snapshot contains unknown mechanism identifiers: "
-                + ", ".join(sorted(invalid_names))
-            )
-
+        _validate_snapshot_mechanisms(snapshot, eligible)
         for mechanism in eligible_mechanisms:
             trials = snapshot.mechanism_trials.get(mechanism.value, 0)
             wins = snapshot.mechanism_successes.get(mechanism.value, 0)
+            if trials < 0 or wins < 0:
+                raise ValueError("mechanism coverage counts cannot be negative")
             if wins > trials:
                 raise ValueError(
                     f"mechanism successes exceed exposures for {mechanism.value}"
@@ -205,17 +186,15 @@ def summarize_mechanism_coverage(
                 conversation_exposures=trials,
                 successful_conversation_exposures=wins,
                 observed_success_rate=wilson_rate(wins, trials, confidence_level),
-                exposure_share=(trials / total_exposure_mass if total_exposure_mass else 0.0),
+                exposure_share=(
+                    trials / total_exposure_mass if total_exposure_mass else 0.0
+                ),
             )
         )
 
-    entropy = _normalized_entropy(
-        tuple(exposures[item] for item in eligible_mechanisms),
-        len(eligible_mechanisms),
-    )
-    effective = _effective_mechanism_count(
-        tuple(exposures[item] for item in eligible_mechanisms)
-    )
+    exposure_counts = tuple(exposures[item] for item in eligible_mechanisms)
+    entropy = _normalized_entropy(exposure_counts, len(eligible_mechanisms))
+    effective = _effective_mechanism_count(exposure_counts)
     max_share = (
         max(exposures.values()) / total_exposure_mass if total_exposure_mass else 0.0
     )
@@ -258,7 +237,9 @@ def assess_red_coverage(
     for mechanism in policy.required_mechanisms:
         cell = by_mechanism.get(mechanism)
         if cell is None:
-            reasons.append(f"required mechanism {mechanism.value} is outside coverage scope")
+            reasons.append(
+                f"required mechanism {mechanism.value} is outside coverage scope"
+            )
             continue
         if cell.conversation_exposures < policy.min_conversation_exposures_per_mechanism:
             reasons.append(
@@ -296,6 +277,29 @@ def assess_red_coverage(
         coverage=coverage,
         reasons=tuple(reasons),
     )
+
+
+def _validate_snapshot_mechanisms(
+    snapshot: MechanismMemorySnapshot,
+    eligible: set[AttackMechanism],
+) -> None:
+    identifiers = set(snapshot.mechanism_trials) | set(snapshot.mechanism_successes)
+    parsed: set[AttackMechanism] = set()
+    invalid: list[str] = []
+    for name in identifiers:
+        try:
+            parsed.add(AttackMechanism(name))
+        except ValueError:
+            invalid.append(name)
+    if invalid:
+        raise ValueError(
+            "snapshot contains unknown mechanism identifiers: "
+            + ", ".join(sorted(invalid))
+        )
+    outside = parsed - eligible
+    if outside:
+        names = ", ".join(sorted(item.value for item in outside))
+        raise ValueError(f"snapshot contains mechanisms outside eligibility scope: {names}")
 
 
 def _normalized_entropy(counts: tuple[int, ...], categories: int) -> float:
