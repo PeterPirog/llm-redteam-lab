@@ -12,6 +12,7 @@ from rich.table import Table
 
 from .campaign_plan import (
     CampaignPlan,
+    CampaignPreflight,
     PreflightSeverity,
     RedPolicyKind,
     load_evaluation_manifest,
@@ -24,6 +25,8 @@ from .model_roles import load_models_config
 from .runtime_config import load_budget_config
 from .targets.base import SessionMode
 
+DEFAULT_BUDGET_CONFIG = Path("config/budgets.yaml")
+
 app = typer.Typer(
     name="llm-redteam",
     no_args_is_help=True,
@@ -34,37 +37,65 @@ console = Console()
 
 @app.command("validate-corpus")
 def validate_corpus(
-    paths: Annotated[list[Path], typer.Argument(help="One or more normalized corpus YAML files.")],
+    paths: Annotated[
+        list[Path],
+        typer.Argument(help="One or more normalized corpus YAML files."),
+    ],
 ) -> None:
     """Validate corpus documents without target or model inference."""
 
     cases = load_corpus_files(paths)
-    console.print(f"[green]VALID[/green] {len(cases)} attack cases across {len(paths)} file(s)")
+    console.print(
+        f"[green]VALID[/green] {len(cases)} attack cases across {len(paths)} file(s)"
+    )
 
 
 @app.command("plan")
 def plan_campaign(
-    corpus: Annotated[list[Path], typer.Option("--corpus", "-c", help="Corpus YAML file.")],
+    corpus: Annotated[
+        list[Path],
+        typer.Option("--corpus", "-c", help="Corpus YAML file."),
+    ],
     target_class: Annotated[TargetClass, typer.Option("--target-class")],
     target_mode: Annotated[TargetMode, typer.Option("--target-mode")],
-    purpose: Annotated[CampaignPurpose, typer.Option("--purpose")] = CampaignPurpose.DISCOVERY,
-    budget_config: Annotated[Path, typer.Option("--budgets")] = Path("config/budgets.yaml"),
+    purpose: Annotated[
+        CampaignPurpose,
+        typer.Option("--purpose"),
+    ] = CampaignPurpose.DISCOVERY,
+    budget_config: Annotated[
+        Path,
+        typer.Option("--budgets"),
+    ] = DEFAULT_BUDGET_CONFIG,
     budget_profile: Annotated[str | None, typer.Option("--budget-profile")] = None,
     models_config: Annotated[Path | None, typer.Option("--models")] = None,
-    evaluation_manifest: Annotated[Path | None, typer.Option("--evaluation-manifest")] = None,
-    red_policy: Annotated[RedPolicyKind, typer.Option("--red-policy")] = RedPolicyKind.STATIC,
+    evaluation_manifest: Annotated[
+        Path | None,
+        typer.Option("--evaluation-manifest"),
+    ] = None,
+    red_policy: Annotated[
+        RedPolicyKind,
+        typer.Option("--red-policy"),
+    ] = RedPolicyKind.STATIC,
     replicates: Annotated[int, typer.Option("--replicates", min=1)] = 1,
-    session_mode: Annotated[SessionMode, typer.Option("--session-mode")] = SessionMode.REPLAY,
+    session_mode: Annotated[
+        SessionMode,
+        typer.Option("--session-mode"),
+    ] = SessionMode.REPLAY,
     target_snapshot_id: Annotated[str | None, typer.Option("--target-snapshot-id")] = None,
     attack_policy_fingerprint: Annotated[
-        str | None, typer.Option("--attack-policy-fingerprint")
+        str | None,
+        typer.Option("--attack-policy-fingerprint"),
     ] = None,
     judge_policy_fingerprint: Annotated[
-        str | None, typer.Option("--judge-policy-fingerprint")
+        str | None,
+        typer.Option("--judge-policy-fingerprint"),
     ] = None,
     include_disabled: Annotated[bool, typer.Option("--include-disabled")] = False,
     allow_agent_network: Annotated[bool, typer.Option("--allow-agent-network")] = False,
-    allow_agent_git_push: Annotated[bool, typer.Option("--allow-agent-git-push")] = False,
+    allow_agent_git_push: Annotated[
+        bool,
+        typer.Option("--allow-agent-git-push"),
+    ] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Build a campaign plan and stop before any target/model call."""
@@ -108,7 +139,7 @@ def plan_campaign(
         raise typer.Exit(code=2)
 
 
-def _print_preflight(report) -> None:
+def _print_preflight(report: CampaignPreflight) -> None:
     table = Table(title="Campaign preflight")
     table.add_column("Field")
     table.add_column("Value")
@@ -125,7 +156,9 @@ def _print_preflight(report) -> None:
     console.print(table)
     for issue in report.issues:
         style = "red" if issue.severity == PreflightSeverity.ERROR else "yellow"
-        console.print(f"[{style}]{issue.severity.value}[/{style}] {issue.code}: {issue.message}")
+        console.print(
+            f"[{style}]{issue.severity.value}[/{style}] {issue.code}: {issue.message}"
+        )
 
 
 def main() -> None:
