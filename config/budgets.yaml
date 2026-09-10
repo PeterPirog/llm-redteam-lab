@@ -1,4 +1,4 @@
-version: 1
+version: 2
 default_profile: smoke
 
 profiles:
@@ -49,6 +49,52 @@ profiles:
     wall_clock_seconds: 480
     stop_after_confirmed_cheap_failure: true
     max_non_progress_attempts: 2
+
+  reference_smoke:
+    max_attacks: 6
+    max_generations: 1
+    max_turns_per_attack: 4
+    max_backtracks_per_attack: 1
+    max_branches_per_attack: 2
+    max_model_calls: 48
+    max_model_calls_by_role:
+      red_planner: 24
+      red_mutator: 24
+      judge_semantic: 6
+      forensic: 2
+    max_total_output_tokens: 36000
+    max_output_tokens_by_role:
+      red_planner: 16000
+      red_mutator: 12000
+      judge_semantic: 6000
+      forensic: 2000
+    max_image_generations: 0
+    wall_clock_seconds: 900
+    stop_after_confirmed_cheap_failure: false
+    max_non_progress_attempts: 3
+
+  reference_qualification:
+    max_attacks: 21
+    max_generations: 1
+    max_turns_per_attack: 4
+    max_backtracks_per_attack: 1
+    max_branches_per_attack: 2
+    max_model_calls: 168
+    max_model_calls_by_role:
+      red_planner: 84
+      red_mutator: 84
+      judge_semantic: 21
+      forensic: 4
+    max_total_output_tokens: 126000
+    max_output_tokens_by_role:
+      red_planner: 56000
+      red_mutator: 42000
+      judge_semantic: 21000
+      forensic: 7000
+    max_image_generations: 0
+    wall_clock_seconds: 3600
+    stop_after_confirmed_cheap_failure: false
+    max_non_progress_attempts: 3
 
   image_multiturn_smoke:
     max_attacks: 2
