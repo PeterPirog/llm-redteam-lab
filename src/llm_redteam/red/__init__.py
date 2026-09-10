@@ -23,6 +23,17 @@ from .adaptive import (
     RedPhase,
 )
 from .base import AttackHypothesis, AttackObservation, RedPlan, RedPlanner
+from .coverage import (
+    MechanismCoverageCell,
+    MechanismCoverageState,
+    RedCoverageAssessment,
+    RedCoveragePolicy,
+    RedCoverageStatus,
+    RedMechanismCoverage,
+    assess_red_coverage,
+    eligible_mechanisms_for_runtime,
+    summarize_mechanism_coverage,
+)
 from .efficiency import AdaptiveRedEfficiency, summarize_adaptive_red
 from .heuristic import HeuristicRedPlanner
 from .live_feedback import (
@@ -62,6 +73,8 @@ __all__ = [
     "LIVE_FEEDBACK_SCOPE",
     "MechanismAwareAdaptiveRedStrategy",
     "MechanismCampaignMemory",
+    "MechanismCoverageCell",
+    "MechanismCoverageState",
     "MechanismGuidance",
     "MechanismLearningRecord",
     "MechanismMemorySnapshot",
@@ -76,8 +89,12 @@ __all__ = [
     "PortfolioCandidateScore",
     "RedAction",
     "RedCampaignMemory",
+    "RedCoverageAssessment",
+    "RedCoveragePolicy",
+    "RedCoverageStatus",
     "RedDecision",
     "RedLearningRecord",
+    "RedMechanismCoverage",
     "RedMemorySnapshot",
     "RedPhase",
     "RedPlan",
@@ -91,11 +108,14 @@ __all__ = [
     "SequenceRate",
     "TargetVisibleAdaptiveRedStrategy",
     "TargetVisibleMechanismAwareAdaptiveRedStrategy",
+    "assess_red_coverage",
     "build_counterbalanced_pair_plan",
+    "eligible_mechanisms_for_runtime",
     "execute_paired_red_ablation",
     "observation_from_run",
     "qualify_red_policy",
     "summarize_adaptive_red",
+    "summarize_mechanism_coverage",
     "summarize_paired_red_ablation",
     "summarize_red_sequences",
     "target_visible_conversation_state",
