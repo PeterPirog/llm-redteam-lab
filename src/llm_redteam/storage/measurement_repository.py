@@ -32,6 +32,14 @@ class CampaignMeasurementSnapshot(StrictModel):
         default=None,
         pattern=_HASH_PATTERN,
     )
+    judge_policy_fingerprint: str | None = Field(
+        default=None,
+        pattern=_HASH_PATTERN,
+    )
+    budget_fingerprint: str | None = Field(
+        default=None,
+        pattern=_HASH_PATTERN,
+    )
     held_out_case_set_hash: str | None = Field(
         default=None,
         pattern=_HASH_PATTERN,
@@ -66,6 +74,12 @@ class CampaignMeasurementSnapshot(StrictModel):
             raise ValueError("EVALUATION requires " + ", ".join(missing))
         return self
 
+    @model_validator(mode="after")
+    def content_hash_matches_snapshot(self) -> CampaignMeasurementSnapshot:
+        if _snapshot_content_hash(self) != self.content_hash:
+            raise ValueError("campaign measurement content_hash does not match snapshot")
+        return self
+
 
 def build_campaign_measurement_snapshot(
     *,
@@ -75,6 +89,8 @@ def build_campaign_measurement_snapshot(
     metric_definition_version: str,
     protocol: MeasurementProtocol,
     attack_policy_fingerprint: str | None = None,
+    judge_policy_fingerprint: str | None = None,
+    budget_fingerprint: str | None = None,
     held_out_case_set_hash: str | None = None,
     corpus_snapshot_hash: str | None = None,
     evaluation_manifest_hash: str | None = None,
@@ -90,6 +106,8 @@ def build_campaign_measurement_snapshot(
         "metric_definition_version": metric_definition_version,
         "protocol": protocol.model_dump(mode="json"),
         "attack_policy_fingerprint": attack_policy_fingerprint,
+        "judge_policy_fingerprint": judge_policy_fingerprint,
+        "budget_fingerprint": budget_fingerprint,
         "held_out_case_set_hash": held_out_case_set_hash,
         "corpus_snapshot_hash": corpus_snapshot_hash,
         "evaluation_manifest_hash": evaluation_manifest_hash,
@@ -113,6 +131,8 @@ def build_evaluation_campaign_measurement_snapshot(
     protocol: MeasurementProtocol,
     attack_policy_fingerprint: str,
     manifest: HeldOutEvaluationManifest,
+    judge_policy_fingerprint: str | None = None,
+    budget_fingerprint: str | None = None,
 ) -> CampaignMeasurementSnapshot:
     """Bind an evaluation campaign to one exact held-out manifest without manual hashes."""
 
@@ -125,6 +145,8 @@ def build_evaluation_campaign_measurement_snapshot(
         metric_definition_version=metric_definition_version,
         protocol=protocol,
         attack_policy_fingerprint=attack_policy_fingerprint,
+        judge_policy_fingerprint=judge_policy_fingerprint,
+        budget_fingerprint=budget_fingerprint,
         held_out_case_set_hash=manifest.evaluation_case_set_hash,
         corpus_snapshot_hash=manifest.corpus_snapshot_hash,
         evaluation_manifest_hash=manifest.content_hash,
@@ -137,6 +159,9 @@ def save_campaign_measurement_snapshot(
     snapshot: CampaignMeasurementSnapshot,
 ) -> str:
     """Persist one immutable measurement snapshot, idempotent for exact repeats."""
+
+    if _snapshot_content_hash(snapshot) != snapshot.content_hash:
+        raise ValueError("campaign measurement content_hash does not match snapshot")
 
     with Session(engine) as session, session.begin():
         campaign = session.get(CampaignRow, snapshot.campaign_id)
@@ -161,6 +186,8 @@ def save_campaign_measurement_snapshot(
                 protocol=snapshot.protocol.model_dump(mode="json"),
                 protocol_hash=snapshot.content_hash,
                 attack_policy_fingerprint=snapshot.attack_policy_fingerprint,
+                judge_policy_fingerprint=snapshot.judge_policy_fingerprint,
+                budget_fingerprint=snapshot.budget_fingerprint,
                 held_out_case_set_hash=snapshot.held_out_case_set_hash,
                 corpus_snapshot_hash=snapshot.corpus_snapshot_hash,
                 evaluation_manifest_hash=snapshot.evaluation_manifest_hash,
@@ -195,6 +222,8 @@ def load_campaign_measurement_snapshot(
             metric_definition_version=campaign.metric_definition_version,
             protocol=protocol,
             attack_policy_fingerprint=row.attack_policy_fingerprint,
+            judge_policy_fingerprint=row.judge_policy_fingerprint,
+            budget_fingerprint=row.budget_fingerprint,
             held_out_case_set_hash=row.held_out_case_set_hash,
             corpus_snapshot_hash=row.corpus_snapshot_hash,
             evaluation_manifest_hash=row.evaluation_manifest_hash,
@@ -217,6 +246,18 @@ def load_campaign_measurement_snapshot(
 
 def fingerprint_attack_policy(value: object) -> str:
     """Canonical SHA-256 for a serializable frozen Red policy/configuration."""
+
+    return _canonical_hash(value)
+
+
+def fingerprint_judge_policy(value: object) -> str:
+    """Canonical SHA-256 for deterministic/model-backed Judge policy/configuration."""
+
+    return _canonical_hash(value)
+
+
+def fingerprint_budget(value: object) -> str:
+    """Canonical SHA-256 for the effective campaign budget contract."""
 
     return _canonical_hash(value)
 
@@ -268,6 +309,10 @@ def _verify_evaluation_manifest_binding(
         else None
     ):
         raise ValueError("measurement exposure does not match evaluation manifest")
+
+
+def _snapshot_content_hash(snapshot: CampaignMeasurementSnapshot) -> str:
+    return _canonical_hash(snapshot.model_dump(mode="json", exclude={"content_hash"}))
 
 
 def _canonical_hash(value: object) -> str:

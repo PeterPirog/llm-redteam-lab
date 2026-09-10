@@ -109,6 +109,28 @@ def _evaluation_snapshot(
     return snapshot, manifest
 
 
+def _rebuild_measurement_snapshot(
+    snapshot: CampaignMeasurementSnapshot,
+    **updates: object,
+) -> CampaignMeasurementSnapshot:
+    values = {
+        "campaign_id": snapshot.campaign_id,
+        "target_snapshot_id": snapshot.target_snapshot_id,
+        "campaign_configuration_hash": snapshot.campaign_configuration_hash,
+        "metric_definition_version": snapshot.metric_definition_version,
+        "protocol": snapshot.protocol,
+        "attack_policy_fingerprint": snapshot.attack_policy_fingerprint,
+        "judge_policy_fingerprint": snapshot.judge_policy_fingerprint,
+        "budget_fingerprint": snapshot.budget_fingerprint,
+        "held_out_case_set_hash": snapshot.held_out_case_set_hash,
+        "corpus_snapshot_hash": snapshot.corpus_snapshot_hash,
+        "evaluation_manifest_hash": snapshot.evaluation_manifest_hash,
+        "evaluation_set_exposure": snapshot.evaluation_set_exposure,
+    }
+    values.update(updates)
+    return build_campaign_measurement_snapshot(**values)
+
+
 def test_schema_registers_measurement_and_evaluation_manifest_tables() -> None:
     repository, _ = _repository()
     tables = inspect(repository.engine).get_table_names()
@@ -226,9 +248,15 @@ def test_measurement_snapshot_must_match_persisted_campaign_identity() -> None:
     valid, _ = _evaluation_snapshot(repository, target_snapshot_id)
 
     mismatches = (
-        valid.model_copy(update={"target_snapshot_id": "wrong-target"}),
-        valid.model_copy(update={"campaign_configuration_hash": "wrong-config"}),
-        valid.model_copy(update={"metric_definition_version": "wrong-metrics"}),
+        _rebuild_measurement_snapshot(valid, target_snapshot_id="wrong-target"),
+        _rebuild_measurement_snapshot(
+            valid,
+            campaign_configuration_hash="wrong-config",
+        ),
+        _rebuild_measurement_snapshot(
+            valid,
+            metric_definition_version="wrong-metrics",
+        ),
     )
     messages = ("target_snapshot_id", "configuration hash", "metric definition")
     for snapshot, message in zip(mismatches, messages, strict=True):
@@ -239,7 +267,7 @@ def test_measurement_snapshot_must_match_persisted_campaign_identity() -> None:
 def test_unknown_campaign_is_rejected() -> None:
     repository, target_snapshot_id = _repository()
     valid, _ = _evaluation_snapshot(repository, target_snapshot_id)
-    unknown = valid.model_copy(update={"campaign_id": "missing-campaign"})
+    unknown = _rebuild_measurement_snapshot(valid, campaign_id="missing-campaign")
 
     with pytest.raises(ValueError, match="unknown campaign"):
         save_campaign_measurement_snapshot(repository.engine, unknown)
