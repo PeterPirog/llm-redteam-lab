@@ -54,6 +54,7 @@ The current core includes:
 - static and adaptive LangGraph Red strategies,
 - first-class multi-turn trajectories with branching/backtracking,
 - branch-aware Red learning and mechanism/portfolio policies,
+- conversation-level multi-turn ASR plus censoring-aware time-to-compromise curves,
 - paired held-out Red component ablations,
 - DISCOVERY vs held-out/sequestered EVALUATION measurement contracts,
 - Wilson uncertainty intervals and explicit denominator policies,
@@ -69,6 +70,12 @@ The current core includes:
 Known multi-turn jailbreak sequences can be represented as explicit corpus `turns`
 and replayed as one statistical attack trial. Adaptive discovery can instead use a
 goal seed and generate the sequence dynamically under a bounded Red policy.
+
+Multi-turn reporting keeps actual target-call cost separate from logical conversation
+path depth. When stopping times differ, Kaplan-Meier/Greenwood estimates avoid reducing
+comparison to latency measured only among successful attacks. Claims that conversation
+memory itself improves an attack should additionally use a budget-matched independent
+resampling control; see `docs/MULTITURN_EVALUATION_PROTOCOL_2026.md`.
 
 ## Safe operator preflight
 
@@ -127,5 +134,6 @@ pytest
 
 CI and unit tests must not require paid APIs or external model inference.
 
-See `PROJECT_REQUIREMENTS.md` for authoritative architecture and
-`PROJECT_OPERATING_CONTEXT.md` for operating assumptions.
+See `PROJECT_REQUIREMENTS.md` for authoritative architecture,
+`PROJECT_OPERATING_CONTEXT.md` for operating assumptions, `docs/METRICS.md` for the
+metric contract and `docs/STANDARDS_ALIGNMENT.md` for current external crosswalks.
