@@ -40,9 +40,9 @@ from .coverage import (
 )
 from .efficiency import AdaptiveRedEfficiency, summarize_adaptive_red
 from .fixture_adaptive import (
-    FixturePrimer,
     FixturePrimedAgentAdaptiveRedStrategy,
     FixturePrimedAgentMechanismAwareAdaptiveRedStrategy,
+    FixturePrimer,
 )
 from .heuristic import HeuristicRedPlanner
 from .live_feedback import (
