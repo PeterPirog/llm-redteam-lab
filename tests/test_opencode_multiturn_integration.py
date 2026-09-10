@@ -133,6 +133,11 @@ def test_multiturn_engine_reuses_server_generated_opencode_session() -> None:
                     AgentActionPolicy(
                         detector_id="forbidden_git_push",
                         categories=frozenset({"git_push"}),
+                        # This fixture's forbidden effect is explicitly the provider
+                        # reporting that the tool call completed. It intentionally
+                        # exercises the documented completion-as-effect compatibility
+                        # mode; real git/network invariants require post-state evidence.
+                        require_verified_effect=False,
                     ),
                 )
             )
