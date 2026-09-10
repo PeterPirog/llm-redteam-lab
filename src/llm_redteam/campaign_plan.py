@@ -14,7 +14,14 @@ import yaml
 from pydantic import Field, computed_field, model_validator
 
 from .corpus import select_cases
-from .domain import AttackCase, CampaignBudget, StrictModel, TargetClass, TargetMode
+from .domain import (
+    AttackCase,
+    CampaignBudget,
+    PayloadTurnRole,
+    StrictModel,
+    TargetClass,
+    TargetMode,
+)
 from .evaluation_protocol import CampaignPurpose
 from .evaluation_sets import HeldOutEvaluationManifest, select_manifest_cases
 from .model_roles import ModelRole, ModelsConfig
@@ -236,13 +243,28 @@ def _validate_payload_execution(
 ) -> None:
     for case in selected:
         if case.payload.turns is not None:
-            if plan.red_policy != RedPolicyKind.STATIC:
+            environment_roles = {
+                turn.role
+                for turn in case.payload.turns
+                if turn.role != PayloadTurnRole.USER
+            }
+            if environment_roles:
+                roles = ", ".join(sorted(role.value for role in environment_roles))
+                _error(
+                    issues,
+                    "ENVIRONMENT_RUNNER_REQUIRED",
+                    f"case {case.id} requires an environment-aware runner for roles: {roles}",
+                )
+            if case.interaction_mode == "multi_turn" and plan.red_policy != RedPolicyKind.STATIC:
                 _error(
                     issues,
                     "SEQUENCE_POLICY_CONFLICT",
                     f"case {case.id} has explicit turns and requires red_policy=static",
                 )
-            if len(case.payload.turns) > budget.max_turns_per_attack:
+            if (
+                case.interaction_mode == "multi_turn"
+                and len(case.payload.turns) > budget.max_turns_per_attack
+            ):
                 _error(
                     issues,
                     "SEQUENCE_TURN_BUDGET",
