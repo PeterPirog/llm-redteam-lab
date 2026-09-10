@@ -243,6 +243,16 @@ def _validate_payload_execution(
     issues: list[PreflightIssue],
 ) -> None:
     for case in selected:
+        if plan.red_policy.model_backed and case.interaction_mode != "multi_turn":
+            _error(
+                issues,
+                "MODEL_RED_MULTITURN_REQUIRED",
+                (
+                    f"case {case.id} uses {case.interaction_mode}; the current model-backed "
+                    "Red runtime executes only multi_turn cases"
+                ),
+            )
+
         if case.payload.fixture is not None or case.payload.artifact is not None:
             _error(
                 issues,
