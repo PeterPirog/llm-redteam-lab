@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from llm_redteam.campaigns.multiturn import ConversationBudget, ConversationRunResult, ConversationTurn
+from llm_redteam.campaigns.multiturn import (
+    ConversationBudget,
+    ConversationRunResult,
+    ConversationState,
+    ConversationTurn,
+)
 from llm_redteam.corpus import load_corpus_file
 from llm_redteam.domain import CompromiseOutcome, ExecutionResult, TargetClass, TargetMode
 from llm_redteam.model_client import ScriptedRoleModelClient
@@ -136,8 +141,6 @@ def test_planner_summary_separates_active_path_from_abandoned_branch_content() -
             branch="b1",
         ),
     )
-    from llm_redteam.campaigns.multiturn import ConversationState
-
     state = ConversationState(
         conversation_id="conv-summary",
         attack_id=_case().id,
