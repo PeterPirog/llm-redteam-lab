@@ -4,6 +4,10 @@ The runtime is deliberately created inside the persisted campaign lifecycle. It
 shares the campaign BudgetLedger with target execution, starts from empty
 transcript-free learning memory, and freezes cross-trial learning for held-out
 EVALUATION while preserving within-conversation adaptation.
+
+Live within-conversation adaptation is restricted to target-visible evidence. The
+independent Judge remains available only after a run for DISCOVERY learning, preventing
+oracle leakage from the measurement layer into the attacker being measured.
 """
 
 from __future__ import annotations
@@ -20,12 +24,17 @@ from ..evaluation_protocol import CampaignPurpose
 from ..model_client import BudgetedRoleModelClient, RoleModelClient
 from ..model_roles import ModelRole, ModelRoleConfig, ModelsConfig
 from ..targets.base import SessionMode
-from .adaptive import AdaptiveRedStrategy, RedCampaignMemory, RedMemorySnapshot
-from .mechanism_adaptive import MechanismAwareAdaptiveRedStrategy
+from .adaptive import RedCampaignMemory, RedMemorySnapshot
+from .live_feedback import (
+    LIVE_FEEDBACK_SCOPE,
+    POST_RUN_DISCOVERY_FEEDBACK,
+    TargetVisibleAdaptiveRedStrategy,
+    TargetVisibleMechanismAwareAdaptiveRedStrategy,
+)
 from .mechanisms import MechanismCampaignMemory, MechanismMemorySnapshot, MechanismPolicy
 from .portfolio import RiskAwarePortfolioPolicy
 
-_RED_RUNTIME_VERSION = 1
+_RED_RUNTIME_VERSION = 2
 
 
 class RedRuntimeDiagnostics(StrictModel):
@@ -78,6 +87,12 @@ def build_model_backed_red_policy_descriptor(
         "target_mode": target_mode.value,
         "session_mode": session_mode.value,
         "within_conversation_adaptation": True,
+        "live_feedback_scope": LIVE_FEEDBACK_SCOPE,
+        "post_run_discovery_feedback": (
+            POST_RUN_DISCOVERY_FEEDBACK
+            if purpose == CampaignPurpose.DISCOVERY
+            else "disabled"
+        ),
         "cross_trial_learning_enabled": purpose == CampaignPurpose.DISCOVERY,
         "duplicate_similarity_threshold": duplicate_similarity_threshold,
         "conversation_budget": conversation_budget.model_dump(mode="json"),
@@ -160,9 +175,9 @@ class RedStrategyRuntime:
             "duplicate_similarity_threshold": self.duplicate_similarity_threshold,
         }
         if self.policy == RedPolicyKind.ADAPTIVE:
-            return AdaptiveRedStrategy(**common)
+            return TargetVisibleAdaptiveRedStrategy(**common)
         if self.policy == RedPolicyKind.MECHANISM:
-            return MechanismAwareAdaptiveRedStrategy(
+            return TargetVisibleMechanismAwareAdaptiveRedStrategy(
                 **common,
                 mechanism_memory=self.mechanism_memory,
                 mechanism_policy=MechanismPolicy(
@@ -171,7 +186,7 @@ class RedStrategyRuntime:
                 cross_trial_learning_enabled=self.cross_trial_learning_enabled,
             )
         if self.policy == RedPolicyKind.PORTFOLIO:
-            return MechanismAwareAdaptiveRedStrategy(
+            return TargetVisibleMechanismAwareAdaptiveRedStrategy(
                 **common,
                 mechanism_memory=self.mechanism_memory,
                 mechanism_policy=RiskAwarePortfolioPolicy(
