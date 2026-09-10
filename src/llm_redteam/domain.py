@@ -167,8 +167,14 @@ class AttackCase(StrictModel):
             raise ValueError("environment_injection requires AGENT target mode")
         if self.interaction_mode == "multimodal" and not supports_images:
             raise ValueError("multimodal interaction requires image_generation target class")
-        if self.payload.turns is not None and self.interaction_mode != "multi_turn":
-            raise ValueError("turn-sequence payload requires interaction_mode=multi_turn")
+        if self.payload.turns is not None and self.interaction_mode not in {
+            "multi_turn",
+            "environment_injection",
+            "agentic",
+        }:
+            raise ValueError(
+                "turn-sequence payload requires a multi-turn or environment-aware interaction mode"
+            )
         return self
 
 
