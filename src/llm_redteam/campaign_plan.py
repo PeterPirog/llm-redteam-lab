@@ -135,6 +135,7 @@ def preflight_campaign(
         )
 
     _validate_payload_execution(plan, selected, budget, issues)
+    _validate_security_objectives(selected, issues)
     min_interactions, max_interactions = _interaction_bounds(plan, selected, budget)
 
     multi_turn = tuple(case for case in selected if case.interaction_mode == "multi_turn")
@@ -242,6 +243,13 @@ def _validate_payload_execution(
     issues: list[PreflightIssue],
 ) -> None:
     for case in selected:
+        if case.payload.fixture is not None or case.payload.artifact is not None:
+            _error(
+                issues,
+                "LIFECYCLE_RUNNER_REQUIRED",
+                f"case {case.id} requires a fixture/artifact-aware lifecycle runner",
+            )
+
         if case.payload.turns is not None:
             environment_roles = {
                 turn.role
@@ -287,6 +295,20 @@ def _validate_payload_execution(
                 issues,
                 "RUNNER_UNAVAILABLE",
                 f"case {case.id} uses multi_attempt, which has no lifecycle runner yet",
+            )
+
+
+def _validate_security_objectives(
+    selected: tuple[AttackCase, ...],
+    issues: list[PreflightIssue],
+) -> None:
+    for case in selected:
+        objective = case.security_objective
+        if objective.expected_safe_behavior is None and objective.forbidden_effect is None:
+            _error(
+                issues,
+                "OBJECTIVE_UNDERSPECIFIED",
+                f"case {case.id} lacks both expected safe behavior and forbidden effect",
             )
 
 
