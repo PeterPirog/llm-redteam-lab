@@ -31,6 +31,7 @@ def _case(
     interaction_mode: str = "single_turn",
     preferred: list[str] | None = None,
     payload: PayloadSpec | None = None,
+    forbidden_effect: str | None = "Synthetic marker is emitted.",
 ) -> AttackCase:
     return AttackCase(
         id=case_id,
@@ -45,7 +46,7 @@ def _case(
         security_objective=SecurityObjective(
             invariant="Synthetic marker remains protected.",
             expected_safe_behavior="Do not emit the marker.",
-            forbidden_effect="Synthetic marker is emitted.",
+            forbidden_effect=forbidden_effect,
         ),
         payload=payload or PayloadSpec(text="synthetic probe"),
         grading=GradingSpec(preferred=preferred or ["deterministic"], detectors=["marker"]),
@@ -53,7 +54,13 @@ def _case(
     )
 
 
-def _budgets(*, max_turns: int = 4, max_attacks: int = 5, max_images: int = 2):
+def _budgets(
+    *,
+    max_turns: int = 4,
+    max_attacks: int = 5,
+    max_images: int = 2,
+    runtime_policy: RuntimePolicy | None = None,
+):
     budget = CampaignBudget(
         max_attacks=max_attacks,
         max_generations=1,
@@ -70,7 +77,7 @@ def _budgets(*, max_turns: int = 4, max_attacks: int = 5, max_images: int = 2):
         version=1,
         default_profile="smoke",
         profiles={"smoke": budget},
-        policy=RuntimePolicy(),
+        policy=runtime_policy or RuntimePolicy(),
     )
 
 
@@ -96,6 +103,21 @@ def test_static_discovery_can_be_planned_without_inference_roles() -> None:
     assert report.ready is True
     assert report.planned_trials == 1
     assert report.required_model_roles == ()
+
+
+def test_selected_case_requires_explicit_forbidden_effect() -> None:
+    report = preflight_campaign(
+        plan=CampaignPlan(
+            purpose=CampaignPurpose.DISCOVERY,
+            target_class=TargetClass.WRITING,
+            target_mode=TargetMode.MODEL,
+        ),
+        cases=(_case(forbidden_effect=None),),
+        budgets=_budgets(),
+    )
+
+    assert report.ready is False
+    assert "SECURITY_OBJECTIVE_INCOMPLETE" in _codes(report, PreflightSeverity.ERROR)
 
 
 def test_evaluation_fails_closed_without_held_out_measurement_identity() -> None:
@@ -147,6 +169,26 @@ def test_planned_replicates_must_fit_attack_budget() -> None:
     assert "ATTACK_BUDGET" in _codes(report, PreflightSeverity.ERROR)
 
 
+def test_explicit_budget_profile_policy_blocks_implicit_default() -> None:
+    report = preflight_campaign(
+        plan=CampaignPlan(
+            purpose=CampaignPurpose.DISCOVERY,
+            target_class=TargetClass.WRITING,
+            target_mode=TargetMode.MODEL,
+        ),
+        cases=(_case(),),
+        budgets=_budgets(
+            runtime_policy=RuntimePolicy(require_explicit_profile=True),
+        ),
+    )
+
+    assert report.ready is False
+    assert "EXPLICIT_BUDGET_PROFILE_REQUIRED" in _codes(
+        report,
+        PreflightSeverity.ERROR,
+    )
+
+
 def test_image_plan_requires_multimodal_model_configuration() -> None:
     case = _case(
         target_class=TargetClass.IMAGE_GENERATION,
@@ -165,6 +207,31 @@ def test_image_plan_requires_multimodal_model_configuration() -> None:
 
     assert report.ready is False
     assert "MODEL_CONFIG_REQUIRED" in _codes(report, PreflightSeverity.ERROR)
+
+
+def test_deterministic_image_plan_can_disable_global_multimodal_requirement() -> None:
+    case = _case(
+        target_class=TargetClass.IMAGE_GENERATION,
+        target_mode=TargetMode.PIPELINE,
+        preferred=["deterministic"],
+    )
+    report = preflight_campaign(
+        plan=CampaignPlan(
+            purpose=CampaignPurpose.DISCOVERY,
+            target_class=TargetClass.IMAGE_GENERATION,
+            target_mode=TargetMode.PIPELINE,
+        ),
+        cases=(case,),
+        budgets=_budgets(
+            max_images=2,
+            runtime_policy=RuntimePolicy(
+                require_multimodal_judge_for_image_generation=False,
+            ),
+        ),
+    )
+
+    assert report.ready is True
+    assert report.required_model_roles == ()
 
 
 def test_agent_network_enablement_is_visible_not_silent() -> None:
