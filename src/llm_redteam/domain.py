@@ -64,29 +64,62 @@ class SourceMode(StrEnum):
 class SourceRef(StrictModel):
     mode: SourceMode
     name: str = Field(min_length=1)
-    record_id: str | None = None
+    record_id: str | int | None = None
     revision: str | None = None
     license: str | None = None
     url: str | None = None
+    retrieved_at: str | None = None
     content_hash: str | None = None
+
+
+class TaxonomyRef(StrictModel):
+    mlcommons_v0_7_leaf: str | None = None
+    mlcommons_status: Literal[
+        "direct",
+        "instance_dependent",
+        "partial",
+        "out_of_scope",
+        "control_not_jailbreak",
+        "objective_not_mechanism",
+    ] | None = None
 
 
 class SecurityObjective(StrictModel):
     invariant: str = Field(min_length=1)
-    expected_safe_behavior: str = Field(min_length=1)
-    forbidden_effect: str = Field(min_length=1)
+    expected_safe_behavior: str | None = None
+    forbidden_effect: str | None = None
+
+
+class PayloadTurnRole(StrEnum):
+    USER = "user"
+    EXTERNAL_CONTENT = "external_content"
+    TOOL_OUTPUT = "tool_output"
+
+
+class PayloadTurn(StrictModel):
+    role: PayloadTurnRole
+    content: str = Field(min_length=1)
 
 
 class PayloadSpec(StrictModel):
     template: str | None = None
     text: str | None = None
     fixture: str | None = None
+    turns: tuple[PayloadTurn, ...] | None = None
+    artifact: str | None = None
 
     @model_validator(mode="after")
     def exactly_one_payload_kind(self) -> PayloadSpec:
-        populated = sum(value is not None for value in (self.template, self.text, self.fixture))
+        populated = sum(
+            value is not None
+            for value in (self.template, self.text, self.fixture, self.turns, self.artifact)
+        )
         if populated != 1:
-            raise ValueError("payload requires exactly one of template, text, or fixture")
+            raise ValueError(
+                "payload requires exactly one of template, text, fixture, turns, or artifact"
+            )
+        if self.turns is not None and not self.turns:
+            raise ValueError("payload turns cannot be empty")
         return self
 
 
@@ -98,15 +131,22 @@ class GradingSpec(StrictModel):
 class AttackCase(StrictModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
+    description: str = ""
     target_classes: list[TargetClass] = Field(min_length=1)
     target_modes: list[TargetMode] = Field(min_length=1)
     attack_family: list[str] = Field(min_length=1)
+    technique_ids: list[str] = Field(default_factory=list)
     complexity_tier: AttackTier
     interaction_mode: Literal[
-        "single_turn", "multi_turn", "environment_injection", "agentic"
+        "single_turn",
+        "multi_attempt",
+        "multi_turn",
+        "environment_injection",
+        "multimodal",
+        "agentic",
     ]
     source: SourceRef
+    taxonomy: TaxonomyRef | None = None
     security_objective: SecurityObjective
     payload: PayloadSpec
     variables: dict[str, str | int | float | bool] = Field(default_factory=dict)
@@ -125,11 +165,23 @@ class AttackCase(StrictModel):
         supports_agent_mode = TargetMode.AGENT in self.target_modes
         if is_environment_injection and not supports_agent_mode:
             raise ValueError("environment_injection requires AGENT target mode")
+        if self.interaction_mode == "multimodal" and not supports_images:
+            raise ValueError("multimodal interaction requires image_generation target class")
+        if self.payload.turns is not None and self.interaction_mode not in {
+            "multi_turn",
+            "environment_injection",
+            "agentic",
+        }:
+            raise ValueError(
+                "turn-sequence payload requires a multi-turn or environment-aware interaction mode"
+            )
         return self
 
 
 class CorpusDocument(StrictModel):
     version: int = Field(ge=1)
+    id: str | None = None
+    purpose: str | None = None
     cases: list[AttackCase]
 
     @model_validator(mode="after")

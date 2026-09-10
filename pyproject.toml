@@ -17,8 +17,13 @@ dependencies = [
   "opentelemetry-sdk>=1.30,<2",
   "pydantic>=2.10,<3",
   "PyYAML>=6.0.2,<7",
+  "rich>=14,<15",
   "SQLAlchemy>=2.0,<3",
+  "typer>=0.27,<1",
 ]
+
+[project.scripts]
+llm-redteam = "llm_redteam.cli:main"
 
 [project.optional-dependencies]
 postgres = [
