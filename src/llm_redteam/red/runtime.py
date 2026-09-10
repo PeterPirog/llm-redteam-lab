@@ -43,7 +43,8 @@ from .live_feedback import (
 from .mechanisms import MechanismCampaignMemory, MechanismMemorySnapshot, MechanismPolicy
 from .portfolio import RiskAwarePortfolioPolicy
 
-_RED_RUNTIME_VERSION = 3
+_RED_RUNTIME_VERSION = 2
+_AGENT_RED_RUNTIME_VERSION = 3
 
 
 class RedRuntimeDiagnostics(StrictModel):
@@ -90,15 +91,12 @@ def build_model_backed_red_policy_descriptor(
             conversation_budget=conversation_budget
         ).descriptor()
 
-    return {
+    descriptor: dict[str, object] = {
         "kind": policy.value,
         "runtime_version": _RED_RUNTIME_VERSION,
         "target_class": target_class.value,
         "target_mode": target_mode.value,
         "session_mode": session_mode.value,
-        "threat_lens": (
-            "agent-system-v1" if target_mode == TargetMode.AGENT else "conversational-v1"
-        ),
         "within_conversation_adaptation": True,
         "live_feedback_scope": LIVE_FEEDBACK_SCOPE,
         "post_run_discovery_feedback": (
@@ -114,6 +112,10 @@ def build_model_backed_red_policy_descriptor(
         "mechanism_policy": mechanism_policy,
         "initial_learning_memory": "empty-v1",
     }
+    if target_mode == TargetMode.AGENT:
+        descriptor["runtime_version"] = _AGENT_RED_RUNTIME_VERSION
+        descriptor["threat_lens"] = "agent-system-v1"
+    return descriptor
 
 
 class RedStrategyRuntime:
