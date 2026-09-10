@@ -1,6 +1,6 @@
-version: 5
+version: 6
 corpus_id: llm-redteam-lab-corpus-v1
-last_verified: 2026-09-08
+last_verified: 2026-09-10
 
 authoritative_files:
   sources:
@@ -22,6 +22,8 @@ authoritative_files:
 native_case_sets:
   - native/smoke/canary-baseline.yaml
   - native/baseline/inert-techniques-v1.yaml
+  - native/multiturn/reference-discovery-v1.yaml
+  - native/multiturn/synthetic-sequences-v1.yaml
 
 native_fixtures:
   - fixtures/coding/repo_injection_canary/fixture.yaml
