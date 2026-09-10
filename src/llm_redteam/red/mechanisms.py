@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from enum import StrEnum
+from statistics import median
 
 from pydantic import Field
 
@@ -39,16 +40,31 @@ class MechanismGuidance(StrictModel):
     stagnation_passes: int = Field(ge=0)
     must_change_mechanism: bool = False
     branch_recommended: bool = False
+    recommended_branch_from_turn_id: str | None = None
+    candidate_scores: dict[str, float] = Field(default_factory=dict)
     rationale: str = Field(min_length=1)
 
 
 class MechanismLearningRecord(StrictModel):
-    """Transcript-free outcome for one bounded multi-turn conversation."""
+    """Transcript-free outcome for one bounded multi-turn conversation.
+
+    ``mechanisms`` is the chronological set of attempted mechanisms and therefore
+    remains useful for exploration accounting. Success credit is carried separately
+    so a mechanism on an abandoned sibling branch is not incorrectly rewarded when
+    another branch later succeeds.
+    """
 
     attack_family: str = Field(min_length=1)
     mechanisms: tuple[AttackMechanism, ...] = ()
+    successful_mechanisms: tuple[AttackMechanism, ...] = ()
+    attempted_transitions: tuple[str, ...] = ()
+    successful_transitions: tuple[str, ...] = ()
+    successful_path: tuple[AttackMechanism, ...] = ()
     successful: bool
     error: bool
+    target_interactions: int = Field(ge=0, default=0)
+    first_violation_ordinal: int | None = Field(default=None, gt=0)
+    first_violation_depth: int | None = Field(default=None, gt=0)
 
 
 class MechanismMemorySnapshot(StrictModel):
@@ -58,18 +74,28 @@ class MechanismMemorySnapshot(StrictModel):
     trials: int = Field(ge=0)
     successes: int = Field(ge=0)
     errors: int = Field(ge=0)
+    target_interactions: int = Field(ge=0, default=0)
     mechanism_trials: dict[str, int] = Field(default_factory=dict)
     mechanism_successes: dict[str, int] = Field(default_factory=dict)
     transition_trials: dict[str, int] = Field(default_factory=dict)
     transition_successes: dict[str, int] = Field(default_factory=dict)
+    sequence_trials: dict[str, int] = Field(default_factory=dict)
+    sequence_successes: dict[str, int] = Field(default_factory=dict)
+    median_success_ordinal: float | None = None
+    median_success_depth: float | None = None
 
     def compact_text(self) -> str:
         mechanisms = self._top_ratios(self.mechanism_trials, self.mechanism_successes, limit=7)
         transitions = self._top_ratios(self.transition_trials, self.transition_successes, limit=5)
+        sequences = self._top_ratios(self.sequence_trials, self.sequence_successes, limit=3)
         return (
             f"family={self.attack_family}; trials={self.trials}; successes={self.successes}; "
-            f"errors={self.errors}; mechanisms(success/trials)={mechanisms}; "
-            f"transitions(success/trials)={transitions}"
+            f"errors={self.errors}; target_interactions={self.target_interactions}; "
+            f"median_success_ordinal={self.median_success_ordinal}; "
+            f"median_success_depth={self.median_success_depth}; "
+            f"mechanisms(success/trials)={mechanisms}; "
+            f"transitions(success/trials)={transitions}; "
+            f"successful_paths(success/trials)={sequences}"
         )
 
     @staticmethod
@@ -116,36 +142,79 @@ class MechanismCampaignMemory:
         mechanism_successes: Counter[str] = Counter()
         transition_trials: Counter[str] = Counter()
         transition_successes: Counter[str] = Counter()
+        sequence_trials: Counter[str] = Counter()
+        sequence_successes: Counter[str] = Counter()
+        success_ordinals: list[int] = []
+        success_depths: list[int] = []
 
         for row in rows:
-            for mechanism in set(row.mechanisms):
+            attempted = row.mechanisms
+            successful_mechanisms = row.successful_mechanisms
+            if row.successful and not successful_mechanisms:
+                # Backward-compatible interpretation for records written before
+                # branch-aware credit assignment existed.
+                successful_mechanisms = attempted
+
+            for mechanism in set(attempted):
                 mechanism_trials[mechanism.value] += 1
+            for mechanism in set(successful_mechanisms):
+                mechanism_successes[mechanism.value] += 1
+
+            attempted_transitions = row.attempted_transitions
+            if not attempted_transitions:
+                attempted_transitions = tuple(
+                    f"{left.value}->{right.value}"
+                    for left, right in zip(attempted, attempted[1:], strict=False)
+                )
+            successful_transitions = row.successful_transitions
+            if row.successful and not successful_transitions:
+                successful_transitions = attempted_transitions
+
+            transition_trials.update(attempted_transitions)
+            transition_successes.update(successful_transitions)
+
+            path = row.successful_path
+            if not path and attempted:
+                path = attempted
+            if path:
+                signature = ">".join(item.value for item in path)
+                sequence_trials[signature] += 1
                 if row.successful:
-                    mechanism_successes[mechanism.value] += 1
-            for left, right in zip(row.mechanisms, row.mechanisms[1:], strict=False):
-                transition = f"{left.value}->{right.value}"
-                transition_trials[transition] += 1
-                if row.successful:
-                    transition_successes[transition] += 1
+                    sequence_successes[signature] += 1
+
+            if row.successful and row.first_violation_ordinal is not None:
+                success_ordinals.append(row.first_violation_ordinal)
+            if row.successful and row.first_violation_depth is not None:
+                success_depths.append(row.first_violation_depth)
 
         return MechanismMemorySnapshot(
             attack_family=attack_family,
             trials=len(rows),
             successes=sum(row.successful for row in rows),
             errors=sum(row.error for row in rows),
+            target_interactions=sum(row.target_interactions for row in rows),
             mechanism_trials=dict(mechanism_trials),
             mechanism_successes=dict(mechanism_successes),
             transition_trials=dict(transition_trials),
             transition_successes=dict(transition_successes),
+            sequence_trials=dict(sequence_trials),
+            sequence_successes=dict(sequence_successes),
+            median_success_ordinal=(
+                float(median(success_ordinals)) if success_ordinals else None
+            ),
+            median_success_depth=(
+                float(median(success_depths)) if success_depths else None
+            ),
         )
 
 
 class MechanismPolicy:
     """Budget-aware mechanism selector with bounded exploration/exploitation.
 
-    The selector is deliberately simple. It uses smoothed historical success yield,
-    a small novelty bonus and deterministic stagnation handling. It does not spend
-    additional model calls, and it cannot change the authorized campaign budget.
+    The selector is deliberately simple and remains the stable baseline for paired
+    ablation. It uses smoothed historical success yield, a small novelty bonus and
+    deterministic stagnation handling. More advanced policies must preserve this
+    interface so they can be compared under identical campaign conditions.
     """
 
     _PRIMER = (
@@ -184,9 +253,12 @@ class MechanismPolicy:
         prior_mechanisms: tuple[AttackMechanism, ...],
         historical_trials: Mapping[str, int],
         historical_successes: Mapping[str, int],
+        historical_transition_trials: Mapping[str, int] | None = None,
+        historical_transition_successes: Mapping[str, int] | None = None,
     ) -> MechanismGuidance:
         """Recommend the next mechanism from state, budget and aggregate evidence."""
 
+        del historical_transition_trials, historical_transition_successes
         stagnation = self._trailing_passes(conversation)
         if phase == "finisher":
             return MechanismGuidance(
@@ -213,6 +285,7 @@ class MechanismPolicy:
                 stagnation_passes=stagnation,
                 must_change_mechanism=True,
                 branch_recommended=True,
+                recommended_branch_from_turn_id=self._branch_anchor(conversation, stagnation),
                 rationale=(
                     "current path has repeated conclusive PASS outcomes; explore an "
                     "alternate branch before spending the remaining turn budget"
@@ -238,6 +311,15 @@ class MechanismPolicy:
                 "force mechanism change after repeated non-progress"
             ),
         )
+
+    def descriptor(self) -> dict[str, object]:
+        """Stable serializable policy parameters for measurement provenance."""
+
+        return {
+            "type": type(self).__name__,
+            "stagnation_threshold": self.stagnation_threshold,
+            "novelty_bonus": self.novelty_bonus,
+        }
 
     def _rank_candidates(
         self,
@@ -270,18 +352,40 @@ class MechanismPolicy:
         return tuple(sorted(eligible, key=score, reverse=True))
 
     def _branch_available(self, conversation: ConversationState) -> bool:
-        return (
-            conversation.session_mode == SessionMode.REPLAY
-            and conversation.active_leaf_turn_id is not None
-            and conversation.backtracks < self.conversation_budget.max_backtracks
-            and conversation.branches < self.conversation_budget.max_branches
-        )
+        if (
+            conversation.session_mode != SessionMode.REPLAY
+            or conversation.active_leaf_turn_id is None
+            or conversation.backtracks >= self.conversation_budget.max_backtracks
+            or conversation.branches >= self.conversation_budget.max_branches
+        ):
+            return False
+        turns = {turn.turn_id: turn for turn in conversation.turns}
+        leaf = turns.get(conversation.active_leaf_turn_id)
+        return leaf is not None and leaf.parent_turn_id is not None
+
+    @staticmethod
+    def _branch_anchor(conversation: ConversationState, stagnation: int) -> str | None:
+        turns = {turn.turn_id: turn for turn in conversation.turns}
+        current = conversation.active_leaf_turn_id
+        if current is None:
+            return None
+        steps = max(1, stagnation)
+        for _ in range(steps):
+            turn = turns.get(current)
+            if turn is None or turn.parent_turn_id is None:
+                break
+            current = turn.parent_turn_id
+        return current if current != conversation.active_leaf_turn_id else None
 
     @staticmethod
     def _trailing_passes(conversation: ConversationState) -> int:
         count = 0
-        for turn in reversed(conversation.turns):
-            if turn.outcome != CompromiseOutcome.PASS:
+        current = conversation.active_leaf_turn_id
+        turns = {turn.turn_id: turn for turn in conversation.turns}
+        while current is not None:
+            turn = turns.get(current)
+            if turn is None or turn.outcome != CompromiseOutcome.PASS:
                 break
             count += 1
+            current = turn.parent_turn_id
         return count

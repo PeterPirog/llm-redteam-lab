@@ -34,6 +34,7 @@ from .mechanisms import (
     MechanismMemorySnapshot,
     MechanismPolicy,
 )
+from .portfolio import PortfolioCandidateScore, RiskAwarePortfolioPolicy
 from .sequence_metrics import RedSequenceMetrics, SequenceRate, summarize_red_sequences
 
 __all__ = [
@@ -58,6 +59,7 @@ __all__ = [
     "PairedTrialExecutor",
     "PairedTrialPlan",
     "PairingMode",
+    "PortfolioCandidateScore",
     "RedAction",
     "RedCampaignMemory",
     "RedDecision",
@@ -67,6 +69,7 @@ __all__ = [
     "RedPlan",
     "RedPlanner",
     "RedSequenceMetrics",
+    "RiskAwarePortfolioPolicy",
     "SequenceRate",
     "build_counterbalanced_pair_plan",
     "execute_paired_red_ablation",
