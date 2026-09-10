@@ -3,13 +3,16 @@ from __future__ import annotations
 from typing import Any, cast
 
 from llm_redteam.metrics import wilson_rate
-from llm_redteam.red.ablation import PairedRedAblationContract, PairedRedAblationReport, PairingMode
+from llm_redteam.red.ablation import (
+    PairedRedAblationContract,
+    PairedRedAblationReport,
+    PairingMode,
+)
 from llm_redteam.red.qualification import (
     RedPolicyQualificationPolicy,
     RedPolicyQualificationStatus,
     qualify_red_policy,
 )
-
 
 HASH_A = "a" * 64
 HASH_B = "b" * 64
