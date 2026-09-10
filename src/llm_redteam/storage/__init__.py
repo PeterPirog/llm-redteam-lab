@@ -11,6 +11,8 @@ from .ablation_repository import (
     save_red_ablation_observations,
     summarize_persisted_red_ablation,
 )
+from .calibration_models import JudgeCalibrationObservationRow, JudgeCalibrationRunRow
+from .calibration_repository import load_judge_calibration, save_judge_calibration
 from .evaluation_set_models import EvaluationSetManifestRow
 from .evaluation_set_repository import (
     load_evaluation_set_manifest,
@@ -39,6 +41,8 @@ __all__ = [
     "CampaignMeasurementSnapshot",
     "EvaluationSetManifestRow",
     "ExperimentRepository",
+    "JudgeCalibrationObservationRow",
+    "JudgeCalibrationRunRow",
     "RedAblationExperimentRow",
     "RedAblationExperimentSnapshot",
     "RedAblationObservationRow",
@@ -53,10 +57,12 @@ __all__ = [
     "load_campaign_measurement_snapshot",
     "load_evaluation_set_manifest",
     "load_evaluation_set_manifest_by_id",
+    "load_judge_calibration",
     "load_red_ablation_experiment",
     "load_red_ablation_observations",
     "save_campaign_measurement_snapshot",
     "save_evaluation_set_manifest",
+    "save_judge_calibration",
     "save_red_ablation_experiment",
     "save_red_ablation_observation",
     "save_red_ablation_observations",
