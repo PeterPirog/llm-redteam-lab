@@ -6,6 +6,8 @@ profiles:
     max_attacks: 5
     max_generations: 1
     max_turns_per_attack: 1
+    max_backtracks_per_attack: 0
+    max_branches_per_attack: 1
     max_model_calls: 12
     max_model_calls_by_role:
       red_planner: 4
@@ -29,6 +31,8 @@ profiles:
     max_attacks: 2
     max_generations: 1
     max_turns_per_attack: 4
+    max_backtracks_per_attack: 1
+    max_branches_per_attack: 2
     max_model_calls: 14
     max_model_calls_by_role:
       red_planner: 8
@@ -50,6 +54,8 @@ profiles:
     max_attacks: 2
     max_generations: 1
     max_turns_per_attack: 4
+    max_backtracks_per_attack: 1
+    max_branches_per_attack: 2
     max_model_calls: 16
     max_model_calls_by_role:
       red_planner: 8
@@ -71,6 +77,8 @@ profiles:
     max_attacks: 20
     max_generations: 3
     max_turns_per_attack: 4
+    max_backtracks_per_attack: 2
+    max_branches_per_attack: 3
     max_model_calls: 80
     max_model_calls_by_role:
       red_planner: 36
@@ -94,6 +102,8 @@ profiles:
     max_attacks: 100
     max_generations: 6
     max_turns_per_attack: 8
+    max_backtracks_per_attack: 3
+    max_branches_per_attack: 4
     max_model_calls: 500
     max_model_calls_by_role:
       red_planner: 220
