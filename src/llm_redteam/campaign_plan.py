@@ -114,6 +114,7 @@ def preflight_campaign(
     budgets: BudgetConfigDocument,
     models: ModelsConfig | None = None,
     evaluation_manifest: HeldOutEvaluationManifest | None = None,
+    fixture_runner_available: bool = False,
 ) -> CampaignPreflight:
     """Validate a campaign before execution without making any inference call."""
 
@@ -141,7 +142,13 @@ def preflight_campaign(
             f"planned trials={planned_trials} exceed max_attacks={budget.max_attacks}",
         )
 
-    _validate_payload_execution(plan, selected, budget, issues)
+    _validate_payload_execution(
+        plan,
+        selected,
+        budget,
+        issues,
+        fixture_runner_available=fixture_runner_available,
+    )
     _validate_security_objectives(selected, issues)
     min_interactions, max_interactions = _interaction_bounds(plan, selected, budget)
 
@@ -254,6 +261,8 @@ def _validate_payload_execution(
     selected: tuple[AttackCase, ...],
     budget: CampaignBudget,
     issues: list[PreflightIssue],
+    *,
+    fixture_runner_available: bool,
 ) -> None:
     for case in selected:
         if plan.red_policy.model_backed and case.interaction_mode != "multi_turn":
@@ -266,11 +275,46 @@ def _validate_payload_execution(
                 ),
             )
 
-        if case.payload.fixture is not None or case.payload.artifact is not None:
+        if case.payload.fixture is not None:
+            if not fixture_runner_available:
+                _error(
+                    issues,
+                    "FIXTURE_RUNNER_REQUIRED",
+                    f"case {case.id} requires the fixture-aware lifecycle runtime",
+                )
+            if plan.target_mode != TargetMode.AGENT:
+                _error(
+                    issues,
+                    "FIXTURE_AGENT_REQUIRED",
+                    f"case {case.id} fixture execution currently requires target_mode=AGENT",
+                )
+            if not plan.red_policy.model_backed:
+                _error(
+                    issues,
+                    "FIXTURE_ADAPTIVE_RED_REQUIRED",
+                    f"case {case.id} fixture execution requires a model-backed Red policy",
+                )
+            if case.interaction_mode != "multi_turn":
+                _error(
+                    issues,
+                    "FIXTURE_MULTITURN_REQUIRED",
+                    f"case {case.id} fixture execution currently requires multi_turn mode",
+                )
+            if plan.purpose == CampaignPurpose.EVALUATION:
+                _error(
+                    issues,
+                    "FIXTURE_EVALUATION_NOT_HASH_BOUND",
+                    (
+                        f"case {case.id} fixture bundle is not yet bound into the held-out "
+                        "evaluation manifest; run it only as DISCOVERY"
+                    ),
+                )
+
+        if case.payload.artifact is not None:
             _error(
                 issues,
                 "LIFECYCLE_RUNNER_REQUIRED",
-                f"case {case.id} requires a fixture/artifact-aware lifecycle runner",
+                f"case {case.id} requires an artifact-aware lifecycle runner",
             )
 
         if case.payload.turns is not None:
@@ -303,7 +347,11 @@ def _validate_payload_execution(
                 )
             for turn in case.payload.turns:
                 _validate_renderable(case, turn.content, issues)
-        elif case.interaction_mode == "multi_turn" and plan.red_policy == RedPolicyKind.STATIC:
+        elif (
+            case.interaction_mode == "multi_turn"
+            and plan.red_policy == RedPolicyKind.STATIC
+            and case.payload.fixture is None
+        ):
             _error(
                 issues,
                 "STATIC_MULTITURN_SEQUENCE_REQUIRED",
