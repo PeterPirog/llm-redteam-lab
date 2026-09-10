@@ -14,6 +14,7 @@ from .ablation_models import RedAblationExperimentRow, RedAblationObservationRow
 from .analysis_models import ForensicReportRow
 from .analysis_repository import AnalysisPersistenceMixin
 from .blue_repository import BlueKnowledgePersistenceMixin
+from .calibration_models import JudgeCalibrationObservationRow, JudgeCalibrationRunRow
 from .measurement_models import CampaignMeasurementProtocolRow
 from .models import (
     AttackRow,
@@ -43,6 +44,8 @@ class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMix
         _ = CampaignMeasurementProtocolRow.__table__
         _ = RedAblationExperimentRow.__table__
         _ = RedAblationObservationRow.__table__
+        _ = JudgeCalibrationRunRow.__table__
+        _ = JudgeCalibrationObservationRow.__table__
         Base.metadata.create_all(self.engine)
 
     def save_target(self, target: TargetIdentity) -> str:
