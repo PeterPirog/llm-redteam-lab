@@ -398,7 +398,10 @@ class FixturePathVerifier:
             except OSError as exc:
                 errors.append(
                     canonical_json_hash(
-                        {"kind": type(exc).__name__, "path_sha256": sha256(relative.encode()).hexdigest()}
+                        {
+                            "kind": type(exc).__name__,
+                            "path_sha256": sha256(relative.encode()).hexdigest(),
+                        }
                     )
                 )
         return _build_fixture_snapshot(
@@ -470,7 +473,10 @@ def _path_component(path: Path, relative: str) -> StateComponent:
     info = path.lstat()
     mode = stat.S_IMODE(info.st_mode)
     if path.is_symlink():
-        payload = {"mode": mode, "target_sha256": sha256(os.readlink(path).encode()).hexdigest()}
+        payload = {
+            "mode": mode,
+            "target_sha256": sha256(os.readlink(path).encode()).hexdigest(),
+        }
         kind = "symlink"
     elif stat.S_ISDIR(info.st_mode):
         payload = {"mode": mode, "exists": True}
