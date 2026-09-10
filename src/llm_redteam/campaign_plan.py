@@ -11,7 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from pydantic import Field, model_validator
+from pydantic import Field, computed_field, model_validator
 
 from .corpus import select_cases
 from .domain import AttackCase, CampaignBudget, StrictModel, TargetClass, TargetMode
@@ -76,11 +76,14 @@ class CampaignPreflight(StrictModel):
     red_policy: RedPolicyKind
     selected_case_ids: tuple[str, ...]
     planned_trials: int
+    minimum_target_interactions: int
+    maximum_target_interactions: int
     multi_turn_cases: int
     image_cases: int
     required_model_roles: tuple[str, ...]
     issues: tuple[PreflightIssue, ...]
 
+    @computed_field
     @property
     def ready(self) -> bool:
         return not any(issue.severity == PreflightSeverity.ERROR for issue in self.issues)
@@ -124,6 +127,9 @@ def preflight_campaign(
             f"planned trials={planned_trials} exceed max_attacks={budget.max_attacks}",
         )
 
+    _validate_payload_execution(plan, selected, budget, issues)
+    min_interactions, max_interactions = _interaction_bounds(plan, selected, budget)
+
     multi_turn = tuple(case for case in selected if case.interaction_mode == "multi_turn")
     if multi_turn and budget.max_turns_per_attack < 2:
         _error(
@@ -135,13 +141,28 @@ def preflight_campaign(
     image_cases = tuple(
         case for case in selected if TargetClass.IMAGE_GENERATION in case.target_classes
     )
-    minimum_image_generations = len(image_cases) * plan.replicates
+    minimum_image_generations = sum(
+        _case_interaction_bounds(case, plan, budget)[0]
+        for case in image_cases
+    ) * plan.replicates
+    maximum_image_generations = sum(
+        _case_interaction_bounds(case, plan, budget)[1]
+        for case in image_cases
+    ) * plan.replicates
     if minimum_image_generations > budget.max_image_generations:
         _error(
             issues,
             "IMAGE_BUDGET",
-            "image budget cannot provide even one generation per planned image trial",
+            "image budget cannot provide the minimum generations required by the plan",
         )
+    elif maximum_image_generations > budget.max_image_generations:
+        message = (
+            "image budget is below the planned upper bound; adaptive trajectories may stop early"
+        )
+        if plan.purpose == CampaignPurpose.EVALUATION:
+            _error(issues, "IMAGE_BUDGET_UPPER_BOUND", message)
+        else:
+            _warning(issues, "IMAGE_BUDGET_UPPER_BOUND", message)
 
     required_roles = _required_model_roles(plan, selected)
     _validate_model_roles(required_roles, models, plan, issues)
@@ -156,6 +177,8 @@ def preflight_campaign(
         red_policy=plan.red_policy,
         selected_case_ids=tuple(case.id for case in selected),
         planned_trials=planned_trials,
+        minimum_target_interactions=min_interactions,
+        maximum_target_interactions=max_interactions,
         multi_turn_cases=len(multi_turn),
         image_cases=len(image_cases),
         required_model_roles=tuple(role.value for role in sorted(required_roles, key=str)),
@@ -202,6 +225,91 @@ def _select_plan_cases(
     if not selected:
         _error(issues, "NO_CASES", "no compatible attack cases selected")
     return selected
+
+
+def _validate_payload_execution(
+    plan: CampaignPlan,
+    selected: tuple[AttackCase, ...],
+    budget: CampaignBudget,
+    issues: list[PreflightIssue],
+) -> None:
+    for case in selected:
+        if case.payload.turns is not None:
+            if plan.red_policy != RedPolicyKind.STATIC:
+                _error(
+                    issues,
+                    "SEQUENCE_POLICY_CONFLICT",
+                    f"case {case.id} has explicit turns and requires red_policy=static",
+                )
+            if len(case.payload.turns) > budget.max_turns_per_attack:
+                _error(
+                    issues,
+                    "SEQUENCE_TURN_BUDGET",
+                    f"case {case.id} sequence exceeds max_turns_per_attack",
+                )
+            for turn in case.payload.turns:
+                _validate_renderable(case, turn.content, issues)
+        elif case.interaction_mode == "multi_turn" and plan.red_policy == RedPolicyKind.STATIC:
+            _error(
+                issues,
+                "STATIC_MULTITURN_SEQUENCE_REQUIRED",
+                f"case {case.id} needs explicit turns or a model-backed Red policy",
+            )
+
+        if case.payload.template is not None:
+            _validate_renderable(case, case.payload.template, issues)
+
+        if case.interaction_mode == "multi_attempt":
+            _error(
+                issues,
+                "RUNNER_UNAVAILABLE",
+                f"case {case.id} uses multi_attempt, which has no lifecycle runner yet",
+            )
+
+
+def _validate_renderable(
+    case: AttackCase,
+    template: str,
+    issues: list[PreflightIssue],
+) -> None:
+    rendered = template
+    for name, value in case.variables.items():
+        rendered = rendered.replace("{{" + name + "}}", str(value))
+    if "{{" in rendered or "}}" in rendered:
+        _error(
+            issues,
+            "UNRESOLVED_VARIABLE",
+            f"case {case.id} contains unresolved template variables",
+        )
+
+
+def _interaction_bounds(
+    plan: CampaignPlan,
+    selected: tuple[AttackCase, ...],
+    budget: CampaignBudget,
+) -> tuple[int, int]:
+    minimum = 0
+    maximum = 0
+    for case in selected:
+        case_min, case_max = _case_interaction_bounds(case, plan, budget)
+        minimum += case_min * plan.replicates
+        maximum += case_max * plan.replicates
+    return minimum, maximum
+
+
+def _case_interaction_bounds(
+    case: AttackCase,
+    plan: CampaignPlan,
+    budget: CampaignBudget,
+) -> tuple[int, int]:
+    if case.interaction_mode != "multi_turn":
+        return 1, 1
+    if case.payload.turns is not None:
+        count = len(case.payload.turns)
+        return count, count
+    if plan.red_policy.model_backed:
+        return 1, budget.max_turns_per_attack
+    return 0, 0
 
 
 def _required_model_roles(
