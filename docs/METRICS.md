@@ -1,7 +1,7 @@
 # Metrics and Statistical Reporting
 
 Status: initial metric contract
-Last verified: 2026-09-09
+Last verified: 2026-09-10
 
 The project reports experimental evidence, not absolute claims that a model is "secure" or "insecure".
 
@@ -17,6 +17,7 @@ The project reports experimental evidence, not absolute claims that a model is "
 8. Comparisons across target versions require comparable corpus, budgets and metric definitions.
 9. For multi-turn attacks, one bounded conversation is one Blue vulnerability trial; individual turns are not additional ASR trials.
 10. Red component comparisons must isolate the changed component and preserve matched experimental conditions.
+11. Experimental Red policies must not be promoted merely because they are more complex; promotion requires a predeclared qualification rule applied to controlled paired evidence.
 
 ## ASR — Attack Success Rate
 
@@ -255,6 +256,33 @@ Effectiveness and cost MUST NOT be collapsed into one default composite score. C
 A negative treatment cost delta means the treatment used fewer resources or reached the violation earlier.
 
 Execution order is counterbalanced across matched pairs to reduce systematic time/runtime/cache bias. If the target supports controlled stochastic seeds, `CASE_REPLICATE_SEED` reuses the same pair seed in both arms. Without supported deterministic seeding, the weaker `CASE_REPLICATE` pairing mode must remain visible in provenance.
+
+## Red policy qualification
+
+A paired ablation report and a policy-promotion decision are different artifacts. The ablation report describes what happened under controlled conditions; qualification applies a predeclared operational rule to that report.
+
+Qualification has three states:
+
+- `QUALIFIED`: treatment has earned promotion under the declared rule;
+- `REJECTED`: paired evidence significantly favors baseline, or treatment violates an explicitly configured resource ceiling;
+- `INCONCLUSIVE`: the experiment cannot support either conclusion.
+
+The default qualification rule requires:
+
+- a minimum matched-pair count,
+- a positive objective-violation rate delta greater than the configured minimum effect,
+- more treatment-only than baseline-only successes,
+- exact two-sided McNemar/binomial `p <= alpha`.
+
+A low-power result is `INCONCLUSIVE`, not evidence that the treatment is ineffective. Zero discordant pairs are also `INCONCLUSIVE`: identical observed outcomes do not prove superiority.
+
+A qualification policy may require `CASE_REPLICATE_SEED`. If the target cannot provide that stronger stochastic pairing, the weaker experiment remains visible and the stricter promotion rule stays inconclusive.
+
+Optional cost ceilings may independently restrict mean additional target interactions or mean additional Red output tokens. Cost and effectiveness are not multiplied, weighted or collapsed into one opaque score.
+
+For auditable use, qualification should consume a report reconstructed through `summarize_persisted_red_ablation()`, which re-verifies the campaign, target, held-out set, Judge, budget, session and execution provenance before the deterministic qualification rule is applied.
+
+Qualification is scoped evidence, not a universal ranking of Red policies. A treatment qualified on one target/configuration/budget regime is not automatically qualified everywhere.
 
 ## Target comparison
 
