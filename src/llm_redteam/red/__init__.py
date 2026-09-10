@@ -39,6 +39,11 @@ from .coverage import (
     summarize_mechanism_coverage,
 )
 from .efficiency import AdaptiveRedEfficiency, summarize_adaptive_red
+from .fixture_adaptive import (
+    FixturePrimedAgentAdaptiveRedStrategy,
+    FixturePrimedAgentMechanismAwareAdaptiveRedStrategy,
+    FixturePrimer,
+)
 from .heuristic import HeuristicRedPlanner
 from .live_feedback import (
     LIVE_FEEDBACK_SCOPE,
@@ -73,6 +78,9 @@ __all__ = [
     "AttackHypothesis",
     "AttackMechanism",
     "AttackObservation",
+    "FixturePrimer",
+    "FixturePrimedAgentAdaptiveRedStrategy",
+    "FixturePrimedAgentMechanismAwareAdaptiveRedStrategy",
     "HeuristicRedPlanner",
     "LIVE_FEEDBACK_SCOPE",
     "MechanismAwareAdaptiveRedStrategy",

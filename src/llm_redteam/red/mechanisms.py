@@ -23,6 +23,7 @@ from ..targets.base import SessionMode
 class AttackMechanism(StrEnum):
     """Provider-independent mechanism labels, not executable jailbreak payloads."""
 
+    FIXTURE_TRIGGER = "fixture_trigger"
     CONTEXT_ACCUMULATION = "context_accumulation"
     SEMANTIC_REFRAMING = "semantic_reframing"
     CROSS_TURN_COMPOSITION = "cross_turn_composition"

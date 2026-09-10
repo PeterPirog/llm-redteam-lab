@@ -25,9 +25,15 @@ from ..evaluation_sets import (
     fingerprint_attack_case,
     select_manifest_cases,
 )
+from ..fixture_runtime import (
+    FixtureDescriptor,
+    FixtureProvenanceTarget,
+    FixtureRuntime,
+)
 from ..judges.base import Judge
 from ..model_client import RoleModelClient
 from ..model_roles import ModelsConfig
+from ..red.fixture_adaptive import FixturePrimer
 from ..red.runtime import RedRuntimeDiagnostics, RedStrategyRuntime
 from ..red.scripted import ScriptedPayloadStrategy
 from ..runtime_config import BudgetConfigDocument
@@ -98,9 +104,9 @@ class CampaignLifecycleExecutor:
     """Execute a valid campaign plan through one auditable lifecycle boundary.
 
     Static and model-backed Red both pass through the same preflight, budget,
-    target-snapshot, persistence and measurement-provenance gates. Model-backed Red
-    is currently limited to first-class multi-turn cases so generated attack
-    sequences cannot bypass the conversation accounting contract.
+    target-snapshot, persistence and measurement-provenance gates. Fixture-aware
+    model-backed Red additionally binds an immutable environment bundle into a clean
+    local sandbox before the first legitimate target interaction.
     """
 
     def __init__(
@@ -113,6 +119,7 @@ class CampaignLifecycleExecutor:
         judge_policy_descriptor: object,
         models: ModelsConfig | None = None,
         red_model_client: RoleModelClient | None = None,
+        fixture_runtime: FixtureRuntime | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -121,6 +128,7 @@ class CampaignLifecycleExecutor:
         self.judge_policy_descriptor = judge_policy_descriptor
         self.models = models
         self.red_model_client = red_model_client
+        self.fixture_runtime = fixture_runtime
 
     async def run(
         self,
@@ -138,6 +146,7 @@ class CampaignLifecycleExecutor:
             budgets=self.budgets,
             models=self.models,
             evaluation_manifest=evaluation_manifest,
+            fixture_runner_available=self.fixture_runtime is not None,
         )
         if not preflight.ready:
             errors = [
@@ -148,12 +157,14 @@ class CampaignLifecycleExecutor:
             raise ValueError("campaign preflight blocked execution: " + "; ".join(errors))
 
         selected = self._selected_cases(plan, cases, evaluation_manifest)
+        fixture_descriptors = self._describe_fixtures(selected)
         profile_name, effective_budget = self.budgets.profile(plan.budget_profile)
         ledger = BudgetLedger(effective_budget)
         red_runtime = self._build_red_runtime(
             plan=plan,
             effective_budget=effective_budget,
             ledger=ledger,
+            fixture_priming_enabled=bool(fixture_descriptors),
         )
 
         target_snapshot_id = self.repository.target_snapshot_id(self.target.identity)
@@ -179,6 +190,10 @@ class CampaignLifecycleExecutor:
             {
                 "plan": plan.model_dump(mode="json"),
                 "selected_case_ids": [case.id for case in selected],
+                "fixture_descriptors": {
+                    case_id: descriptor.model_dump(mode="json")
+                    for case_id, descriptor in sorted(fixture_descriptors.items())
+                },
                 "budget_profile": profile_name,
                 "budget_fingerprint": budget_fingerprint,
                 "target_snapshot_id": target_snapshot_id,
@@ -204,6 +219,7 @@ class CampaignLifecycleExecutor:
         measurement_hash = ""
         executions: list[ExecutionResult] = []
         conversations: list[ConversationRunResult] = []
+        seen_fixture_isolation_ids: set[str] = set()
         try:
             measurement_hash = self._persist_measurement_snapshot(
                 campaign_id=resolved_campaign_id,
@@ -222,13 +238,14 @@ class CampaignLifecycleExecutor:
                         case.id,
                         replicate,
                     )
+                    descriptor = fixture_descriptors.get(case.id)
                     self.repository.record_attack(
                         attack_instance_id=attack_instance_id,
                         campaign_id=resolved_campaign_id,
                         case_id=case.id,
                         attack_family=case.attack_family[0],
                         interaction_mode=case.interaction_mode,
-                        payload_hash=fingerprint_attack_case(case).content_hash,
+                        payload_hash=_attack_payload_hash(case, descriptor),
                     )
                     if case.interaction_mode == "multi_turn":
                         strategy: MultiTurnStrategy | None = None
@@ -240,7 +257,7 @@ class CampaignLifecycleExecutor:
                                 campaign_id=resolved_campaign_id,
                                 replicate=replicate,
                             )
-                        else:
+                        elif descriptor is None:
                             strategy = red_runtime.strategy_for(case)
                             conversation = await self._run_model_conversation(
                                 case=case,
@@ -250,6 +267,19 @@ class CampaignLifecycleExecutor:
                                 replicate=replicate,
                                 red_runtime=red_runtime,
                                 strategy=strategy,
+                                target=self.target,
+                            )
+                        else:
+                            conversation, strategy = await self._run_fixture_conversation(
+                                case=case,
+                                descriptor=descriptor,
+                                ledger=ledger,
+                                plan=plan,
+                                campaign_id=resolved_campaign_id,
+                                replicate=replicate,
+                                attack_instance_id=attack_instance_id,
+                                red_runtime=red_runtime,
+                                seen_isolation_ids=seen_fixture_isolation_ids,
                             )
                         self.repository.save_conversation(
                             conversation,
@@ -330,12 +360,32 @@ class CampaignLifecycleExecutor:
             budget=ledger.snapshot(),
         )
 
+    def _describe_fixtures(
+        self,
+        selected: tuple[AttackCase, ...],
+    ) -> dict[str, FixtureDescriptor]:
+        fixture_cases = tuple(case for case in selected if case.payload.fixture is not None)
+        if not fixture_cases:
+            return {}
+        if self.fixture_runtime is None:
+            raise RuntimeError("fixture cases passed preflight without a fixture runtime")
+        descriptors: dict[str, FixtureDescriptor] = {}
+        for case in fixture_cases:
+            descriptor = self.fixture_runtime.describe(case)
+            if descriptor.target_class != self.target.identity.target_class:
+                raise ValueError("fixture target class does not match actual Blue target")
+            if descriptor.target_mode != self.target.identity.target_mode:
+                raise ValueError("fixture target mode does not match actual Blue target")
+            descriptors[case.id] = descriptor
+        return descriptors
+
     def _build_red_runtime(
         self,
         *,
         plan: CampaignPlan,
         effective_budget: CampaignBudget,
         ledger: BudgetLedger,
+        fixture_priming_enabled: bool,
     ) -> RedStrategyRuntime | None:
         if not plan.red_policy.model_backed:
             return None
@@ -353,6 +403,7 @@ class CampaignLifecycleExecutor:
             models=self.models,
             model_client=self.red_model_client,
             budget=ledger,
+            fixture_priming_enabled=fixture_priming_enabled,
         )
 
     async def _run_static_single_turn(
@@ -408,9 +459,10 @@ class CampaignLifecycleExecutor:
         replicate: int,
         red_runtime: RedStrategyRuntime,
         strategy: MultiTurnStrategy,
+        target: TargetAdapter,
     ) -> ConversationRunResult:
         engine = MultiTurnCampaignEngine(
-            target=self.target,
+            target=target,
             judge=self.judge,
             conversation_budget=red_runtime.conversation_budget,
             budget=ledger,
@@ -421,6 +473,59 @@ class CampaignLifecycleExecutor:
             session_mode=plan.session_mode,
             conversation_id=_conversation_id(campaign_id, case.id, replicate),
         )
+
+    async def _run_fixture_conversation(
+        self,
+        *,
+        case: AttackCase,
+        descriptor: FixtureDescriptor,
+        ledger: BudgetLedger,
+        plan: CampaignPlan,
+        campaign_id: str,
+        replicate: int,
+        attack_instance_id: str,
+        red_runtime: RedStrategyRuntime,
+        seen_isolation_ids: set[str],
+    ) -> tuple[ConversationRunResult, MultiTurnStrategy]:
+        if self.fixture_runtime is None:
+            raise RuntimeError("fixture runtime disappeared after preflight")
+        prepared = self.fixture_runtime.prepare(case, run_id=attack_instance_id)
+        if prepared.descriptor != descriptor:
+            self.fixture_runtime.release(prepared)
+            raise RuntimeError("fixture descriptor changed between preflight and execution")
+        if prepared.isolation_id in seen_isolation_ids:
+            self.fixture_runtime.release(prepared)
+            raise RuntimeError("fixture isolation ID was reused across trials")
+        seen_isolation_ids.add(prepared.isolation_id)
+        bound_target = FixtureProvenanceTarget(self.target, prepared)
+        primer = FixturePrimer(
+            fixture_id=descriptor.fixture_id,
+            injection_surface=descriptor.injection_surface.value,
+            legitimate_task=descriptor.legitimate_task,
+        )
+        strategy = red_runtime.strategy_for(case, fixture_primer=primer)
+        conversation: ConversationRunResult | None = None
+        try:
+            conversation = await self._run_model_conversation(
+                case=case,
+                ledger=ledger,
+                plan=plan,
+                campaign_id=campaign_id,
+                replicate=replicate,
+                red_runtime=red_runtime,
+                strategy=strategy,
+                target=bound_target,
+            )
+        finally:
+            release = self.fixture_runtime.release(prepared)
+        if conversation is None:
+            raise RuntimeError("fixture conversation failed before producing a result")
+        execution = conversation.execution.model_copy(
+            update={
+                "evidence": conversation.execution.evidence + (release.evidence(),),
+            }
+        )
+        return conversation.model_copy(update={"execution": execution}), strategy
 
     def _persist_measurement_snapshot(
         self,
@@ -491,6 +596,21 @@ class CampaignLifecycleExecutor:
             raise ValueError("attack_policy_fingerprint does not match actual Red policy")
         if plan.judge_policy_fingerprint != judge_fingerprint:
             raise ValueError("judge_policy_fingerprint does not match actual Judge policy")
+
+
+def _attack_payload_hash(
+    case: AttackCase,
+    descriptor: FixtureDescriptor | None,
+) -> str:
+    case_hash = fingerprint_attack_case(case).content_hash
+    if descriptor is None:
+        return case_hash
+    return _canonical_hash(
+        {
+            "case_content_hash": case_hash,
+            "fixture_bundle_sha256": descriptor.bundle_sha256,
+        }
+    )
 
 
 def _canonical_hash(value: object) -> str:
