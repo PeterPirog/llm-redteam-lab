@@ -54,6 +54,7 @@ class AgentActionObservation(StrictModel):
     tool: str = Field(min_length=1)
     phase: AgentActionPhase
     categories: frozenset[str] = frozenset()
+    resource_hashes: frozenset[str] = frozenset()
     input_hash: str = Field(min_length=1)
     output_hash: str | None = None
     error_hash: str | None = None
@@ -72,6 +73,7 @@ class AgentActionObservation(StrictModel):
                 "tool": self.tool,
                 "phase": self.phase.value,
                 "categories": sorted(self.categories),
+                "resource_hashes": sorted(self.resource_hashes),
                 "input_hash": self.input_hash,
                 "output_hash": self.output_hash or "",
                 "error_hash": self.error_hash or "",
@@ -115,6 +117,7 @@ class AgentEffectObservation(StrictModel):
     verifier_id: str = Field(min_length=1)
     state: AgentEffectState
     categories: frozenset[str] = Field(min_length=1)
+    resource_hashes: frozenset[str] = frozenset()
     effect_hash: str | None = None
     state_before_hash: str | None = None
     state_after_hash: str | None = None
@@ -137,6 +140,7 @@ class AgentEffectObservation(StrictModel):
                 "verifier_id": self.verifier_id,
                 "state": self.state.value,
                 "categories": sorted(self.categories),
+                "resource_hashes": sorted(self.resource_hashes),
                 "effect_hash": self.effect_hash or "",
                 "state_before_hash": self.state_before_hash or "",
                 "state_after_hash": self.state_after_hash or "",
@@ -205,6 +209,94 @@ def classify_agent_action(
         categories.add("external_path")
 
     return frozenset(categories)
+
+
+def fingerprint_agent_path(path: str, *, workspace_root: str | None = None) -> str:
+    """Return a stable hash for a path without retaining the raw path in evidence.
+
+    Paths inside the configured workspace are normalized to workspace-relative POSIX
+    form. This lets a Judge match `ATTACK_MARKER.txt` whether a tool emitted a relative
+    path or an absolute path rooted in the disposable workspace.
+    """
+
+    normalized = _normalize_resource_path(path, workspace_root)
+    return canonical_json_hash({"kind": "path", "value": normalized})
+
+
+def fingerprint_agent_resources(
+    tool: str,
+    tool_input: dict[str, Any],
+    *,
+    workspace_root: str | None = None,
+) -> frozenset[str]:
+    """Extract privacy-preserving resource identities from a tool request.
+
+    This is intentionally narrower than shell parsing. It recognizes explicit file
+    fields and common shell redirection/file-command targets. Unknown syntax remains
+    unclassified rather than inventing attribution.
+    """
+
+    paths: set[str] = set()
+    for key in (
+        "path",
+        "filePath",
+        "filepath",
+        "file_path",
+        "cwd",
+        "workingDirectory",
+        "working_directory",
+    ):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            paths.add(value)
+
+    normalized_tool = tool.casefold()
+    if normalized_tool in {"bash", "shell"}:
+        command = _first_string(tool_input, "command", "cmd", "script")
+        if command:
+            paths.update(_shell_path_candidates(command))
+
+    return frozenset(
+        fingerprint_agent_path(path, workspace_root=workspace_root)
+        for path in paths
+        if path.strip()
+    )
+
+
+def _shell_path_candidates(command: str) -> set[str]:
+    candidates: set[str] = set()
+    patterns = (
+        r">{1,2}\s*[\"']?([^\"'\s;&|]+)",
+        r"\b(?:touch|New-Item)\s+(?:-Path\s+)?[\"']?([^\"'\s;&|]+)",
+        r"\b(?:Set-Content|Out-File)\s+(?:-Path\s+|-FilePath\s+)?[\"']?([^\"'\s;&|]+)",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, command, re.IGNORECASE):
+            value = match.group(1).strip()
+            if value:
+                candidates.add(value)
+    return candidates
+
+
+def _normalize_resource_path(candidate: str, workspace_root: str | None) -> str:
+    windows = bool(re.match(r"^[A-Za-z]:[\\/]", candidate)) or bool(
+        workspace_root and re.match(r"^[A-Za-z]:[\\/]", workspace_root)
+    )
+    path_cls = PureWindowsPath if windows else PurePosixPath
+    path = path_cls(candidate)
+
+    if workspace_root:
+        root = path_cls(workspace_root)
+        if path.is_absolute() and root.is_absolute():
+            try:
+                path = path.relative_to(root)
+            except ValueError:
+                pass
+
+    normalized = path.as_posix()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized.casefold() if windows else normalized
 
 
 def _first_string(mapping: dict[str, Any], *keys: str) -> str | None:
