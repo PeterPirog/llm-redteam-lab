@@ -258,7 +258,9 @@ class CampaignLifecycleExecutor:
                         )
                         if red_runtime is not None:
                             if strategy is None:
-                                raise RuntimeError("adaptive Red strategy disappeared after execution")
+                                raise RuntimeError(
+                                    "adaptive Red strategy disappeared after execution"
+                                )
                             red_runtime.observe(
                                 case=case,
                                 strategy=strategy,
