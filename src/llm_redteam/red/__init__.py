@@ -35,6 +35,12 @@ from .mechanisms import (
     MechanismPolicy,
 )
 from .portfolio import PortfolioCandidateScore, RiskAwarePortfolioPolicy
+from .qualification import (
+    RedPolicyQualificationDecision,
+    RedPolicyQualificationPolicy,
+    RedPolicyQualificationStatus,
+    qualify_red_policy,
+)
 from .scripted import ScriptedPayloadStrategy
 from .sequence_metrics import RedSequenceMetrics, SequenceRate, summarize_red_sequences
 
@@ -69,6 +75,9 @@ __all__ = [
     "RedPhase",
     "RedPlan",
     "RedPlanner",
+    "RedPolicyQualificationDecision",
+    "RedPolicyQualificationPolicy",
+    "RedPolicyQualificationStatus",
     "RedSequenceMetrics",
     "RiskAwarePortfolioPolicy",
     "ScriptedPayloadStrategy",
@@ -76,6 +85,7 @@ __all__ = [
     "build_counterbalanced_pair_plan",
     "execute_paired_red_ablation",
     "observation_from_run",
+    "qualify_red_policy",
     "summarize_adaptive_red",
     "summarize_paired_red_ablation",
     "summarize_red_sequences",
