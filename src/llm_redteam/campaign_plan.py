@@ -118,6 +118,13 @@ def preflight_campaign(
     """Validate a campaign before execution without making any inference call."""
 
     issues: list[PreflightIssue] = []
+    if budgets.policy.require_explicit_profile and plan.budget_profile is None:
+        _error(
+            issues,
+            "EXPLICIT_BUDGET_PROFILE_REQUIRED",
+            "runtime policy requires an explicit campaign budget profile",
+        )
+
     try:
         profile_name, budget = budgets.profile(plan.budget_profile)
     except ValueError as exc:
@@ -126,6 +133,8 @@ def preflight_campaign(
         _error(issues, "BUDGET_PROFILE", str(exc))
 
     selected = _select_plan_cases(plan, cases, evaluation_manifest, issues)
+    _validate_security_objectives(selected, issues)
+
     planned_trials = len(selected) * plan.replicates
     if planned_trials > budget.max_attacks:
         _error(
@@ -171,8 +180,14 @@ def preflight_campaign(
         else:
             _warning(issues, "IMAGE_BUDGET_UPPER_BOUND", message)
 
-    required_roles = _required_model_roles(plan, selected)
-    _validate_model_roles(required_roles, models, plan, issues)
+    required_roles = _required_model_roles(
+        plan,
+        selected,
+        require_multimodal_for_image=(
+            budgets.policy.require_multimodal_judge_for_image_generation
+        ),
+    )
+    _validate_model_roles(required_roles, models, budget, issues)
     _validate_measurement_identity(plan, evaluation_manifest, issues)
     _validate_agent_policy(plan, budgets, issues)
 
@@ -233,6 +248,22 @@ def _select_plan_cases(
     if not selected:
         _error(issues, "NO_CASES", "no compatible attack cases selected")
     return selected
+
+
+def _validate_security_objectives(
+    selected: tuple[AttackCase, ...],
+    issues: list[PreflightIssue],
+) -> None:
+    """Require an executable forbidden effect without over-constraining corpus ingestion."""
+
+    for case in selected:
+        forbidden_effect = case.security_objective.forbidden_effect
+        if forbidden_effect is None or not forbidden_effect.strip():
+            _error(
+                issues,
+                "SECURITY_OBJECTIVE_INCOMPLETE",
+                f"case {case.id} has no explicit forbidden_effect and cannot be measured",
+            )
 
 
 def _validate_payload_execution(
@@ -338,6 +369,8 @@ def _case_interaction_bounds(
 def _required_model_roles(
     plan: CampaignPlan,
     selected: tuple[AttackCase, ...],
+    *,
+    require_multimodal_for_image: bool,
 ) -> set[ModelRole]:
     roles: set[ModelRole] = set()
     if plan.red_policy.model_backed:
@@ -345,7 +378,9 @@ def _required_model_roles(
     preferred = {judge for case in selected for judge in case.grading.preferred}
     if "semantic" in preferred:
         roles.add(ModelRole.JUDGE_SEMANTIC)
-    if "multimodal" in preferred or plan.target_class == TargetClass.IMAGE_GENERATION:
+    if "multimodal" in preferred or (
+        require_multimodal_for_image and plan.target_class == TargetClass.IMAGE_GENERATION
+    ):
         roles.add(ModelRole.JUDGE_MULTIMODAL)
     return roles
 
@@ -353,7 +388,7 @@ def _required_model_roles(
 def _validate_model_roles(
     required: set[ModelRole],
     models: ModelsConfig | None,
-    plan: CampaignPlan,
+    budget: CampaignBudget,
     issues: list[PreflightIssue],
 ) -> None:
     if not required:
@@ -372,18 +407,30 @@ def _validate_model_roles(
         if role == ModelRole.RED_PLANNER:
             capabilities.add("reasoning")
         try:
-            models.role(role, required_capabilities=capabilities)
+            config = models.role(role, required_capabilities=capabilities)
         except ValueError as exc:
             _error(issues, "MODEL_ROLE", str(exc))
+            continue
 
-    if plan.target_class == TargetClass.IMAGE_GENERATION:
-        try:
-            models.role(
-                ModelRole.JUDGE_MULTIMODAL,
-                required_capabilities={"text", "vision"},
+        if config.max_output_tokens > budget.max_total_output_tokens:
+            _error(
+                issues,
+                "MODEL_OUTPUT_BUDGET",
+                (
+                    f"model role {role.value} max_output_tokens={config.max_output_tokens} "
+                    f"exceeds campaign total output budget={budget.max_total_output_tokens}"
+                ),
             )
-        except ValueError as exc:
-            _error(issues, "MULTIMODAL_JUDGE", str(exc))
+        role_limit = budget.max_output_tokens_by_role.get(role.value)
+        if role_limit is not None and config.max_output_tokens > role_limit:
+            _error(
+                issues,
+                "MODEL_ROLE_OUTPUT_BUDGET",
+                (
+                    f"model role {role.value} max_output_tokens={config.max_output_tokens} "
+                    f"exceeds role output budget={role_limit}"
+                ),
+            )
 
 
 def _validate_measurement_identity(
