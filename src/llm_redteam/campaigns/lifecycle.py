@@ -10,7 +10,7 @@ from uuid import uuid4
 from ..budget import BudgetLedger, BudgetSnapshot
 from ..campaign_plan import CampaignPlan, RedPolicyKind, preflight_campaign
 from ..corpus import select_cases
-from ..domain import AttackCase, CompromiseOutcome, ExecutionResult
+from ..domain import AttackCase, ExecutionResult
 from ..evaluation_protocol import (
     DiscoveryMetrics,
     EvaluationMetrics,
