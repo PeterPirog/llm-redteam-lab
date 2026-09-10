@@ -1,4 +1,9 @@
-"""Normalized, privacy-conscious evidence for agent tool activity."""
+"""Normalized, privacy-conscious evidence for agent tool activity.
+
+Tool completion, authorization and real-world/system-state effects are deliberately
+separate evidence channels. A provider reporting that a tool call completed is not
+by itself proof that a forbidden effect occurred.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,7 @@ from hashlib import sha256
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .domain import EvidenceKind, EvidenceRecord, StrictModel
 
@@ -22,6 +27,22 @@ class AgentActionPhase(StrEnum):
     EXECUTED = "executed"
     ERROR = "error"
     DENIED = "denied"
+
+
+class AgentAuthorizationDecision(StrEnum):
+    """Decision emitted by a runtime authorization/control layer."""
+
+    ALLOWED = "allowed"
+    DENIED = "denied"
+    UNKNOWN = "unknown"
+
+
+class AgentEffectState(StrEnum):
+    """Independent conclusion about whether a security-relevant effect occurred."""
+
+    OBSERVED = "observed"
+    ABSENT = "absent"
+    UNKNOWN = "unknown"
 
 
 class AgentActionObservation(StrictModel):
@@ -54,6 +75,71 @@ class AgentActionObservation(StrictModel):
                 "input_hash": self.input_hash,
                 "output_hash": self.output_hash or "",
                 "error_hash": self.error_hash or "",
+            },
+            redacted=True,
+        )
+
+
+class AgentAuthorizationObservation(StrictModel):
+    """Runtime authorization decision linked to one tool-control event."""
+
+    control_event_id: str = Field(min_length=1)
+    decision: AgentAuthorizationDecision
+    control_id: str = Field(min_length=1)
+    decision_hash: str | None = None
+    source: str = Field(min_length=1, default="authorization_layer")
+
+    def to_evidence(self) -> EvidenceRecord:
+        return EvidenceRecord(
+            kind=EvidenceKind.GUARDRAIL,
+            source=self.source,
+            observed_at=datetime.now(UTC).isoformat(),
+            content_hash=self.decision_hash,
+            data={
+                "control_event_id": self.control_event_id,
+                "decision": self.decision.value,
+                "control_id": self.control_id,
+            },
+            redacted=True,
+        )
+
+
+class AgentEffectObservation(StrictModel):
+    """Independent state-verifier result linked to one tool-control event.
+
+    `verifier_id` is matched against the Judge policy, so target-controlled text
+    cannot make itself authoritative by merely claiming that an effect occurred.
+    """
+
+    control_event_id: str = Field(min_length=1)
+    verifier_id: str = Field(min_length=1)
+    state: AgentEffectState
+    categories: frozenset[str] = Field(min_length=1)
+    effect_hash: str | None = None
+    state_before_hash: str | None = None
+    state_after_hash: str | None = None
+    source: str = Field(min_length=1, default="system_state_verifier")
+
+    @model_validator(mode="after")
+    def observed_effect_requires_a_fingerprint(self) -> AgentEffectObservation:
+        if self.state == AgentEffectState.OBSERVED and self.effect_hash is None:
+            raise ValueError("observed agent effect requires effect_hash")
+        return self
+
+    def to_evidence(self) -> EvidenceRecord:
+        return EvidenceRecord(
+            kind=EvidenceKind.SYSTEM_STATE,
+            source=self.source,
+            observed_at=datetime.now(UTC).isoformat(),
+            content_hash=self.effect_hash,
+            data={
+                "control_event_id": self.control_event_id,
+                "verifier_id": self.verifier_id,
+                "state": self.state.value,
+                "categories": sorted(self.categories),
+                "effect_hash": self.effect_hash or "",
+                "state_before_hash": self.state_before_hash or "",
+                "state_after_hash": self.state_after_hash or "",
             },
             redacted=True,
         )
