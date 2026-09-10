@@ -35,9 +35,9 @@ from .coverage import (
     summarize_mechanism_coverage,
 )
 from .fixture_adaptive import (
-    FixturePrimer,
     FixturePrimedAgentAdaptiveRedStrategy,
     FixturePrimedAgentMechanismAwareAdaptiveRedStrategy,
+    FixturePrimer,
 )
 from .live_feedback import (
     LIVE_FEEDBACK_SCOPE,
