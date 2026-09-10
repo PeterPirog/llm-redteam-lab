@@ -1,10 +1,16 @@
 import asyncio
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from llm_redteam.agent_actions import AgentActionObservation, AgentActionPhase
-from llm_redteam.campaign_plan import CampaignPlan, PreflightSeverity, RedPolicyKind, preflight_campaign
+from llm_redteam.campaign_plan import (
+    CampaignPlan,
+    PreflightSeverity,
+    RedPolicyKind,
+    preflight_campaign,
+)
 from llm_redteam.campaigns.lifecycle import CampaignLifecycleExecutor
 from llm_redteam.domain import (
     AttackCase,
@@ -21,6 +27,7 @@ from llm_redteam.domain import (
     TargetMode,
 )
 from llm_redteam.evaluation_protocol import CampaignPurpose
+from llm_redteam.evaluation_sets import build_held_out_evaluation_manifest
 from llm_redteam.fixture_runtime import FixturePathVerifier, LocalFixtureRuntime
 from llm_redteam.judges.system_state import AgentActionPolicy, SystemStateJudge
 from llm_redteam.model_client import ScriptedRoleModelClient
@@ -275,6 +282,7 @@ def test_fixture_runtime_refuses_to_clean_unowned_nonempty_directory(tmp_path: P
 
 
 def test_fixture_preflight_is_fail_closed_without_runner_and_for_evaluation() -> None:
+    case = _case()
     plan = CampaignPlan(
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.CODING,
@@ -285,7 +293,7 @@ def test_fixture_preflight_is_fail_closed_without_runner_and_for_evaluation() ->
     )
     blocked = preflight_campaign(
         plan=plan,
-        cases=(_case(),),
+        cases=(case,),
         budgets=_budgets(),
         models=_models(),
     )
@@ -293,11 +301,19 @@ def test_fixture_preflight_is_fail_closed_without_runner_and_for_evaluation() ->
         item.code for item in blocked.issues if item.severity == PreflightSeverity.ERROR
     }
 
+    manifest = build_held_out_evaluation_manifest(
+        manifest_id="fixture-held-out-test",
+        discovery_cases=(),
+        evaluation_cases=(case,),
+        corpus_snapshot_hash=sha256(b"fixture-held-out-test").hexdigest(),
+        split_strategy="synthetic-test",
+    )
     evaluation = preflight_campaign(
         plan=plan.model_copy(update={"purpose": CampaignPurpose.EVALUATION}),
-        cases=(_case(),),
+        cases=(case,),
         budgets=_budgets(),
         models=_models(),
+        evaluation_manifest=manifest,
         fixture_runner_available=True,
     )
     assert "FIXTURE_EVALUATION_NOT_HASH_BOUND" in {
