@@ -17,9 +17,10 @@ from hashlib import sha256
 from uuid import uuid4
 
 from .budget import BudgetLedger
+from .campaign_plan import RedPolicyKind
 from .campaigns.lifecycle import METRIC_DEFINITION_VERSION
 from .campaigns.multiturn import ConversationRunResult, MultiTurnCampaignEngine
-from .domain import AttackCase
+from .domain import AttackCase, CampaignBudget
 from .evaluation_protocol import held_out_evaluation_protocol
 from .evaluation_sets import (
     HeldOutEvaluationManifest,
@@ -66,7 +67,7 @@ from .storage.measurement_repository import (
     save_campaign_measurement_snapshot,
 )
 from .storage.repository import ExperimentRepository
-from .targets.base import TargetAdapter
+from .targets.base import SessionMode, TargetAdapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +157,11 @@ async def run_reference_evaluation_stage(
     )
     selected = select_manifest_cases(cases, manifest=manifest, evaluation=True)
     selected_by_id = {case.id: case for case in selected}
-    stage_plan = preflight.smoke if stage == ReferenceEvaluationStage.INSTRUMENTATION_SMOKE else preflight.qualification
+    stage_plan = (
+        preflight.smoke
+        if stage == ReferenceEvaluationStage.INSTRUMENTATION_SMOKE
+        else preflight.qualification
+    )
     profile_name, effective_budget = budgets.profile(stage_plan.budget_profile)
 
     repository.create_schema()
@@ -275,12 +280,28 @@ async def run_reference_evaluation_stage(
             manifest=manifest,
         )
     except Exception:
-        finish_campaign(repository.engine, campaign_id=baseline.campaign_id, status=CampaignTerminalStatus.FAILED)
-        finish_campaign(repository.engine, campaign_id=treatment.campaign_id, status=CampaignTerminalStatus.FAILED)
+        finish_campaign(
+            repository.engine,
+            campaign_id=baseline.campaign_id,
+            status=CampaignTerminalStatus.FAILED,
+        )
+        finish_campaign(
+            repository.engine,
+            campaign_id=treatment.campaign_id,
+            status=CampaignTerminalStatus.FAILED,
+        )
         raise
 
-    finish_campaign(repository.engine, campaign_id=baseline.campaign_id, status=CampaignTerminalStatus.COMPLETED)
-    finish_campaign(repository.engine, campaign_id=treatment.campaign_id, status=CampaignTerminalStatus.COMPLETED)
+    finish_campaign(
+        repository.engine,
+        campaign_id=baseline.campaign_id,
+        status=CampaignTerminalStatus.COMPLETED,
+    )
+    finish_campaign(
+        repository.engine,
+        campaign_id=treatment.campaign_id,
+        status=CampaignTerminalStatus.COMPLETED,
+    )
 
     experiment = build_red_ablation_experiment_snapshot(
         contract=contract,
@@ -315,14 +336,14 @@ def _start_arm(
     *,
     arm: AblationArm,
     campaign_id: str,
-    policy,
+    policy: RedPolicyKind,
     policy_fingerprint: str,
     repository: ExperimentRepository,
     target: TargetAdapter,
     judge_fingerprint: str,
     budget_fingerprint: str,
     budget_profile: str,
-    effective_budget,
+    effective_budget: CampaignBudget,
     models: ModelsConfig,
     red_model_client: RoleModelClient,
     manifest: HeldOutEvaluationManifest,
@@ -395,13 +416,11 @@ async def _run_trial(
     judge: Judge,
     repository: ExperimentRepository,
     target_snapshot_id: str,
-    session_mode,
+    session_mode: SessionMode,
 ) -> PairedRedObservation:
     before = context.ledger.snapshot()
     strategy = context.red_runtime.strategy_for(case)
-    conversation_id = (
-        f"{context.campaign_id}:conv:{case.id}:{replicate}"
-    )
+    conversation_id = f"{context.campaign_id}:conv:{case.id}:{replicate}"
     engine = MultiTurnCampaignEngine(
         target=target,
         judge=judge,
