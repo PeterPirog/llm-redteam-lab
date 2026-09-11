@@ -1,4 +1,4 @@
-version: 8
+version: 9
 corpus_id: llm-redteam-lab-corpus-v1
 last_verified: 2026-09-11
 
@@ -26,10 +26,12 @@ native_case_sets:
   - native/multiturn/synthetic-sequences-v1.yaml
   - native/agent/adaptive-system-boundaries-v1.yaml
   - native/agent/fixture-adaptive-injection-v1.yaml
+  - native/rag/reference-discovery-v1.yaml
 
 native_fixtures:
   - fixtures/coding/repo_injection_canary/fixture.yaml
   - fixtures/coding/terminal_output_marker/fixture.yaml
+  - fixtures/rag/context_poison_canary/corpus.yaml
 
 packs:
   - packs/smoke-v1.yaml
@@ -55,6 +57,7 @@ principles:
   benign_controls_are_mandatory_for_safety_claims: true
   mechanism_taxonomy_is_separate_from_attack_complexity: true
   environment_fixtures_are_separate_attack_inputs: true
+  retrieval_corpora_are_security_significant_target_dependencies: true
 
 supported_target_classes:
   - coding
@@ -78,3 +81,4 @@ validation_requirements:
   - native and imported case IDs are globally unique
   - a concrete prompt-only case maps to at most one MLCommons v0.7 leaf when within that taxonomy scope
   - environment-originated attacks preserve fixture origin, bundle fingerprint and per-trial isolation identity
+  - RAG targets preserve corpus identity and ordered retrieval provenance for every evaluated interaction
