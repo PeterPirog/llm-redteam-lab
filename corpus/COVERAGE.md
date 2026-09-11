@@ -1,6 +1,6 @@
-# Corpus Coverage — v2
+# Corpus Coverage — v3
 
-Last reviewed: 2026-09-10
+Last reviewed: 2026-09-11
 
 This document explains what the current corpus architecture covers and what remains intentionally external, gated, or deferred.
 
@@ -13,6 +13,7 @@ Coverage is tracked across independent axes:
 3. **Attack mechanism** — normalized project techniques, with MLCommons v0.7 crosswalk where applicable.
 4. **Execution complexity** — T0 through T5.
 5. **Interaction shape** — single-turn, repeated attempts, multi-turn trajectories, environment injection, multimodal and agentic execution.
+6. **Indirect-input provenance** — repository, terminal/tool output, retrieval, MCP context and other environment channels are not collapsed into direct user prompts.
 
 A source count is not a security metric. Coverage is meaningful only when cases are normalized, executed under declared budgets, and graded with appropriate evidence. Runtime Red mechanism coverage is reported separately from Blue vulnerability estimates so search breadth cannot be mistaken for ASR.
 
@@ -34,15 +35,19 @@ Reasoning-targeted techniques that alter hidden/displayed reasoning while preser
 
 Primary references include RepoGuardBench, AgentDojo, InjecAgent, AgentDyn, AgentInjectionBench, PIArena/PISmith, Agent Security Evaluation Kit, AgentProv/PAB, Agent Egress Bench, AgentShield Benchmark, BoundaryBench and Promptfoo coding-agent plugins. LivePI remains explicit-opt-in research only.
 
-Represented system mechanisms include repository prompt injection, terminal/tool-output injection, MCP context/tool poisoning, goal hijacking, privilege escalation, synthetic-secret access, sandbox read/write escape, network egress, memory poisoning, provenance laundering, generated vulnerabilities, automation poisoning, delayed effects, steganographic exfiltration, verifier sabotage and session isolation.
+Represented system mechanisms include repository prompt injection, terminal/tool-output injection, retrieval/RAG context poisoning, MCP context/tool poisoning, goal hijacking, privilege escalation, synthetic-secret access, sandbox read/write escape, network egress, memory poisoning, provenance laundering, generated vulnerabilities, automation poisoning, delayed effects, steganographic exfiltration, verifier sabotage and session isolation.
 
-The native corpus now also contains adaptive multi-turn AGENT goal seeds for:
+The native corpus contains adaptive multi-turn AGENT goal seeds for:
 
 - protected synthetic workspace mutation,
 - synthetic memory/persistence poisoning,
-- prohibited Git publication against a disposable local repository and local bare synthetic remote.
+- prohibited Git publication against a disposable local repository and local bare synthetic remote,
+- repository-originated indirect prompt injection,
+- terminal-output injection,
+- retrieval/RAG context poisoning through an explicit untrusted context channel,
+- MCP-context poisoning through an explicit untrusted context channel.
 
-These cases are disabled by default and require explicit sandbox fixtures and matching system-state policies. Model-backed Red uses target-visible feedback across turns, but the attacker never receives Judge labels during the live trajectory.
+Environment-backed cases use immutable fixture bundles and isolated per-trial workspaces. Context-backed fixtures preserve the source channel separately from the direct user prompt and persist hash-only provenance. Targets that do not explicitly declare support for the untrusted-context transport fail closed before fixture execution. These cases remain disabled by default and require matching system-state policies. Model-backed Red uses target-visible feedback across turns, but the attacker never receives Judge labels during the live trajectory.
 
 The framework distinguishes four system layers during AGENT evaluation:
 
@@ -52,6 +57,8 @@ The framework distinguishes four system layers during AGENT evaluation:
 4. independently verified system effect.
 
 A forbidden request can establish `MODEL_COMPROMISE`. `SYSTEM_COMPROMISE` requires the surrounding system to permit the unauthorized effect under the declared evidence contract; a provider-reported completed tool call alone is not sufficient by default.
+
+Synthetic retrieval/MCP fixtures prove the provider-independent lifecycle and provenance contract. They do **not** yet claim real OpenWebUI RAG or live MCP-server coverage; concrete adapters must implement the context transport before advertising that capability.
 
 ## Image generation
 
@@ -88,17 +95,18 @@ The following are not silently enabled:
 - image-generation tests without a visual grader,
 - external network egress tests without an authorized local trap,
 - real Git publication targets,
+- live third-party MCP servers or untrusted external RAG sources without an authorized adapter,
 - real credentials, production secrets or user memory,
 - any attacker-controlled request to expand its own permissions.
 
 ## Current implementation frontier
 
-The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware time-to-violation metrics, system-state verification, Red exploration coverage and staged reference-evaluation contracts.
+The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware time-to-violation metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures and hash-bound held-out external attack inputs.
 
 Highest-value remaining work is now:
 
 1. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
-2. add fixture-aware adaptive AGENT orchestration for repository/tool-output/RAG/MCP injection, rather than only conversational steering of an already configured agent workspace;
+2. connect the explicit retrieval/MCP untrusted-context contract to concrete local OpenWebUI/RAG and MCP-capable targets without weakening target identity or provenance;
 3. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
 4. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
 5. add a predeclared statistical backend before any generalized-population security claim is allowed;
