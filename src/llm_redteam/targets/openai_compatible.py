@@ -37,6 +37,7 @@ class OpenAICompatibleConfig(StrictModel):
     timeout_seconds: float = Field(gt=0.0, default=60.0)
     temperature: float = Field(ge=0.0, le=2.0, default=0.0)
     max_output_tokens: int | None = Field(gt=0, default=None)
+    system_prompt: str | None = Field(default=None, min_length=1)
     capabilities: frozenset[str] = frozenset({"text"})
     supports_target_managed_sessions: bool = False
 
@@ -66,6 +67,7 @@ class OpenAICompatibleTarget:
                 self.config.target_mode.value,
                 str(self.config.temperature),
                 str(self.config.max_output_tokens),
+                _system_prompt_hash(self.config.system_prompt),
                 str(self.config.supports_target_managed_sessions),
             ]
         )
@@ -99,10 +101,13 @@ class OpenAICompatibleTarget:
                 return TargetResponse(error_kind=f"missing_api_key_env:{self.config.api_key_env}")
             headers["Authorization"] = f"Bearer {token}"
 
-        messages = [
+        messages: list[dict[str, str]] = []
+        if self.config.system_prompt is not None:
+            messages.append({"role": "system", "content": self.config.system_prompt})
+        messages.extend(
             {"role": message.role.value, "content": message.content}
             for message in request.conversation
-        ]
+        )
         messages.append({"role": "user", "content": request.prompt})
 
         payload: dict[str, object] = {
@@ -160,6 +165,7 @@ class OpenAICompatibleTarget:
                 "endpoint_path": self.config.endpoint_path,
                 "session_mode": request.session_mode.value,
                 "history_messages": len(request.conversation),
+                "system_prompt_sha256": _system_prompt_hash(self.config.system_prompt),
             },
             redacted=True,
         )
@@ -172,3 +178,9 @@ class OpenAICompatibleTarget:
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+
+def _system_prompt_hash(system_prompt: str | None) -> str:
+    if system_prompt is None:
+        return sha256(b"no-system-prompt").hexdigest()
+    return sha256(system_prompt.encode()).hexdigest()
