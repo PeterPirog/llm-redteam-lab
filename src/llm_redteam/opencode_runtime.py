@@ -17,8 +17,9 @@ from urllib.parse import urlparse
 from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
-from .domain import StrictModel
-from .targets.opencode import OpenCodeConfig
+from .domain import StrictModel, TargetIdentity
+from .targets.base import TargetRequest, TargetResponse
+from .targets.opencode import OpenCodeConfig, OpenCodeTarget
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -187,6 +188,46 @@ class OpenCodeLaunchPlan(StrictModel):
         return canonical_json_hash(self.model_dump(mode="json"))
 
 
+class AttestedOpenCodeTarget:
+    """OpenCode target whose identity is bound to one attested local launch plan."""
+
+    def __init__(self, target: OpenCodeTarget, launch_plan: OpenCodeLaunchPlan) -> None:
+        _validate_target_binding(target.config, launch_plan)
+        self._target = target
+        self.launch_plan = launch_plan
+
+    @property
+    def identity(self) -> TargetIdentity:
+        base = self._target.identity
+        return base.model_copy(
+            update={
+                "configuration_hash": canonical_json_hash(
+                    {
+                        "base_target_configuration_hash": base.configuration_hash,
+                        "opencode_attested_launch_sha256": self.launch_plan.launch_sha256,
+                    }
+                ),
+                "capabilities": frozenset((*base.capabilities, "runtime_attested")),
+            }
+        )
+
+    async def execute(self, request: TargetRequest) -> TargetResponse:
+        response = await self._target.execute(request)
+        metadata = dict(response.provider_metadata)
+        metadata.update(
+            {
+                "runtime_attested": True,
+                "runtime_profile_sha256": self.launch_plan.runtime_profile_sha256,
+                "sandbox_attestation_sha256": self.launch_plan.sandbox_attestation_sha256,
+                "launch_plan_sha256": self.launch_plan.launch_sha256,
+            }
+        )
+        return response.model_copy(update={"provider_metadata": metadata})
+
+    async def aclose(self) -> None:
+        await self._target.aclose()
+
+
 def build_attested_opencode_launch_plan(
     profile: OpenCodeRuntimeProfile,
     attestation: AgentSandboxAttestation,
@@ -238,12 +279,10 @@ def build_attested_opencode_launch_plan(
     )
 
 
-def bind_attested_runtime_to_target(
+def _validate_target_binding(
     config: OpenCodeConfig,
     launch_plan: OpenCodeLaunchPlan,
-) -> OpenCodeConfig:
-    """Bind an OpenCode adapter identity to the attested process launch contract."""
-
+) -> None:
     if config.workspace_root is None:
         raise ValueError("attested OpenCode target requires workspace_root")
     workspace_hash = sha256(_normalize_workspace(config.workspace_root).encode()).hexdigest()
@@ -266,10 +305,6 @@ def bind_attested_runtime_to_target(
             raise ValueError("OpenCode target password_env is not bound to launch plan")
     elif config.password_env is not None:
         raise ValueError("OpenCode target requires a password not declared by launch plan")
-
-    return config.model_copy(
-        update={"runtime_attestation_fingerprint": launch_plan.launch_sha256}
-    )
 
 
 def _launch_endpoint(command: tuple[str, ...]) -> tuple[str, int]:
