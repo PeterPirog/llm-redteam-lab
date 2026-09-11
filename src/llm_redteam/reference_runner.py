@@ -436,13 +436,14 @@ async def _run_trial(
     after = context.ledger.snapshot()
 
     attack_instance_id = f"{context.campaign_id}:attack:{case.id}:{replicate}"
+    case_fingerprint = fingerprint_attack_case(case)
     repository.record_attack(
         attack_instance_id=attack_instance_id,
         campaign_id=context.campaign_id,
         case_id=case.id,
         attack_family=case.attack_family[0],
         interaction_mode=case.interaction_mode,
-        payload_hash=fingerprint_attack_case(case),
+        payload_hash=case_fingerprint.content_hash,
     )
     repository.save_conversation(
         result,
