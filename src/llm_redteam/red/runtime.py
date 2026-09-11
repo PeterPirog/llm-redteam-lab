@@ -93,7 +93,11 @@ def build_model_backed_red_policy_descriptor(
         required_capabilities={"text", "reasoning"},
     )
     mutator = models.role(ModelRole.RED_MUTATOR, required_capabilities={"text"})
-    conversation_budget = _conversation_budget(campaign_budget, session_mode)
+    conversation_budget = _conversation_budget(
+        campaign_budget,
+        session_mode,
+        target_mode,
+    )
 
     mechanism_policy: dict[str, object] | None = None
     if policy == RedPolicyKind.MECHANISM:
@@ -121,6 +125,7 @@ def build_model_backed_red_policy_descriptor(
         "cross_trial_learning_enabled": purpose == CampaignPurpose.DISCOVERY,
         "duplicate_similarity_threshold": duplicate_similarity_threshold,
         "conversation_budget": conversation_budget.model_dump(mode="json"),
+        "stopping_policy": conversation_budget.stopping_policy,
         "red_planner": _model_role_descriptor(planner),
         "red_mutator": _model_role_descriptor(mutator),
         "mechanism_policy": mechanism_policy,
@@ -129,6 +134,7 @@ def build_model_backed_red_policy_descriptor(
     if target_mode == TargetMode.AGENT:
         descriptor["runtime_version"] = _AGENT_RED_RUNTIME_VERSION
         descriptor["threat_lens"] = "agent-system-v1"
+        descriptor["layer_aware_stopping"] = "model-to-system-escalation-v1"
     if fixture_priming_enabled:
         descriptor["runtime_version"] = _AGENT_FIXTURE_RED_RUNTIME_VERSION
         descriptor["fixture_priming"] = "immutable-environment-fixture-v1"
@@ -183,7 +189,11 @@ class RedStrategyRuntime:
         self.tactic_memory = RedCampaignMemory()
         self.mechanism_memory = MechanismCampaignMemory()
         self._observed_families: set[str] = set()
-        self.conversation_budget = _conversation_budget(campaign_budget, session_mode)
+        self.conversation_budget = _conversation_budget(
+            campaign_budget,
+            session_mode,
+            target_mode,
+        )
 
     @property
     def cross_trial_learning_enabled(self) -> bool:
@@ -321,19 +331,23 @@ class RedStrategyRuntime:
 def _conversation_budget(
     budget: CampaignBudget,
     session_mode: SessionMode,
+    target_mode: TargetMode,
 ) -> ConversationBudget:
+    layer_aware_agent = target_mode == TargetMode.AGENT
     if session_mode == SessionMode.TARGET_MANAGED:
         return ConversationBudget(
             max_turns=budget.max_turns_per_attack,
             max_backtracks=0,
             max_branches=1,
-            continue_after_success=False,
+            continue_after_success=layer_aware_agent,
+            stop_after_system_compromise=layer_aware_agent,
         )
     return ConversationBudget(
         max_turns=budget.max_turns_per_attack,
         max_backtracks=budget.max_backtracks_per_attack,
         max_branches=budget.max_branches_per_attack,
-        continue_after_success=False,
+        continue_after_success=layer_aware_agent,
+        stop_after_system_compromise=layer_aware_agent,
     )
 
 
