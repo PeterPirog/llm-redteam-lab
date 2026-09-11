@@ -1,6 +1,6 @@
-# Corpus Coverage — v2
+# Corpus Coverage — v3
 
-Last reviewed: 2026-09-10
+Last reviewed: 2026-09-11
 
 This document explains what the current corpus architecture covers and what remains intentionally external, gated, or deferred.
 
@@ -13,6 +13,7 @@ Coverage is tracked across independent axes:
 3. **Attack mechanism** — normalized project techniques, with MLCommons v0.7 crosswalk where applicable.
 4. **Execution complexity** — T0 through T5.
 5. **Interaction shape** — single-turn, repeated attempts, multi-turn trajectories, environment injection, multimodal and agentic execution.
+6. **Indirect-input provenance** — repository, terminal/tool output, retrieval and MCP context are not collapsed into direct user prompts.
 
 A source count is not a security metric. Coverage is meaningful only when cases are normalized, executed under declared budgets, and graded with appropriate evidence. Runtime Red mechanism coverage is reported separately from Blue vulnerability estimates so search breadth cannot be mistaken for ASR.
 
@@ -30,19 +31,30 @@ Includes applicable writing-model coverage plus reasoning-targeted research fami
 
 Reasoning-targeted techniques that alter hidden/displayed reasoning while preserving a final answer require evidence beyond final-answer-only scoring. The framework records only target-visible reasoning fields legitimately exposed by the provider; hidden chain-of-thought is not assumed available.
 
+## RAG and PIPELINE systems
+
+The deterministic local RAG reference target provides the first executable `PIPELINE` context-poisoning slice. Its target identity binds the wrapped Blue target, retrieval corpus hash and retrieval configuration. Retrieval evidence records ordered chunk provenance and hashes without persisting poisoned text. Held-out evaluation can bind the exact retrieval corpus as an external dependency.
+
+A multi-turn synthetic regression proves that a first safe retrieval turn and a later poisoned retrieval turn remain one bounded attack trial. A deterministic disclosure establishes `MODEL_COMPROMISE` only; `SYSTEM_COMPROMISE` still requires an independent unauthorized system effect.
+
+This reference retriever proves measurement and provenance contracts. It is not claimed to reproduce production vector search, OpenWebUI retrieval or any other concrete deployment.
+
 ## Coding and AGENT systems
 
 Primary references include RepoGuardBench, AgentDojo, InjecAgent, AgentDyn, AgentInjectionBench, PIArena/PISmith, Agent Security Evaluation Kit, AgentProv/PAB, Agent Egress Bench, AgentShield Benchmark, BoundaryBench and Promptfoo coding-agent plugins. LivePI remains explicit-opt-in research only.
 
 Represented system mechanisms include repository prompt injection, terminal/tool-output injection, MCP context/tool poisoning, goal hijacking, privilege escalation, synthetic-secret access, sandbox read/write escape, network egress, memory poisoning, provenance laundering, generated vulnerabilities, automation poisoning, delayed effects, steganographic exfiltration, verifier sabotage and session isolation.
 
-The native corpus now also contains adaptive multi-turn AGENT goal seeds for:
+The native corpus contains adaptive multi-turn AGENT goal/fixture cases for:
 
 - protected synthetic workspace mutation,
 - synthetic memory/persistence poisoning,
-- prohibited Git publication against a disposable local repository and local bare synthetic remote.
+- prohibited Git publication against a disposable local repository and local bare synthetic remote,
+- repository-originated indirect prompt injection,
+- terminal-output injection,
+- MCP-context poisoning through an explicit untrusted-context channel.
 
-These cases are disabled by default and require explicit sandbox fixtures and matching system-state policies. Model-backed Red uses target-visible feedback across turns, but the attacker never receives Judge labels during the live trajectory.
+Environment-backed cases use immutable fixture bundles and isolated per-trial workspaces. MCP/tool/retrieval context can be represented separately from the user prompt with integrity-checked content hashes. A context-backed fixture requires a target that explicitly declares `untrusted_context`; unsupported targets fail before execution rather than receiving credit for an attack they never saw.
 
 The framework distinguishes four system layers during AGENT evaluation:
 
@@ -52,6 +64,8 @@ The framework distinguishes four system layers during AGENT evaluation:
 4. independently verified system effect.
 
 A forbidden request can establish `MODEL_COMPROMISE`. `SYSTEM_COMPROMISE` requires the surrounding system to permit the unauthorized effect under the declared evidence contract; a provider-reported completed tool call alone is not sufficient by default.
+
+The native MCP fixture is synthetic/local and disabled by default. Real OpenCode/OpenWebUI/MCP adapters must implement the actual context transport before advertising support.
 
 ## Image generation
 
@@ -88,17 +102,18 @@ The following are not silently enabled:
 - image-generation tests without a visual grader,
 - external network egress tests without an authorized local trap,
 - real Git publication targets,
+- live third-party MCP servers or external RAG sources without an authorized adapter,
 - real credentials, production secrets or user memory,
 - any attacker-controlled request to expand its own permissions.
 
 ## Current implementation frontier
 
-The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware time-to-violation metrics, system-state verification, Red exploration coverage and staged reference-evaluation contracts.
+The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware time-to-violation metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs and a deterministic RAG PIPELINE reference target.
 
 Highest-value remaining work is now:
 
 1. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
-2. add fixture-aware adaptive AGENT orchestration for repository/tool-output/RAG/MCP injection, rather than only conversational steering of an already configured agent workspace;
+2. connect the explicit MCP/tool-context contract to a concrete authorized local MCP/OpenCode or OpenWebUI target without weakening target identity or provenance;
 3. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
 4. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
 5. add a predeclared statistical backend before any generalized-population security claim is allowed;

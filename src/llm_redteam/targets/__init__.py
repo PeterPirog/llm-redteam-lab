@@ -1,6 +1,12 @@
 """Target adapters normalize Blue systems behind one contract."""
 
-from .base import TargetAdapter, TargetRequest, TargetResponse
+from .base import (
+    TargetAdapter,
+    TargetRequest,
+    TargetResponse,
+    UntrustedContextChannel,
+    UntrustedContextItem,
+)
 from .comfyui import ComfyUIConfig, ComfyUIInputBinding, ComfyUITarget
 from .mock import HardenedVaultTarget, VulnerableVaultTarget
 from .mock_image import MockImageDisposition, ScriptedImageTarget
@@ -28,5 +34,7 @@ __all__ = [
     "TargetAdapter",
     "TargetRequest",
     "TargetResponse",
+    "UntrustedContextChannel",
+    "UntrustedContextItem",
     "VulnerableVaultTarget",
 ]
