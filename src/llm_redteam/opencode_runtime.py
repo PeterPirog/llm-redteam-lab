@@ -34,7 +34,7 @@ class SandboxEnforcementKind(StrEnum):
 
 
 class OpenCodeRuntimeProfile(StrictModel):
-    """Deterministic security profile for one local headless OpenCode target."""
+    """Deterministic application/runtime profile for one local headless OpenCode target."""
 
     version: int = Field(ge=1, default=1)
     executable: str = Field(min_length=1, default="opencode")
@@ -102,11 +102,7 @@ class OpenCodeRuntimeProfile(StrictModel):
         )
 
     def config_document(self) -> dict[str, object]:
-        """Return a deny-by-default stable OpenCode configuration document.
-
-        Shell permission is intentionally only a local application-layer guard. The
-        independent sandbox attestation remains mandatory even when shell is denied.
-        """
+        """Return a deny-by-default stable OpenCode configuration document."""
 
         shell_rules: dict[str, str] = {"*": "deny"}
         for pattern in self.shell_allowlist:
@@ -139,27 +135,18 @@ class OpenCodeRuntimeProfile(StrictModel):
         return json.dumps(self.config_document(), separators=(",", ":"), ensure_ascii=True)
 
 
-class AgentSandboxAttestation(StrictModel):
-    """Hash-only statement issued by a trusted isolation harness.
-
-    The laboratory treats this as control-plane evidence. Red prompts, repository
-    content, target output and OpenCode itself must never be allowed to mint or modify it.
-    """
+class AgentSandboxPolicy(StrictModel):
+    """Stable security policy that defines one Blue runtime configuration."""
 
     version: int = Field(ge=1, default=1)
-    issuer: str = Field(min_length=1)
     enforcement_kind: SandboxEnforcementKind
-    isolation_id: str = Field(min_length=1)
-    runtime_profile_sha256: str = Field(pattern=_HASH_PATTERN)
-    workspace_root_sha256: str = Field(pattern=_HASH_PATTERN)
-    proof_sha256: str = Field(pattern=_HASH_PATTERN)
-    disposable_workspace: bool
-    external_network_denied: bool
-    git_publication_denied: bool
+    disposable_workspace: bool = True
+    external_network_denied: bool = True
+    git_publication_denied: bool = True
     allowed_network_endpoints: tuple[str, ...] = ()
 
     @model_validator(mode="after")
-    def attestation_endpoints_are_local(self) -> AgentSandboxAttestation:
+    def policy_endpoints_are_local(self) -> AgentSandboxPolicy:
         for endpoint in self.allowed_network_endpoints:
             parsed = urlparse(endpoint)
             if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
@@ -168,28 +155,63 @@ class AgentSandboxAttestation(StrictModel):
         return self
 
     @property
+    def policy_sha256(self) -> str:
+        return canonical_json_hash(self.model_dump(mode="json"))
+
+
+class AgentSandboxAttestation(StrictModel):
+    """Per-run hash-only evidence issued by a trusted isolation harness.
+
+    Unlike ``AgentSandboxPolicy``, this object contains ephemeral run identity and proof.
+    It is execution evidence and MUST NOT change the Blue target identity by itself.
+    """
+
+    version: int = Field(ge=1, default=1)
+    issuer: str = Field(min_length=1)
+    isolation_id: str = Field(min_length=1)
+    runtime_profile_sha256: str = Field(pattern=_HASH_PATTERN)
+    sandbox_policy_sha256: str = Field(pattern=_HASH_PATTERN)
+    workspace_root_sha256: str = Field(pattern=_HASH_PATTERN)
+    proof_sha256: str = Field(pattern=_HASH_PATTERN)
+
+    @property
     def attestation_sha256(self) -> str:
         return canonical_json_hash(self.model_dump(mode="json"))
 
 
 class OpenCodeLaunchPlan(StrictModel):
-    """Deterministic non-secret process launch contract."""
+    """Deterministic non-secret process launch contract for one isolated run."""
 
     cwd: str = Field(min_length=1)
     command: tuple[str, ...] = Field(min_length=1)
     public_environment: dict[str, str]
     required_secret_env_names: tuple[str, ...] = ()
     runtime_profile_sha256: str = Field(pattern=_HASH_PATTERN)
+    sandbox_policy_sha256: str = Field(pattern=_HASH_PATTERN)
     sandbox_attestation_sha256: str = Field(pattern=_HASH_PATTERN)
     workspace_root_sha256: str = Field(pattern=_HASH_PATTERN)
 
     @property
     def launch_sha256(self) -> str:
+        """Per-run execution fingerprint; may change across isolated replicates."""
+
         return canonical_json_hash(self.model_dump(mode="json"))
+
+    @property
+    def target_policy_sha256(self) -> str:
+        """Stable identity of the security-relevant runtime policy."""
+
+        return canonical_json_hash(
+            {
+                "runtime_profile_sha256": self.runtime_profile_sha256,
+                "sandbox_policy_sha256": self.sandbox_policy_sha256,
+                "workspace_root_sha256": self.workspace_root_sha256,
+            }
+        )
 
 
 class AttestedOpenCodeTarget:
-    """OpenCode target whose identity is bound to one attested local launch plan."""
+    """OpenCode target bound to stable policy and one run-specific attestation."""
 
     def __init__(self, target: OpenCodeTarget, launch_plan: OpenCodeLaunchPlan) -> None:
         _validate_target_binding(target.config, launch_plan)
@@ -204,10 +226,12 @@ class AttestedOpenCodeTarget:
                 "configuration_hash": canonical_json_hash(
                     {
                         "base_target_configuration_hash": base.configuration_hash,
-                        "opencode_attested_launch_sha256": self.launch_plan.launch_sha256,
+                        "opencode_target_policy_sha256": (
+                            self.launch_plan.target_policy_sha256
+                        ),
                     }
                 ),
-                "capabilities": frozenset((*base.capabilities, "runtime_attested")),
+                "capabilities": base.capabilities | frozenset({"runtime_attested"}),
             }
         )
 
@@ -218,6 +242,7 @@ class AttestedOpenCodeTarget:
             {
                 "runtime_attested": True,
                 "runtime_profile_sha256": self.launch_plan.runtime_profile_sha256,
+                "sandbox_policy_sha256": self.launch_plan.sandbox_policy_sha256,
                 "sandbox_attestation_sha256": self.launch_plan.sandbox_attestation_sha256,
                 "launch_plan_sha256": self.launch_plan.launch_sha256,
             }
@@ -230,24 +255,28 @@ class AttestedOpenCodeTarget:
 
 def build_attested_opencode_launch_plan(
     profile: OpenCodeRuntimeProfile,
+    sandbox_policy: AgentSandboxPolicy,
     attestation: AgentSandboxAttestation,
 ) -> OpenCodeLaunchPlan:
-    """Bind OpenCode application controls to independent host/sandbox evidence."""
+    """Bind stable runtime policy to independent per-run sandbox evidence."""
 
     if attestation.runtime_profile_sha256 != profile.profile_sha256:
         raise ValueError("sandbox attestation does not bind the requested runtime profile")
+    if attestation.sandbox_policy_sha256 != sandbox_policy.policy_sha256:
+        raise ValueError("sandbox attestation does not bind the requested sandbox policy")
     if attestation.workspace_root_sha256 != profile.workspace_root_sha256:
         raise ValueError("sandbox attestation workspace does not match runtime profile")
+
     missing: list[str] = []
-    if not attestation.disposable_workspace:
+    if not sandbox_policy.disposable_workspace:
         missing.append("disposable_workspace")
-    if not attestation.external_network_denied:
+    if not sandbox_policy.external_network_denied:
         missing.append("external_network_denied")
-    if not attestation.git_publication_denied:
+    if not sandbox_policy.git_publication_denied:
         missing.append("git_publication_denied")
     if missing:
         raise ValueError(
-            "sandbox attestation is insufficient for restricted campaign: "
+            "sandbox policy is insufficient for restricted campaign: "
             + ", ".join(missing)
         )
 
@@ -274,6 +303,7 @@ def build_attested_opencode_launch_plan(
         public_environment=environment,
         required_secret_env_names=required_secret_env_names,
         runtime_profile_sha256=profile.profile_sha256,
+        sandbox_policy_sha256=sandbox_policy.policy_sha256,
         sandbox_attestation_sha256=attestation.attestation_sha256,
         workspace_root_sha256=profile.workspace_root_sha256,
     )
