@@ -50,14 +50,8 @@ def _run(
     )
     rows = []
     for ordinal in range(1, turns + 1):
-        if model_at is not None and ordinal >= model_at:
-            turn_model = True
-        else:
-            turn_model = False
-        if system_at is not None and ordinal >= system_at:
-            turn_system = True
-        else:
-            turn_system = False
+        turn_model = model_at is not None and ordinal >= model_at
+        turn_system = system_at is not None and ordinal >= system_at
         if turn_model and turn_system:
             turn_outcome = CompromiseOutcome.MODEL_AND_SYSTEM_COMPROMISE
         elif turn_model:
