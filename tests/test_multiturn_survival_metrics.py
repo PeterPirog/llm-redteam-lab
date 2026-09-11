@@ -64,6 +64,13 @@ def _run(
         first_violation_depth=(
             resolved_depths[success_at - 1] if success_at is not None else None
         ),
+        first_model_compromise_turn_id=(
+            f"{execution_id}-turn-{success_at}" if success_at is not None else None
+        ),
+        first_model_compromise_ordinal=success_at,
+        first_model_compromise_depth=(
+            resolved_depths[success_at - 1] if success_at is not None else None
+        ),
         flow_fingerprint="synthetic-flow-v1",
     )
 
