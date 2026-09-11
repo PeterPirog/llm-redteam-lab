@@ -5,9 +5,9 @@ The server intentionally supports the handshake-era MCP revisions through
 JSON-RPC ``Method not found`` so standards-compliant clients can fall back to the
 initialize handshake on the same stdio transport.
 
-Raw fixture content is read only from a harness-controlled sidecar file whose SHA-256
-must match the expected hash supplied through process environment. Nothing is written
-to stdout except newline-delimited JSON-RPC messages.
+Raw fixture content is read only from a harness-controlled sidecar file. Its SHA-256
+must match a second harness-controlled hash sidecar. Nothing is written to stdout
+except newline-delimited JSON-RPC messages.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 _CONTEXT_FILE_ENV = "LLM_REDTEAM_MCP_CONTEXT_FILE"
-_CONTEXT_HASH_ENV = "LLM_REDTEAM_MCP_CONTEXT_SHA256"
+_CONTEXT_HASH_FILE_ENV = "LLM_REDTEAM_MCP_CONTEXT_HASH_FILE"
 _SERVER_NAME = "llm-redteam-fixture-mcp"
 _SERVER_VERSION = "1"
 _TOOL_NAME = "context"
@@ -45,6 +45,7 @@ def handle_message(
         return None
 
     if method == "server/discover":
+        # Modern stdio clients may fall back to initialize after Method not found.
         return _error(request_id, -32601, "Method not found")
     if method == "initialize":
         return _initialize_result(request_id, message.get("params"))
@@ -90,6 +91,7 @@ def serve_stdio(
         line = raw_line.strip()
         if not line:
             continue
+        raw: object = None
         try:
             raw = json.loads(line)
             if not isinstance(raw, dict):
@@ -100,7 +102,7 @@ def serve_stdio(
             response = _error(None, -32700, "Parse error")
         except Exception as exc:  # fail closed without leaking raw fixture content
             print(f"fixture MCP server error: {type(exc).__name__}", file=stderr, flush=True)
-            response = _error(_safe_request_id(locals().get("raw")), -32603, "Internal error")
+            response = _error(_safe_request_id(raw), -32603, "Internal error")
 
         if response is not None:
             stdout.write(json.dumps(response, separators=(",", ":"), ensure_ascii=True))
@@ -116,7 +118,9 @@ def _initialize_result(request_id: object, params: object) -> dict[str, Any]:
         if isinstance(value, str):
             requested = value
     protocol_version = (
-        requested if requested in _SUPPORTED_PROTOCOL_VERSIONS else _SUPPORTED_PROTOCOL_VERSIONS[0]
+        requested
+        if requested in _SUPPORTED_PROTOCOL_VERSIONS
+        else _SUPPORTED_PROTOCOL_VERSIONS[0]
     )
     return _result(
         request_id,
@@ -157,12 +161,18 @@ def _call_tool_result(
 
 def _read_verified_context(environ: dict[str, str]) -> str:
     raw_path = environ.get(_CONTEXT_FILE_ENV)
-    expected_hash = environ.get(_CONTEXT_HASH_ENV)
-    if not raw_path or not expected_hash or len(expected_hash) != 64:
+    raw_hash_path = environ.get(_CONTEXT_HASH_FILE_ENV)
+    if not raw_path or not raw_hash_path:
         raise ValueError("fixture MCP context environment is incomplete")
     path = Path(raw_path)
-    if not path.is_file():
-        raise ValueError("fixture MCP context file does not exist")
+    hash_path = Path(raw_hash_path)
+    if not path.is_file() or not hash_path.is_file():
+        raise ValueError("fixture MCP sidecar does not exist")
+    expected_hash = hash_path.read_text(encoding="ascii").strip()
+    if len(expected_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in expected_hash
+    ):
+        raise ValueError("fixture MCP context hash is invalid")
     content = path.read_text(encoding="utf-8")
     if sha256(content.encode()).hexdigest() != expected_hash:
         raise ValueError("fixture MCP context hash mismatch")
