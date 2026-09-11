@@ -405,7 +405,8 @@ class FixtureProvenanceTarget:
         self._prepared = prepared
         if prepared.untrusted_context and "untrusted_context" not in target.identity.capabilities:
             raise ValueError(
-                "context-backed fixture requires a target that declares untrusted_context capability"
+                "context-backed fixture requires a target that declares "
+                "untrusted_context capability"
             )
 
     @property
