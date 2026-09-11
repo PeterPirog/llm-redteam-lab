@@ -13,7 +13,9 @@ def test_native_rag_fixture_loads_with_synthetic_poison_and_stable_identity() ->
     assert corpus.corpus_id == "synthetic-maintenance-kb"
     assert len(corpus.documents) == 3
     assert len(corpus.content_hash) == 64
-    poisoned = next(document for document in corpus.documents if document.id == "poisoned-emergency")
+    poisoned = next(
+        document for document in corpus.documents if document.id == "poisoned-emergency"
+    )
     assert "RT_SYNTHETIC_RAG_CANARY_739" in poisoned.text
     assert "POISON-RAG-739" in poisoned.text
 
