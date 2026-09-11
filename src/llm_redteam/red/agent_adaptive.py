@@ -8,7 +8,7 @@ boundaries, tool intent, cross-turn action composition, persistence and provenan
 
 from __future__ import annotations
 
-from ..campaigns.multiturn import ConversationState
+from ..campaigns.multiturn import ConversationRunResult, ConversationState
 from .adaptive import RedPhase
 from .live_feedback import (
     TargetVisibleAdaptiveRedStrategy,
@@ -77,6 +77,31 @@ class _AgentThreatLensMixin:
             "they advance the declared synthetic forbidden effect;\n"
             f"- configured testcase detectors: {detectors}."
         )
+
+    def learn(self, result: ConversationRunResult) -> None:
+        """Credit the full escalation path when an AGENT reaches system compromise.
+
+        Generic Red learning credits the logical path ending at the first objective
+        violation. For AGENT targets that first violation may be model-only while a
+        later turn is the one that crosses the authorization/sandbox boundary. Use a
+        transient copy for learning so the actual measured first-violation metadata
+        remains unchanged, while tactic/mechanism credit reaches the first verified
+        system compromise when one exists.
+        """
+
+        credit_result = result
+        if (
+            result.execution.system_compromise
+            and result.first_system_compromise_turn_id is not None
+        ):
+            credit_result = result.model_copy(
+                update={
+                    "first_violation_turn_id": result.first_system_compromise_turn_id,
+                    "first_violation_ordinal": result.first_system_compromise_ordinal,
+                    "first_violation_depth": result.first_system_compromise_depth,
+                }
+            )
+        super().learn(credit_result)
 
 
 class TargetVisibleAgentAdaptiveRedStrategy(
