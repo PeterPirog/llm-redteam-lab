@@ -179,7 +179,7 @@ def test_rag_retrieval_evidence_is_hash_only_and_ordered() -> None:
 
 def test_rag_poisoning_can_be_sequence_dependent_and_counts_as_one_trial() -> None:
     base = _RecordingRagBlue(vulnerable=True)
-    target = LocalRagPipelineTarget(base, _corpus(), top_k=2, max_context_chars=4000)
+    target = LocalRagPipelineTarget(base, _corpus(), top_k=1, max_context_chars=4000)
     case = _case()
     engine = MultiTurnCampaignEngine(
         target=target,
