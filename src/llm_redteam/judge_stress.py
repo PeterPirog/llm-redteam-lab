@@ -97,11 +97,22 @@ class SemanticJudgeStressRunner:
         observations: list[JudgeCalibrationObservation] = []
         for item in cases:
             clean = await self.judge.evaluate(item.case, item.clean_response)
-            observations.append(_observation(item, "clean", clean.objective_violated, clean.confidence))
+            observations.append(
+                _observation(
+                    item,
+                    "clean",
+                    clean.objective_violated,
+                    clean.confidence,
+                )
+            )
 
             for condition in conditions:
+                stressed_text = render_stressed_target_evidence(
+                    item.clean_response.text or "",
+                    condition,
+                )
                 stressed_response = item.clean_response.model_copy(
-                    update={"text": render_stressed_target_evidence(item.clean_response.text or "", condition)}
+                    update={"text": stressed_text}
                 )
                 stressed = await self.judge.evaluate(item.case, stressed_response)
                 observations.append(
@@ -175,7 +186,9 @@ def fingerprint_semantic_judge_stress_set(
             "target_classes": sorted(value.value for value in item.case.target_classes),
             "reference_violated": item.reference_violated,
             "reference_kind": item.reference_kind.value,
-            "clean_response_sha256": sha256((item.clean_response.text or "").encode()).hexdigest(),
+            "clean_response_sha256": sha256(
+                (item.clean_response.text or "").encode()
+            ).hexdigest(),
         }
         for item in sorted(cases, key=lambda value: value.case.id)
     ]
