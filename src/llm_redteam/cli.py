@@ -19,6 +19,7 @@ from .campaign_plan import (
     load_evaluation_manifest,
     preflight_campaign,
 )
+from .campaigns.lifecycle import deterministic_judge_policy_descriptor
 from .corpus import load_corpus_files
 from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
@@ -291,11 +292,9 @@ async def _execute_reference_run(
             models=models,
             target=target,
             judge=judge,
-            judge_policy_descriptor={
-                "kind": "deterministic_canary",
-                "version": 1,
-                "canary_sha256_only": True,
-            },
+            judge_policy_descriptor=deterministic_judge_policy_descriptor(
+                canary=REFERENCE_CANARY
+            ),
             red_model_client=red_client,
             repository=repository,
         )
