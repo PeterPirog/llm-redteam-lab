@@ -31,11 +31,18 @@ from .domain import (
     TargetMode,
 )
 from .state_verifiers import StateComponent, VerifierSnapshot
-from .targets.base import TargetAdapter, TargetRequest, TargetResponse
+from .targets.base import (
+    TargetAdapter,
+    TargetRequest,
+    TargetResponse,
+    UntrustedContextChannel,
+    UntrustedContextItem,
+)
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 _OWNERSHIP_MARKER = ".llm-redteam-fixture-root-v1"
 _OWNERSHIP_CONTENT = "llm-redteam-lab disposable fixture root v1\n"
+_MAX_CONTEXT_BYTES = 128 * 1024
 
 
 class FixtureInjectionSurface(StrEnum):
@@ -49,6 +56,13 @@ class FixtureInjectionSurface(StrEnum):
     MEMORY = "memory"
 
 
+_CONTEXT_CHANNELS = {
+    FixtureInjectionSurface.RETRIEVAL: UntrustedContextChannel.RETRIEVAL,
+    FixtureInjectionSurface.TOOL_OUTPUT: UntrustedContextChannel.TOOL_OUTPUT,
+    FixtureInjectionSurface.MCP_CONTEXT: UntrustedContextChannel.MCP_CONTEXT,
+}
+
+
 class FixtureManifest(StrictModel):
     """Typed manifest stored beside one immutable local fixture bundle."""
 
@@ -60,6 +74,7 @@ class FixtureManifest(StrictModel):
     injection_surface: FixtureInjectionSurface
     workspace_subdir: str = Field(min_length=1)
     legitimate_task: str = Field(min_length=1)
+    context_file: str | None = None
     environment: dict[str, str] = Field(default_factory=dict)
     forbidden_paths: tuple[str, ...] = ()
     forbidden_effects: tuple[str, ...] = Field(min_length=1)
@@ -75,6 +90,18 @@ class FixtureManifest(StrictModel):
             path = PurePosixPath(raw.replace("\\", "/"))
             if path.is_absolute() or ".." in path.parts or not path.parts:
                 raise ValueError("forbidden_paths must be non-empty relative paths")
+        if self.context_file is not None:
+            context_path = PurePosixPath(self.context_file.replace("\\", "/"))
+            if context_path.is_absolute() or ".." in context_path.parts or not context_path.parts:
+                raise ValueError("context_file must be a non-empty relative path")
+            if self.injection_surface not in _CONTEXT_CHANNELS:
+                raise ValueError(
+                    "context_file is supported only for retrieval, tool_output, or mcp_context"
+                )
+        elif self.injection_surface in _CONTEXT_CHANNELS:
+            raise ValueError(
+                "retrieval, tool_output, and mcp_context fixtures require context_file"
+            )
         for name, value in self.environment.items():
             if not name or not name.replace("_", "").isalnum():
                 raise ValueError("fixture environment names must be identifier-like")
@@ -96,6 +123,7 @@ class FixtureDescriptor(StrictModel):
     manifest_sha256: str = Field(pattern=_HASH_PATTERN)
     bundle_sha256: str = Field(pattern=_HASH_PATTERN)
     workspace_template_sha256: str = Field(pattern=_HASH_PATTERN)
+    context_content_sha256: str | None = Field(default=None, pattern=_HASH_PATTERN)
     legitimate_task: str = Field(min_length=1)
     environment_names: tuple[str, ...] = ()
     forbidden_paths: tuple[str, ...] = ()
@@ -103,13 +131,14 @@ class FixtureDescriptor(StrictModel):
 
 @dataclass(frozen=True, slots=True)
 class PreparedFixture:
-    """Ephemeral runtime handle; synthetic values are never persisted by this class."""
+    """Ephemeral runtime handle; raw environment context is never persisted here."""
 
     descriptor: FixtureDescriptor
     isolation_id: str
     workspace_root: Path
     workspace_initial_sha256: str
     environment: dict[str, str]
+    untrusted_context: tuple[UntrustedContextItem, ...] = ()
 
     def provenance_evidence(self) -> EvidenceRecord:
         return EvidenceRecord(
@@ -125,6 +154,7 @@ class PreparedFixture:
                 "fixture_workspace_template_sha256": (
                     self.descriptor.workspace_template_sha256
                 ),
+                "fixture_context_content_sha256": self.descriptor.context_content_sha256,
                 "fixture_injection_surface": self.descriptor.injection_surface.value,
                 "fixture_isolation_id": self.isolation_id,
                 "workspace_root_sha256": sha256(str(self.workspace_root).encode()).hexdigest(),
@@ -133,6 +163,14 @@ class PreparedFixture:
                     key: sha256(value.encode()).hexdigest()
                     for key, value in sorted(self.environment.items())
                 },
+                "untrusted_context": [
+                    {
+                        "channel": item.channel.value,
+                        "source_id_sha256": sha256(item.source_id.encode()).hexdigest(),
+                        "content_sha256": item.content_sha256,
+                    }
+                    for item in self.untrusted_context
+                ],
             },
             redacted=True,
         )
@@ -205,6 +243,11 @@ class LocalFixtureRuntime:
         workspace_source = (fixture_dir / manifest.workspace_subdir).resolve(strict=False)
         if not workspace_source.is_relative_to(fixture_dir) or not workspace_source.is_dir():
             raise ValueError("fixture workspace_subdir does not resolve to a fixture directory")
+        context_hash = None
+        if manifest.context_file is not None:
+            context_source = _fixture_member(fixture_dir, manifest.context_file)
+            _read_context_text(context_source)
+            context_hash = _file_sha256(context_source)
         return FixtureDescriptor(
             fixture_ref=fixture_ref,
             fixture_id=manifest.id,
@@ -214,6 +257,7 @@ class LocalFixtureRuntime:
             manifest_sha256=_file_sha256(manifest_path),
             bundle_sha256=_tree_sha256(fixture_dir),
             workspace_template_sha256=_tree_sha256(workspace_source),
+            context_content_sha256=context_hash,
             legitimate_task=manifest.legitimate_task,
             environment_names=tuple(sorted(manifest.environment)),
             forbidden_paths=tuple(sorted(manifest.forbidden_paths)),
@@ -248,6 +292,11 @@ class LocalFixtureRuntime:
             )
             for name, value in manifest.environment.items()
         }
+        untrusted_context = self._materialize_untrusted_context(
+            manifest_path=manifest_path,
+            manifest=manifest,
+            descriptor=descriptor,
+        )
         self._active_isolation_id = isolation_id
         return PreparedFixture(
             descriptor=descriptor,
@@ -255,6 +304,7 @@ class LocalFixtureRuntime:
             workspace_root=self.workspace_root,
             workspace_initial_sha256=workspace_hash,
             environment=environment,
+            untrusted_context=untrusted_context,
         )
 
     def release(self, prepared: PreparedFixture) -> FixtureRelease:
@@ -280,6 +330,31 @@ class LocalFixtureRuntime:
             isolation_id=prepared.isolation_id,
             workspace_final_sha256=final_hash,
             cleanup_complete=True,
+        )
+
+    def _materialize_untrusted_context(
+        self,
+        *,
+        manifest_path: Path,
+        manifest: FixtureManifest,
+        descriptor: FixtureDescriptor,
+    ) -> tuple[UntrustedContextItem, ...]:
+        if manifest.context_file is None:
+            return ()
+        channel = _CONTEXT_CHANNELS.get(manifest.injection_surface)
+        if channel is None:
+            raise RuntimeError("context-backed fixture has unsupported injection surface")
+        source = _fixture_member(manifest_path.parent, manifest.context_file)
+        content = _read_context_text(source)
+        observed_hash = sha256(content.encode()).hexdigest()
+        if observed_hash != descriptor.context_content_sha256:
+            raise RuntimeError("fixture context changed between describe and prepare")
+        return (
+            UntrustedContextItem.from_text(
+                channel=channel,
+                source_id=f"fixture:{descriptor.fixture_id}:{channel.value}",
+                content=content,
+            ),
         )
 
     def _resolve_fixture_manifest(self, fixture_ref: str) -> Path:
@@ -328,12 +403,20 @@ class FixtureProvenanceTarget:
     def __init__(self, target: TargetAdapter, prepared: PreparedFixture) -> None:
         self._target = target
         self._prepared = prepared
+        if prepared.untrusted_context and "untrusted_context" not in target.identity.capabilities:
+            raise ValueError(
+                "context-backed fixture requires a target that declares untrusted_context capability"
+            )
 
     @property
     def identity(self) -> TargetIdentity:
         return self._target.identity
 
     async def execute(self, request: TargetRequest) -> TargetResponse:
+        if request.untrusted_context:
+            raise RuntimeError(
+                "fixture-bound target received pre-existing untrusted context outside the fixture"
+            )
         metadata = dict(request.metadata)
         metadata.update(
             {
@@ -344,13 +427,24 @@ class FixtureProvenanceTarget:
                 ),
             }
         )
-        response = await self._target.execute(request.model_copy(update={"metadata": metadata}))
+        response = await self._target.execute(
+            request.model_copy(
+                update={
+                    "metadata": metadata,
+                    "untrusted_context": self._prepared.untrusted_context,
+                }
+            )
+        )
         provider_metadata = dict(response.provider_metadata)
         provider_metadata.update(
             {
                 "fixture_bound": True,
                 "fixture_injection_surface": (
                     self._prepared.descriptor.injection_surface.value
+                ),
+                "fixture_untrusted_context_count": len(self._prepared.untrusted_context),
+                "fixture_untrusted_context_channels": ",".join(
+                    item.channel.value for item in self._prepared.untrusted_context
                 ),
             }
         )
@@ -460,6 +554,31 @@ def _safe_relative_path(raw: str) -> str:
     if path.is_absolute() or ".." in path.parts or not path.parts:
         raise ValueError("fixture verifier paths must be non-empty relative paths")
     return path.as_posix()
+
+
+def _fixture_member(root: Path, raw: str) -> Path:
+    relative = Path(raw.replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("fixture member must remain inside the fixture bundle")
+    path = (root / relative).resolve(strict=False)
+    if not path.is_relative_to(root) or not path.is_file():
+        raise ValueError(f"fixture member does not exist inside the bundle: {raw}")
+    return path
+
+
+def _read_context_text(path: Path) -> str:
+    try:
+        size = path.stat().st_size
+        if size > _MAX_CONTEXT_BYTES:
+            raise ValueError(
+                f"fixture context exceeds {_MAX_CONTEXT_BYTES} byte safety limit"
+            )
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("fixture context must be UTF-8 text") from exc
+    if not content.strip():
+        raise ValueError("fixture context cannot be empty")
+    return content
 
 
 def _path_component(path: Path, relative: str) -> StateComponent:
