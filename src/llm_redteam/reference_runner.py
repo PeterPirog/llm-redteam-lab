@@ -109,7 +109,7 @@ def reference_corpus_snapshot_hash(cases: tuple[AttackCase, ...]) -> str:
         raise ValueError("reference corpus cannot be empty")
     return fingerprint_corpus_snapshot(
         {
-            case.id: fingerprint_attack_case(case)
+            case.id: fingerprint_attack_case(case).model_dump(mode="json")
             for case in sorted(cases, key=lambda item: item.id)
         }
     )
