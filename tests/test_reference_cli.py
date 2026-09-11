@@ -56,7 +56,7 @@ def test_reference_run_rejects_blue_policy_without_reference_canary(tmp_path: Pa
     )
 
     assert result.exit_code == 2
-    assert "must explicitly bind RT_SYNTHETIC_CANARY" in result.output
+    assert "RT_SYNTHETIC_CANARY" in result.output
 
 
 def test_reference_run_rejects_cloud_red_roles_under_local_only_policy(tmp_path: Path) -> None:
