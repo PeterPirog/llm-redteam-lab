@@ -1,9 +1,11 @@
+import asyncio
 import json
 
 import pytest
 
 from llm_redteam.opencode_runtime import (
     AgentSandboxAttestation,
+    AgentSandboxPolicy,
     AttestedOpenCodeTarget,
     OpenCodeRuntimeProfile,
     SandboxEnforcementKind,
@@ -24,17 +26,9 @@ def _profile(**updates: object) -> OpenCodeRuntimeProfile:
     return OpenCodeRuntimeProfile.model_validate(values)
 
 
-def _attestation(
-    profile: OpenCodeRuntimeProfile,
-    **updates: object,
-) -> AgentSandboxAttestation:
+def _policy(**updates: object) -> AgentSandboxPolicy:
     values: dict[str, object] = {
-        "issuer": "llm-redteam-trusted-test-harness",
         "enforcement_kind": SandboxEnforcementKind.TRUSTED_HARNESS,
-        "isolation_id": "synthetic-isolation-1",
-        "runtime_profile_sha256": profile.profile_sha256,
-        "workspace_root_sha256": profile.workspace_root_sha256,
-        "proof_sha256": "f" * 64,
         "disposable_workspace": True,
         "external_network_denied": True,
         "git_publication_denied": True,
@@ -44,7 +38,38 @@ def _attestation(
         ),
     }
     values.update(updates)
+    return AgentSandboxPolicy.model_validate(values)
+
+
+def _attestation(
+    profile: OpenCodeRuntimeProfile,
+    policy: AgentSandboxPolicy,
+    **updates: object,
+) -> AgentSandboxAttestation:
+    values: dict[str, object] = {
+        "issuer": "llm-redteam-trusted-test-harness",
+        "isolation_id": "synthetic-isolation-1",
+        "runtime_profile_sha256": profile.profile_sha256,
+        "sandbox_policy_sha256": policy.policy_sha256,
+        "workspace_root_sha256": profile.workspace_root_sha256,
+        "proof_sha256": "f" * 64,
+    }
+    values.update(updates)
     return AgentSandboxAttestation.model_validate(values)
+
+
+def _plan(
+    profile: OpenCodeRuntimeProfile | None = None,
+    policy: AgentSandboxPolicy | None = None,
+    **attestation_updates: object,
+):
+    resolved_profile = profile or _profile()
+    resolved_policy = policy or _policy()
+    return build_attested_opencode_launch_plan(
+        resolved_profile,
+        resolved_policy,
+        _attestation(resolved_profile, resolved_policy, **attestation_updates),
+    )
 
 
 def _target_config(**updates: object) -> OpenCodeConfig:
@@ -78,31 +103,22 @@ def test_runtime_profile_generates_deny_by_default_local_config() -> None:
     assert permission["read"]["*.env"] == "deny"
 
 
-def test_launch_plan_requires_independent_containment_attestation() -> None:
+def test_launch_plan_requires_restricted_stable_sandbox_policy() -> None:
     profile = _profile()
 
-    with pytest.raises(ValueError, match="external_network_denied"):
-        build_attested_opencode_launch_plan(
-            profile,
-            _attestation(profile, external_network_denied=False),
-        )
-
-    with pytest.raises(ValueError, match="git_publication_denied"):
-        build_attested_opencode_launch_plan(
-            profile,
-            _attestation(profile, git_publication_denied=False),
-        )
-
-    with pytest.raises(ValueError, match="disposable_workspace"):
-        build_attested_opencode_launch_plan(
-            profile,
-            _attestation(profile, disposable_workspace=False),
-        )
+    for field in (
+        "external_network_denied",
+        "git_publication_denied",
+        "disposable_workspace",
+    ):
+        policy = _policy(**{field: False})
+        attestation = _attestation(profile, policy)
+        with pytest.raises(ValueError, match=field):
+            build_attested_opencode_launch_plan(profile, policy, attestation)
 
 
 def test_launch_plan_is_pure_loopback_and_contains_no_secret_value() -> None:
-    profile = _profile()
-    plan = build_attested_opencode_launch_plan(profile, _attestation(profile))
+    plan = _plan()
 
     assert plan.command == (
         "opencode",
@@ -131,41 +147,58 @@ def test_profile_rejects_non_loopback_or_explicit_network_shell_rules() -> None:
         _profile(shell_allowlist=("git push *",))
 
 
-def test_attestation_rejects_nonlocal_allowlisted_endpoint() -> None:
-    profile = _profile()
-
+def test_sandbox_policy_rejects_nonlocal_allowlisted_endpoint() -> None:
     with pytest.raises(ValueError, match="loopback"):
-        _attestation(
-            profile,
-            allowed_network_endpoints=("https://example.com",),
-        )
+        _policy(allowed_network_endpoints=("https://example.com",))
 
 
-def test_attested_target_identity_binds_launch_and_sandbox_policy() -> None:
+def test_per_run_attestation_does_not_change_blue_target_identity() -> None:
     profile = _profile()
-    first_plan = build_attested_opencode_launch_plan(profile, _attestation(profile))
-    second_plan = build_attested_opencode_launch_plan(
+    policy = _policy()
+    first_plan = _plan(profile, policy)
+    second_plan = _plan(
         profile,
-        _attestation(profile, proof_sha256="e" * 64, isolation_id="synthetic-isolation-2"),
+        policy,
+        proof_sha256="e" * 64,
+        isolation_id="synthetic-isolation-2",
     )
 
     first = AttestedOpenCodeTarget(OpenCodeTarget(_target_config()), first_plan)
     second = AttestedOpenCodeTarget(OpenCodeTarget(_target_config()), second_plan)
 
     try:
-        assert first.identity.configuration_hash != second.identity.configuration_hash
+        assert first_plan.launch_sha256 != second_plan.launch_sha256
+        assert first.identity.configuration_hash == second.identity.configuration_hash
         assert "runtime_attested" in first.identity.capabilities
-        assert first.identity.model == second.identity.model
     finally:
-        import asyncio
+        asyncio.run(first.aclose())
+        asyncio.run(second.aclose())
 
+
+def test_security_policy_change_changes_blue_target_identity() -> None:
+    profile = _profile()
+    first_policy = _policy()
+    second_policy = _policy(
+        allowed_network_endpoints=("http://127.0.0.1:4096",),
+    )
+    first = AttestedOpenCodeTarget(
+        OpenCodeTarget(_target_config()),
+        _plan(profile, first_policy),
+    )
+    second = AttestedOpenCodeTarget(
+        OpenCodeTarget(_target_config()),
+        _plan(profile, second_policy),
+    )
+
+    try:
+        assert first.identity.configuration_hash != second.identity.configuration_hash
+    finally:
         asyncio.run(first.aclose())
         asyncio.run(second.aclose())
 
 
 def test_attested_target_fails_closed_on_workspace_or_endpoint_mismatch() -> None:
-    profile = _profile()
-    plan = build_attested_opencode_launch_plan(profile, _attestation(profile))
+    plan = _plan()
 
     with pytest.raises(ValueError, match="workspace"):
         AttestedOpenCodeTarget(
@@ -180,10 +213,15 @@ def test_attested_target_fails_closed_on_workspace_or_endpoint_mismatch() -> Non
         )
 
 
-def test_attestation_must_bind_exact_runtime_profile() -> None:
+def test_attestation_must_bind_exact_runtime_profile_and_sandbox_policy() -> None:
     profile = _profile()
-    changed = _profile(shell_allowlist=("pytest *",))
-    stale = _attestation(profile)
+    policy = _policy()
+    stale = _attestation(profile, policy)
 
+    changed_profile = _profile(shell_allowlist=("pytest *",))
     with pytest.raises(ValueError, match="runtime profile"):
-        build_attested_opencode_launch_plan(changed, stale)
+        build_attested_opencode_launch_plan(changed_profile, policy, stale)
+
+    changed_policy = _policy(allowed_network_endpoints=("http://127.0.0.1:4096",))
+    with pytest.raises(ValueError, match="sandbox policy"):
+        build_attested_opencode_launch_plan(profile, changed_policy, stale)
