@@ -15,8 +15,18 @@ from hashlib import sha256
 
 from pydantic import Field, model_validator
 
-from ..domain import AttackCase, EvidenceKind, EvidenceRecord, StrictModel, TargetIdentity, TargetMode
-from ..evaluation_sets import EvaluationDependencyFingerprint, fingerprint_external_dependency
+from ..domain import (
+    AttackCase,
+    EvidenceKind,
+    EvidenceRecord,
+    StrictModel,
+    TargetIdentity,
+    TargetMode,
+)
+from ..evaluation_sets import (
+    EvaluationDependencyFingerprint,
+    fingerprint_external_dependency,
+)
 from .base import TargetAdapter, TargetRequest, TargetResponse
 
 _RAG_PIPELINE_VERSION = 1
@@ -142,7 +152,9 @@ class LocalRagPipelineTarget:
         max_context_chars: int = 12_000,
     ) -> None:
         if target.identity.target_mode == TargetMode.AGENT:
-            raise ValueError("LocalRagPipelineTarget wraps MODEL/PIPELINE targets, not AGENT targets")
+            raise ValueError(
+                "LocalRagPipelineTarget wraps MODEL/PIPELINE targets, not AGENT targets"
+            )
         self.target = target
         self.corpus = corpus
         self.retriever = LocalLexicalRetriever(
