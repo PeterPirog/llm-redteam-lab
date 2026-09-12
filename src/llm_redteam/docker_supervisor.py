@@ -24,6 +24,7 @@ from .docker_sandbox import (
     attest_offline_docker_sandbox,
 )
 from .domain import StrictModel
+from .opencode_health import OpenCodeHealthObservation
 from .opencode_runtime import (
     AgentSandboxAttestation,
     AgentSandboxPolicy,
@@ -31,6 +32,17 @@ from .opencode_runtime import (
 )
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
+_OPENCODE_HEALTH_PROBE_SCRIPT = (
+    "import base64,json,os,sys,urllib.request;"
+    "url=sys.argv[1];password_env=sys.argv[2];"
+    "request=urllib.request.Request(url);"
+    "password=os.getenv(password_env) if password_env else None;"
+    "username=os.getenv('OPENCODE_SERVER_USERNAME','opencode');"
+    "request.add_header('Authorization','Basic '+"
+    "base64.b64encode((username+':'+password).encode()).decode()) if password else None;"
+    "response=urllib.request.urlopen(request,timeout=5);"
+    "data=response.read();response.close();print(data.decode())"
+)
 
 
 class CommandResult(StrictModel):
@@ -81,7 +93,7 @@ class DockerSandboxLease(StrictModel):
 
 
 class DockerProcessSupervisor:
-    """Launch, attest and release one offline Docker sandbox fail closed."""
+    """Launch, attest, health-check and release one offline Docker sandbox fail closed."""
 
     def __init__(
         self,
@@ -150,14 +162,63 @@ class DockerProcessSupervisor:
             attestation=attestation,
         )
 
+    def probe_opencode_health(
+        self,
+        lease: DockerSandboxLease,
+        runtime_profile: OpenCodeRuntimeProfile,
+        *,
+        python_executable: str = "python",
+    ) -> OpenCodeHealthObservation:
+        """Probe `/global/health` from inside the owned network namespace."""
+
+        if not python_executable or any(character.isspace() for character in python_executable):
+            raise ValueError("python_executable must be one non-empty executable token")
+        self._require_owned_container(lease)
+        endpoint = _opencode_health_endpoint(runtime_profile)
+        result = self._runner.run(
+            (
+                "docker",
+                "exec",
+                lease.container_name,
+                python_executable,
+                "-c",
+                _OPENCODE_HEALTH_PROBE_SCRIPT,
+                endpoint,
+                runtime_profile.server_password_env or "",
+            ),
+            timeout_seconds=self._command_timeout_seconds,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("OpenCode container health probe failed")
+        self._require_owned_container(lease)
+
+        try:
+            payload = json.loads(result.stdout.strip())
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("OpenCode health response is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("OpenCode health response must be a JSON object")
+        healthy = payload.get("healthy")
+        application_version = payload.get("version")
+        if healthy is not True:
+            raise RuntimeError("OpenCode runtime reported unhealthy state")
+        if not isinstance(application_version, str) or not application_version:
+            raise RuntimeError("OpenCode health response lacks application version")
+
+        return OpenCodeHealthObservation(
+            healthy=True,
+            application_version=application_version,
+            runtime_profile_sha256=runtime_profile.profile_sha256,
+            sandbox_attestation_sha256=lease.attestation.attestation_sha256,
+            container_id_sha256=lease.container_id_sha256,
+            endpoint_sha256=sha256(endpoint.encode()).hexdigest(),
+            response_sha256=sha256(result.stdout.encode()).hexdigest(),
+        )
+
     def release(self, lease: DockerSandboxLease) -> None:
         """Stop only the container still owned by this lease and verify removal."""
 
-        raw_inspection = self._inspect_raw(lease.container_name)
-        current_id = _raw_container_id(raw_inspection)
-        if sha256(current_id.encode()).hexdigest() != lease.container_id_sha256:
-            raise RuntimeError("Docker sandbox lease no longer owns the named container")
-
+        self._require_owned_container(lease)
         stop_result = self._runner.run(
             (
                 "docker",
@@ -189,6 +250,13 @@ class DockerProcessSupervisor:
             if sha256(remaining_id.encode()).hexdigest() == lease.container_id_sha256:
                 raise RuntimeError("Docker sandbox container still exists after teardown")
             raise RuntimeError("Docker sandbox name was reused during teardown")
+
+    def _require_owned_container(self, lease: DockerSandboxLease) -> dict[str, object]:
+        raw_inspection = self._inspect_raw(lease.container_name)
+        current_id = _raw_container_id(raw_inspection)
+        if sha256(current_id.encode()).hexdigest() != lease.container_id_sha256:
+            raise RuntimeError("Docker sandbox lease no longer owns the named container")
+        return raw_inspection
 
     def _inspect_raw(self, container_name: str) -> dict[str, object]:
         result = self._runner.run(
@@ -225,6 +293,12 @@ class DockerProcessSupervisor:
         )
         if remove_result.returncode != 0:
             raise RuntimeError("Docker sandbox cleanup failed after rejected attestation")
+
+
+def _opencode_health_endpoint(runtime_profile: OpenCodeRuntimeProfile) -> str:
+    hostname = runtime_profile.hostname.strip()
+    url_host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    return f"http://{url_host}:{runtime_profile.port}/global/health"
 
 
 def _parse_container_id(stdout: str) -> str:
