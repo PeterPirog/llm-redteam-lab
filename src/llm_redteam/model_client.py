@@ -3,6 +3,9 @@
 The orchestration layer addresses models by role. Concrete providers, endpoints and
 model identifiers stay in runtime configuration. No client is allowed to change
 campaign budgets or security policy.
+
+Intentional multi-attacker routing is explicit in request metadata and is allowed only
+for Red planner/mutator roles. All variants still consume the same campaign budget.
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ from pydantic import Field
 from .budget import BudgetLedger
 from .domain import StrictModel
 from .model_roles import ModelRole, ModelsConfig
+
+_ATTACKER_VARIANT_METADATA_KEY = "attacker_variant_id"
+_RED_ROLES = frozenset({ModelRole.RED_PLANNER, ModelRole.RED_MUTATOR})
 
 
 class ModelMessage(StrictModel):
@@ -63,6 +69,30 @@ class ScriptedRoleModelClient:
         return ModelResponse(text=queue.popleft(), output_tokens=0)
 
 
+class AttackerVariantRoleModelClient:
+    """Stamp one predeclared attacker variant onto Red requests only."""
+
+    def __init__(self, delegate: RoleModelClient, *, attacker_variant_id: str) -> None:
+        if not attacker_variant_id:
+            raise ValueError("attacker_variant_id must be non-empty")
+        self.delegate = delegate
+        self.attacker_variant_id = attacker_variant_id
+
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        if request.role not in _RED_ROLES:
+            raise ValueError(
+                f"attacker variant client cannot route non-Red role: {request.role.value}"
+            )
+        existing = request.metadata.get(_ATTACKER_VARIANT_METADATA_KEY)
+        if existing is not None and existing != self.attacker_variant_id:
+            raise ValueError(
+                "conflicting attacker_variant_id in Red model request metadata"
+            )
+        metadata = dict(request.metadata)
+        metadata[_ATTACKER_VARIANT_METADATA_KEY] = self.attacker_variant_id
+        return await self.delegate.complete(request.model_copy(update={"metadata": metadata}))
+
+
 class BudgetedRoleModelClient:
     """Decorate any role client with deterministic, role-aware budget accounting."""
 
@@ -78,7 +108,10 @@ class BudgetedRoleModelClient:
         self.budget = budget
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        config = self.models.role(request.role)
+        config = self.models.resolve_role_config(
+            request.role,
+            attacker_variant_id=_attacker_variant_id(request),
+        )
         reserved = config.max_output_tokens
         self.budget.reserve_model_call(
             role=request.role.value,
@@ -114,7 +147,11 @@ class OpenAICompatibleRoleModelClient:
         self._owns_client = client is None
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
-        config = self.models.role(request.role)
+        attacker_variant_id = _attacker_variant_id(request)
+        config = self.models.resolve_role_config(
+            request.role,
+            attacker_variant_id=attacker_variant_id,
+        )
         if not config.endpoint:
             return ModelResponse(error_kind=f"missing_endpoint:{request.role.value}")
 
@@ -158,6 +195,8 @@ class OpenAICompatibleRoleModelClient:
             "provider": config.provider,
             "model": config.model,
         }
+        if attacker_variant_id is not None:
+            metadata[_ATTACKER_VARIANT_METADATA_KEY] = attacker_variant_id
         if isinstance(body, dict) and isinstance(body.get("model"), str):
             metadata["response_model"] = body["model"]
 
@@ -181,3 +220,16 @@ class OpenAICompatibleRoleModelClient:
             if isinstance(value, int) and value >= 0:
                 return value
         return None
+
+
+def _attacker_variant_id(request: ModelRequest) -> str | None:
+    variant_id = request.metadata.get(_ATTACKER_VARIANT_METADATA_KEY)
+    if variant_id is None:
+        return None
+    if request.role not in _RED_ROLES:
+        raise ValueError(
+            f"attacker_variant_id cannot be used with non-Red role: {request.role.value}"
+        )
+    if not variant_id:
+        raise ValueError("attacker_variant_id request metadata cannot be empty")
+    return variant_id

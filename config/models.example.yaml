@@ -67,6 +67,14 @@ roles:
     invoke: reproducible_findings_only
     fallback: []
 
+# Intentional attacker diversity is separate from per-role fallback chains.
+# Leave disabled for ordinary single-attacker campaigns. When enabled, configure
+# at least two distinct variants and predeclare the pool in the campaign/evaluation
+# contract. All variants consume the same campaign BudgetLedger.
+red_attacker_pool:
+  enabled: false
+  variants: []
+
 blue:
   source: campaign
 

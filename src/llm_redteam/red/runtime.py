@@ -8,6 +8,10 @@ EVALUATION while preserving within-conversation adaptation.
 Live within-conversation adaptation is restricted to target-visible evidence. The
 independent Judge remains available only after a run for DISCOVERY learning, preventing
 oracle leakage from the measurement layer into the attacker being measured.
+
+Intentional multi-attacker execution uses explicit attacker variants. Each variant owns
+separate transcript-free Red learning memory while every variant shares the same campaign
+BudgetLedger. Provider fallback remains unrelated availability behavior.
 """
 
 from __future__ import annotations
@@ -16,12 +20,17 @@ from hashlib import sha256
 
 from pydantic import Field
 
+from ..agent_actions import canonical_json_hash
 from ..budget import BudgetLedger
 from ..campaign_plan import RedPolicyKind
 from ..campaigns.multiturn import ConversationBudget, ConversationRunResult, MultiTurnStrategy
 from ..domain import AttackCase, CampaignBudget, StrictModel, TargetClass, TargetMode
 from ..evaluation_protocol import CampaignPurpose
-from ..model_client import BudgetedRoleModelClient, RoleModelClient
+from ..model_client import (
+    AttackerVariantRoleModelClient,
+    BudgetedRoleModelClient,
+    RoleModelClient,
+)
 from ..model_roles import ModelRole, ModelRoleConfig, ModelsConfig
 from ..targets.base import SessionMode
 from .adaptive import RedCampaignMemory, RedMemorySnapshot
@@ -56,6 +65,7 @@ from .portfolio import RiskAwarePortfolioPolicy
 _RED_RUNTIME_VERSION = 2
 _AGENT_RED_RUNTIME_VERSION = 3
 _AGENT_FIXTURE_RED_RUNTIME_VERSION = 4
+_MULTI_ATTACKER_VERSION_INCREMENT = 1
 
 
 class RedRuntimeDiagnostics(StrictModel):
@@ -78,6 +88,7 @@ def build_model_backed_red_policy_descriptor(
     models: ModelsConfig,
     duplicate_similarity_threshold: float = 0.92,
     fixture_priming_enabled: bool = False,
+    attacker_variant_id: str | None = None,
 ) -> dict[str, object]:
     """Build the exact campaign-start Red identity without making an inference call."""
 
@@ -88,11 +99,16 @@ def build_model_backed_red_policy_descriptor(
     if fixture_priming_enabled and target_mode != TargetMode.AGENT:
         raise ValueError("fixture-primed adaptive Red currently requires target_mode=AGENT")
 
-    planner = models.role(
+    planner = models.resolve_role_config(
         ModelRole.RED_PLANNER,
+        attacker_variant_id=attacker_variant_id,
         required_capabilities={"text", "reasoning"},
     )
-    mutator = models.role(ModelRole.RED_MUTATOR, required_capabilities={"text"})
+    mutator = models.resolve_role_config(
+        ModelRole.RED_MUTATOR,
+        attacker_variant_id=attacker_variant_id,
+        required_capabilities={"text"},
+    )
     conversation_budget = _conversation_budget(
         campaign_budget,
         session_mode,
@@ -139,11 +155,20 @@ def build_model_backed_red_policy_descriptor(
         descriptor["runtime_version"] = _AGENT_FIXTURE_RED_RUNTIME_VERSION
         descriptor["fixture_priming"] = "immutable-environment-fixture-v1"
         descriptor["first_turn_source"] = "fixture_legitimate_task"
+    if attacker_variant_id is not None:
+        variant = models.attacker_variant(attacker_variant_id)
+        descriptor["runtime_version"] = (
+            int(descriptor["runtime_version"]) + _MULTI_ATTACKER_VERSION_INCREMENT
+        )
+        descriptor["attacker_variant"] = {
+            "id": variant.id,
+            "configuration_fingerprint": variant.configuration_fingerprint,
+        }
     return descriptor
 
 
 class RedStrategyRuntime:
-    """Create and learn campaign-scoped Red strategies under one immutable contract."""
+    """Create and learn one campaign-scoped Red attacker under an immutable contract."""
 
     def __init__(
         self,
@@ -159,6 +184,7 @@ class RedStrategyRuntime:
         budget: BudgetLedger,
         duplicate_similarity_threshold: float = 0.92,
         fixture_priming_enabled: bool = False,
+        attacker_variant_id: str | None = None,
     ) -> None:
         self._descriptor = build_model_backed_red_policy_descriptor(
             policy=policy,
@@ -170,6 +196,7 @@ class RedStrategyRuntime:
             models=models,
             duplicate_similarity_threshold=duplicate_similarity_threshold,
             fixture_priming_enabled=fixture_priming_enabled,
+            attacker_variant_id=attacker_variant_id,
         )
 
         self.policy = policy
@@ -179,10 +206,19 @@ class RedStrategyRuntime:
         self.session_mode = session_mode
         self.campaign_budget = campaign_budget
         self.models_config = models
-        self.model_client = BudgetedRoleModelClient(
+        self.attacker_variant_id = attacker_variant_id
+        budgeted_client: RoleModelClient = BudgetedRoleModelClient(
             model_client,
             models=models,
             budget=budget,
+        )
+        self.model_client = (
+            AttackerVariantRoleModelClient(
+                budgeted_client,
+                attacker_variant_id=attacker_variant_id,
+            )
+            if attacker_variant_id is not None
+            else budgeted_client
         )
         self.duplicate_similarity_threshold = duplicate_similarity_threshold
         self.fixture_priming_enabled = fixture_priming_enabled
@@ -210,7 +246,7 @@ class RedStrategyRuntime:
         *,
         fixture_primer: FixturePrimer | None = None,
     ) -> MultiTurnStrategy:
-        """Create one strategy while sharing only transcript-free campaign memory."""
+        """Create one strategy while sharing only this attacker's transcript-free memory."""
 
         if case.interaction_mode != "multi_turn":
             raise ValueError(
@@ -326,6 +362,73 @@ class RedStrategyRuntime:
             mechanism_memory=mechanism_memory,
             mechanism_coverage=mechanism_coverage,
         )
+
+
+class RedAttackerPoolRuntime:
+    """Registry of explicit Red variants sharing one campaign inference budget."""
+
+    def __init__(
+        self,
+        *,
+        policy: RedPolicyKind,
+        purpose: CampaignPurpose,
+        target_class: TargetClass,
+        target_mode: TargetMode,
+        session_mode: SessionMode,
+        campaign_budget: CampaignBudget,
+        models: ModelsConfig,
+        model_client: RoleModelClient,
+        budget: BudgetLedger,
+        duplicate_similarity_threshold: float = 0.92,
+        fixture_priming_enabled: bool = False,
+    ) -> None:
+        variants = models.red_attacker_pool.enabled_variants
+        if len(variants) < 2:
+            raise ValueError("multi-attacker runtime requires an enabled attacker pool")
+        self.models_config = models
+        self.budget = budget
+        self._runtimes = {
+            variant.id: RedStrategyRuntime(
+                policy=policy,
+                purpose=purpose,
+                target_class=target_class,
+                target_mode=target_mode,
+                session_mode=session_mode,
+                campaign_budget=campaign_budget,
+                models=models,
+                model_client=model_client,
+                budget=budget,
+                duplicate_similarity_threshold=duplicate_similarity_threshold,
+                fixture_priming_enabled=fixture_priming_enabled,
+                attacker_variant_id=variant.id,
+            )
+            for variant in variants
+        }
+
+    @property
+    def variant_ids(self) -> tuple[str, ...]:
+        return tuple(self._runtimes)
+
+    @property
+    def pool_fingerprint(self) -> str:
+        return canonical_json_hash(
+            {
+                variant_id: runtime.descriptor()
+                for variant_id, runtime in self._runtimes.items()
+            }
+        )
+
+    def runtime_for(self, variant_id: str) -> RedStrategyRuntime:
+        try:
+            return self._runtimes[variant_id]
+        except KeyError as exc:
+            raise ValueError(f"unknown Red attacker runtime variant: {variant_id}") from exc
+
+    def descriptors(self) -> dict[str, dict[str, object]]:
+        return {
+            variant_id: runtime.descriptor()
+            for variant_id, runtime in self._runtimes.items()
+        }
 
 
 def _conversation_budget(

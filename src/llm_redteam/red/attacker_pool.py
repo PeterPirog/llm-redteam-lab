@@ -89,6 +89,53 @@ class AttackerPoolContract(StrictModel):
         return canonical_json_hash(self.model_dump(mode="json"))
 
 
+class AttackerPoolTrialAssignment(StrictModel):
+    """One predeclared full-cross trial assignment."""
+
+    order_index: int = Field(ge=0)
+    opportunity_index: int = Field(ge=0)
+    variant_id: str = Field(min_length=1)
+    case_id: str = Field(min_length=1)
+    replicate: int = Field(ge=0)
+
+    @property
+    def opportunity_key(self) -> tuple[str, int]:
+        return self.case_id, self.replicate
+
+
+def build_attacker_pool_trial_schedule(
+    contract: AttackerPoolContract,
+) -> tuple[AttackerPoolTrialAssignment, ...]:
+    """Build a deterministic, rotating full-cross execution schedule.
+
+    Variant order rotates once per opportunity. The schedule therefore preserves the
+    complete fixed allocation while reducing the simplest systematic first/last-attacker
+    temporal bias. It is derived entirely from the predeclared contract; observed outcomes
+    cannot influence routing.
+    """
+
+    variant_ids = tuple(variant.id for variant in contract.variants)
+    assignments: list[AttackerPoolTrialAssignment] = []
+    order_index = 0
+    for opportunity_index, (case_id, replicate) in enumerate(
+        contract.expected_opportunities
+    ):
+        rotation = opportunity_index % len(variant_ids)
+        ordered_variants = variant_ids[rotation:] + variant_ids[:rotation]
+        for variant_id in ordered_variants:
+            assignments.append(
+                AttackerPoolTrialAssignment(
+                    order_index=order_index,
+                    opportunity_index=opportunity_index,
+                    variant_id=variant_id,
+                    case_id=case_id,
+                    replicate=replicate,
+                )
+            )
+            order_index += 1
+    return tuple(assignments)
+
+
 class AttackerPoolObservation(StrictModel):
     """One bounded conversation executed by one attacker variant."""
 
