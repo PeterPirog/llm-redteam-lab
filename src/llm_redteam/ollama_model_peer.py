@@ -6,7 +6,8 @@ artifact and one verified minimal Ollama bundle, then builds a launch contract t
 only that bundle read-only and points ``OLLAMA_MODELS`` at the container-visible mount.
 
 The bundle's host path is per-run control-plane state and is intentionally excluded from
-stable Blue identity. The exact path used for launch is hashed into per-run attestation.
+stable Blue identity. Requested and Docker-observed mount sources are recorded separately
+because Docker Desktop/WSL2 may translate the host path into its VM namespace.
 """
 
 from __future__ import annotations
@@ -73,9 +74,7 @@ class OllamaModelPeerProfile(StrictModel):
         source = str(bundle_host_path.absolute())
         if not source or "\x00" in source or "," in source:
             raise ValueError("bundle host path is unsafe for Docker --mount syntax")
-        mount = (
-            f"type=bind,source={source},target={self.models_mount_path},readonly"
-        )
+        mount = f"type=bind,source={source},target={self.models_mount_path},readonly"
         gpu_args = ("--gpus", "all") if peer.gpu_access else ()
         return (
             "docker",
@@ -117,7 +116,8 @@ class OllamaModelPeerAttestation(StrictModel):
     artifact_binding_sha256: str = Field(pattern=_HASH_PATTERN)
     bundle_contract_sha256: str = Field(pattern=_HASH_PATTERN)
     bundle_verification_proof_sha256: str = Field(pattern=_HASH_PATTERN)
-    bundle_host_path_sha256: str = Field(pattern=_HASH_PATTERN)
+    requested_bundle_host_path_sha256: str = Field(pattern=_HASH_PATTERN)
+    observed_mount_source_sha256: str = Field(pattern=_HASH_PATTERN)
     container_id_sha256: str = Field(pattern=_HASH_PATTERN)
     network_name_sha256: str = Field(pattern=_HASH_PATTERN)
     inspection_sha256: str = Field(pattern=_HASH_PATTERN)
@@ -152,9 +152,8 @@ def compose_ollama_model_peer_profile(
         raise ValueError("Ollama bundle does not bind the selected model artifact")
     if bundle_verification.contract_sha256 != bundle_contract.bundle_sha256:
         raise ValueError("Ollama bundle verification does not bind the bundle contract")
-    if bundle_verification.manifest_sha256 != bundle_contract.manifest_digest.removeprefix(
-        "sha256:"
-    ):
+    manifest_hex = bundle_contract.manifest_digest.removeprefix("sha256:")
+    if bundle_verification.manifest_sha256 != manifest_hex:
         raise ValueError("Ollama bundle verification manifest digest does not match contract")
 
     return OllamaModelPeerProfile(
@@ -232,6 +231,7 @@ def attest_ollama_model_peer_inspection(
     if not isinstance(network_map, dict) or set(network_map) != {expected_network_name}:
         failures.append("network_membership")
 
+    observed_mount_source = ""
     mounts = payload.get("Mounts")
     if not isinstance(mounts, list) or len(mounts) != 1:
         failures.append("model_bundle_mount_count")
@@ -246,6 +246,11 @@ def attest_ollama_model_peer_inspection(
                 failures.append("model_bundle_mount_destination")
             if mount.get("RW") is not False:
                 failures.append("model_bundle_mount_readonly")
+            source = mount.get("Source")
+            if not isinstance(source, str) or not source:
+                failures.append("model_bundle_mount_source")
+            else:
+                observed_mount_source = source
 
     config = payload.get("Config")
     env = config.get("Env") if isinstance(config, dict) else None
@@ -259,14 +264,15 @@ def attest_ollama_model_peer_inspection(
             + ", ".join(sorted(set(failures)))
         )
 
-    source_hash = sha256(str(bundle_host_path.absolute()).encode()).hexdigest()
+    requested_source = str(bundle_host_path.absolute())
     return OllamaModelPeerAttestation(
         profile_sha256=profile.profile_sha256,
         peer_profile_sha256=peer.profile_sha256,
         artifact_binding_sha256=profile.artifact_binding_sha256,
         bundle_contract_sha256=profile.bundle_contract_sha256,
         bundle_verification_proof_sha256=profile.bundle_verification_proof_sha256,
-        bundle_host_path_sha256=source_hash,
+        requested_bundle_host_path_sha256=sha256(requested_source.encode()).hexdigest(),
+        observed_mount_source_sha256=sha256(observed_mount_source.encode()).hexdigest(),
         container_id_sha256=sha256(container_id.encode()).hexdigest(),
         network_name_sha256=sha256(expected_network_name.encode()).hexdigest(),
         inspection_sha256=canonical_json_hash(payload),
