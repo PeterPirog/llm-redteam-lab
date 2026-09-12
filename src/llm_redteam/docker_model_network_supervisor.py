@@ -21,11 +21,7 @@ from .docker_model_network import (
     DockerModelNetworkInspection,
     attest_isolated_model_network,
 )
-from .docker_supervisor import (
-    CommandResult,
-    DockerCommandRunner,
-    SubprocessDockerCommandRunner,
-)
+from .docker_supervisor import DockerCommandRunner, SubprocessDockerCommandRunner
 from .domain import StrictModel
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
@@ -132,7 +128,11 @@ class DockerModelNetworkSupervisor:
             if inspected_id != created_id:
                 raise RuntimeError("Docker model network ownership changed before attestation")
             inspection = DockerModelNetworkInspection.from_docker_network_inspect(raw)
-            _verify_empty_network_base(profile=profile, inspection=inspection, network_name=network_name)
+            _verify_empty_network_base(
+                profile=profile,
+                inspection=inspection,
+                network_name=network_name,
+            )
         except Exception:
             self._remove_if_owned(network_name, created_id)
             raise
