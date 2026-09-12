@@ -62,6 +62,7 @@ class DockerExecHttpProfile(StrictModel):
 
     version: int = Field(ge=1, default=1)
     runtime_profile_sha256: str = Field(pattern=_HASH_PATTERN)
+    username: str = Field(min_length=1)
     python_executable: str = Field(min_length=1, default="python")
     transport_kind: str = Field(default="docker-exec-loopback-http-v1")
 
@@ -78,6 +79,7 @@ class DockerExecHttpTransport(httpx.AsyncBaseTransport):
         *,
         runtime_profile: OpenCodeRuntimeProfile,
         container: DockerExecContainerRef,
+        username: str = "opencode",
         runner: DockerCommandRunner | None = None,
         command_timeout_seconds: float = 135.0,
         python_executable: str = "python",
@@ -88,12 +90,15 @@ class DockerExecHttpTransport(httpx.AsyncBaseTransport):
             character.isspace() for character in python_executable
         ):
             raise ValueError("python_executable must be one executable token")
+        if not username:
+            raise ValueError("username must be non-empty")
         self.runtime_profile = runtime_profile
         self.container = container
         self._runner = runner or SubprocessDockerCommandRunner()
         self._command_timeout_seconds = command_timeout_seconds
         self.profile = DockerExecHttpProfile(
             runtime_profile_sha256=runtime_profile.profile_sha256,
+            username=username,
             python_executable=python_executable,
         )
 
@@ -123,7 +128,7 @@ class DockerExecHttpTransport(httpx.AsyncBaseTransport):
                 encoded_headers,
                 encoded_body,
                 self.runtime_profile.server_password_env or "",
-                "opencode",
+                self.profile.username,
             ),
             timeout_seconds=self._command_timeout_seconds,
         )
