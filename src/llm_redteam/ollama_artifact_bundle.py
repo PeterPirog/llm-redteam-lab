@@ -47,6 +47,7 @@ class OllamaArtifactBundleContract(StrictModel):
     provider_id: str = Field(default="ollama")
     model_id: str = Field(min_length=1, max_length=256)
     artifact_identity_sha256: str = Field(pattern=_HASH_PATTERN)
+    artifact_size_bytes: int = Field(ge=0)
     manifest_digest: str = Field(pattern=_SHA256_PATTERN)
     manifest_relative_path: str = Field(min_length=1, max_length=1024)
     blobs: tuple[OllamaBundleBlob, ...] = Field(min_length=1)
@@ -123,6 +124,7 @@ def build_ollama_artifact_bundle_contract(
         members.append(layer)
 
     aggregated: dict[str, tuple[int, set[str]]] = {}
+    referenced_size_bytes = 0
     for member in members:
         digest = _canonical_digest(member.get("digest"))
         size = member.get("size")
@@ -131,6 +133,7 @@ def build_ollama_artifact_bundle_contract(
             raise ValueError("Ollama manifest member size must be a non-negative integer")
         if not isinstance(media_type, str) or not media_type:
             raise ValueError("Ollama manifest member mediaType must be a non-empty string")
+        referenced_size_bytes += size
         existing = aggregated.get(digest)
         if existing is None:
             aggregated[digest] = (size, {media_type})
@@ -150,8 +153,7 @@ def build_ollama_artifact_bundle_contract(
     )
     if not blobs:
         raise ValueError("Ollama artifact manifest references no blobs")
-    total_blob_bytes = sum(blob.size_bytes for blob in blobs)
-    if total_blob_bytes != artifact.artifact_size_bytes:
+    if referenced_size_bytes != artifact.artifact_size_bytes:
         raise ValueError(
             "Ollama manifest referenced bytes do not match artifact inventory size"
         )
@@ -159,6 +161,7 @@ def build_ollama_artifact_bundle_contract(
     return OllamaArtifactBundleContract(
         model_id=artifact.model_id,
         artifact_identity_sha256=artifact.identity_sha256,
+        artifact_size_bytes=artifact.artifact_size_bytes,
         manifest_digest=artifact.artifact_digest,
         manifest_relative_path=manifest_relative_path,
         blobs=blobs,
