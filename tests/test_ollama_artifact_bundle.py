@@ -102,13 +102,26 @@ def test_contract_binds_exact_manifest_and_referenced_blobs(tmp_path: Path) -> N
 
 
 def test_same_name_wrong_manifest_bytes_fail_closed(tmp_path: Path) -> None:
-    root, manifest_bytes, artifact = _source_store(tmp_path)
-    del root
+    _, manifest_bytes, artifact = _source_store(tmp_path)
 
     with pytest.raises(ValueError, match="manifest digest"):
         build_ollama_artifact_bundle_contract(
             artifact=artifact,
             manifest_bytes=manifest_bytes + b" ",
+            manifest_relative_path=_MANIFEST_RELATIVE,
+        )
+
+
+def test_manifest_size_must_match_verified_inventory_size(tmp_path: Path) -> None:
+    _, manifest_bytes, artifact = _source_store(tmp_path)
+    wrong_size = artifact.model_copy(
+        update={"artifact_size_bytes": artifact.artifact_size_bytes + 1}
+    )
+
+    with pytest.raises(ValueError, match="inventory size"):
+        build_ollama_artifact_bundle_contract(
+            artifact=wrong_size,
+            manifest_bytes=manifest_bytes,
             manifest_relative_path=_MANIFEST_RELATIVE,
         )
 
