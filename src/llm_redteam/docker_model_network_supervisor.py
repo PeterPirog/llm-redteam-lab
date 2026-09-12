@@ -321,7 +321,7 @@ def _parse_inspect_records(stdout: str) -> list[dict[str, object]]:
     record = payload[0]
     if not isinstance(record, dict):
         raise ValueError("Docker inspect record must be an object")
-    return record
+    return [record]
 
 
 def _raw_network_id(payload: dict[str, object]) -> str:
