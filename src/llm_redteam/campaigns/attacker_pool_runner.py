@@ -15,6 +15,7 @@ from ..agent_actions import canonical_json_hash
 from ..budget import BudgetSnapshot
 from ..domain import AttackCase, ExecutionResult
 from ..evaluation_sets import fingerprint_attack_case
+from ..judges.base import Judge
 from ..red.attacker_pool import (
     AttackerPoolContract,
     AttackerPoolTrialAssignment,
@@ -34,7 +35,6 @@ from ..storage.attacker_pool_execution import (
 from ..storage.measurement_repository import fingerprint_budget
 from ..storage.repository import ExperimentRepository
 from ..targets.base import SessionMode, TargetAdapter
-from ..judges.base import Judge
 from .multiturn import ConversationRunResult, MultiTurnCampaignEngine
 
 
@@ -272,7 +272,8 @@ class PersistedAttackerPoolRunner:
                 raise ValueError("attacker-pool runner currently requires multi_turn cases")
             if case.payload.fixture is not None:
                 raise ValueError(
-                    "attacker-pool fixture execution requires per-trial target leases and is deferred"
+                    "attacker-pool fixture execution requires per-trial target leases "
+                    "and is deferred"
                 )
 
 
