@@ -291,7 +291,9 @@ class PersistedAttackerPoolRunner:
         if required is None:
             return self.target, None
         if self.target_lease_provider is None:
-            raise ValueError("attacker-pool trial requires a target isolation lease provider")
+            raise ValueError(
+                "attacker-pool trial requires a per-trial target lease/reset isolation provider"
+            )
 
         lease = self.target_lease_provider.acquire(
             expected_identity=self.target.identity,
@@ -308,12 +310,12 @@ class PersistedAttackerPoolRunner:
                 attack_instance_id=attack_instance_id,
                 attestation=lease.attestation,
             )
-        except Exception:
+        except Exception as exc:
             release = self.target_lease_provider.release(lease)
             if not release.cleanup_complete:
                 raise RuntimeError(
                     "target-isolation cleanup failed after rejected acquisition"
-                )
+                ) from exc
             raise
         return IsolationProvenanceTarget(lease.target, lease.attestation), lease
 
@@ -365,7 +367,8 @@ class PersistedAttackerPoolRunner:
         )
         if required is not None and self.target_lease_provider is None:
             raise ValueError(
-                "attacker-pool target/session mode requires a per-trial isolation provider"
+                "attacker-pool target/session mode requires a per-trial target lease/reset "
+                "isolation provider"
             )
 
         for case in cases:
@@ -405,7 +408,9 @@ class PersistedAttackerPoolRunner:
         )
         if required is None:
             if isolation_records:
-                raise RuntimeError("unexpected target-isolation evidence for stateless MODEL+REPLAY")
+                raise RuntimeError(
+                    "unexpected target-isolation evidence for stateless MODEL+REPLAY"
+                )
             return
         if len(isolation_records) != len(records):
             raise RuntimeError("target-isolation evidence is incomplete for attacker-pool trials")
