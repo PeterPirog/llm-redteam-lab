@@ -183,11 +183,7 @@ def test_attacker_variant_client_stamps_red_requests_and_rejects_conflicts() -> 
         asyncio.run(client.complete(conflicting))
 
     with pytest.raises(ValueError, match="non-Red"):
-        asyncio.run(
-            client.complete(
-                _request(ModelRole.JUDGE_SEMANTIC)
-            )
-        )
+        asyncio.run(client.complete(_request(ModelRole.JUDGE_SEMANTIC)))
 
 
 def test_budget_reservation_uses_variant_config_but_logical_role_counter() -> None:
@@ -251,7 +247,7 @@ def test_red_runtime_descriptor_binds_exact_attacker_variant() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=SessionMode.STATELESS,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=models,
         model_client=delegate,
@@ -263,7 +259,7 @@ def test_red_runtime_descriptor_binds_exact_attacker_variant() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=SessionMode.STATELESS,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=models,
         model_client=delegate,
@@ -273,10 +269,18 @@ def test_red_runtime_descriptor_binds_exact_attacker_variant() -> None:
 
     descriptor_a = runtime_a.descriptor()
     descriptor_b = runtime_b.descriptor()
-    assert descriptor_a["attacker_variant"]["id"] == "local-a"
-    assert descriptor_b["attacker_variant"]["id"] == "local-b"
-    assert descriptor_a["red_planner"]["model"] == "planner-a"
-    assert descriptor_b["red_planner"]["model"] == "planner-b"
+    attacker_a = descriptor_a["attacker_variant"]
+    attacker_b = descriptor_b["attacker_variant"]
+    assert isinstance(attacker_a, dict)
+    assert isinstance(attacker_b, dict)
+    planner_a = descriptor_a["red_planner"]
+    planner_b = descriptor_b["red_planner"]
+    assert isinstance(planner_a, dict)
+    assert isinstance(planner_b, dict)
+    assert attacker_a["id"] == "local-a"
+    assert attacker_b["id"] == "local-b"
+    assert planner_a["model"] == "planner-a"
+    assert planner_b["model"] == "planner-b"
     assert descriptor_a != descriptor_b
 
 
@@ -292,7 +296,7 @@ def test_pool_runtimes_share_one_global_campaign_budget() -> None:
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=SessionMode.STATELESS,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=campaign_budget,
         models=models,
         model_client=delegate,
@@ -320,7 +324,7 @@ def test_pool_runtime_keeps_evaluation_cross_trial_learning_frozen() -> None:
         purpose=CampaignPurpose.EVALUATION,
         target_class=TargetClass.WRITING,
         target_mode=TargetMode.MODEL,
-        session_mode=SessionMode.STATELESS,
+        session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=_models(),
         model_client=ScriptedRoleModelClient({}),
