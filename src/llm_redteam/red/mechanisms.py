@@ -46,6 +46,12 @@ class MechanismGuidance(StrictModel):
     candidate_scores: dict[str, float] = Field(default_factory=dict)
     rationale: str = Field(min_length=1)
 
+    @property
+    def stagnation_passes(self) -> int:
+        """Compatibility presentation alias; the signal is target-response repetition."""
+
+        return self.target_response_stagnation
+
 
 class MechanismLearningRecord(StrictModel):
     """Transcript-free outcome for one bounded multi-turn conversation.
