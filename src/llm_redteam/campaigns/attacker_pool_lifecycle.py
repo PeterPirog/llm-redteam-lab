@@ -26,8 +26,13 @@ from ..campaign_plan import (
     preflight_campaign,
 )
 from ..corpus import select_cases
-from ..domain import AttackCase, CompromiseOutcome, ExecutionResult, StrictModel
-from ..evaluation_protocol import CampaignPurpose, DiscoveryMetrics, discovery_protocol, summarize_discovery
+from ..domain import AttackCase, CompromiseOutcome, ExecutionResult
+from ..evaluation_protocol import (
+    CampaignPurpose,
+    DiscoveryMetrics,
+    discovery_protocol,
+    summarize_discovery,
+)
 from ..judges.base import Judge
 from ..metrics import RateEstimate, wilson_rate
 from ..model_client import RoleModelClient
