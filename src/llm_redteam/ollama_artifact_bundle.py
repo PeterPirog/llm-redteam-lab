@@ -150,6 +150,11 @@ def build_ollama_artifact_bundle_contract(
     )
     if not blobs:
         raise ValueError("Ollama artifact manifest references no blobs")
+    total_blob_bytes = sum(blob.size_bytes for blob in blobs)
+    if total_blob_bytes != artifact.artifact_size_bytes:
+        raise ValueError(
+            "Ollama manifest referenced bytes do not match artifact inventory size"
+        )
 
     return OllamaArtifactBundleContract(
         model_id=artifact.model_id,
