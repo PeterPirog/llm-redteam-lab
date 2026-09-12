@@ -23,7 +23,7 @@ def _turn(
         parent_turn_id=parent,
         attacker_message=f"probe-{ordinal}",
         target_response="synthetic protected response",
-        outcome=CompromiseOutcome.PASS,
+        outcome=CompromiseOutcome.INCONCLUSIVE,
     )
 
 
@@ -116,7 +116,7 @@ def test_materially_better_alternative_can_trigger_early_branch() -> None:
     budget = ConversationBudget(max_turns=6, max_backtracks=2, max_branches=3)
     policy = RiskAwarePortfolioPolicy(
         conversation_budget=budget,
-        stagnation_threshold=3,
+        response_stagnation_threshold=3,
         branch_advantage_threshold=0.05,
     )
     turns = (
@@ -151,6 +151,7 @@ def test_materially_better_alternative_can_trigger_early_branch() -> None:
         historical_successes=successes,
     )
 
+    assert guidance.target_response_stagnation == 2
     assert guidance.branch_recommended is True
     assert guidance.preferred == AttackMechanism.BRANCH_DIVERSIFICATION
     assert guidance.recommended_branch_from_turn_id == "t1"
@@ -179,6 +180,8 @@ def test_finisher_is_not_spent_on_portfolio_exploration() -> None:
 def test_policy_descriptor_captures_ablation_relevant_parameters() -> None:
     policy = RiskAwarePortfolioPolicy(
         conversation_budget=ConversationBudget(max_turns=5),
+        response_stagnation_threshold=3,
+        response_similarity_threshold=0.83,
         transition_weight=0.42,
         branch_advantage_threshold=0.07,
     )
@@ -186,5 +189,8 @@ def test_policy_descriptor_captures_ablation_relevant_parameters() -> None:
     descriptor = policy.descriptor()
 
     assert descriptor["type"] == "RiskAwarePortfolioPolicy"
+    assert descriptor["stagnation_signal"] == "target_response_token_jaccard-v1"
+    assert descriptor["response_stagnation_threshold"] == 3
+    assert descriptor["response_similarity_threshold"] == 0.83
     assert descriptor["transition_weight"] == 0.42
     assert descriptor["branch_advantage_threshold"] == 0.07
