@@ -103,7 +103,7 @@ def test_offline_docker_command_is_fail_closed_and_digest_pinned() -> None:
     )
 
     assert command[:3] == ("docker", "run", "--rm")
-    assert ("--pull", "never") == command[3:5]
+    assert command[3:5] == ("--pull", "never")
     assert _adjacent(command, "--network", "none")
     assert "--read-only" in command
     assert _adjacent(command, "--cap-drop", "ALL")
