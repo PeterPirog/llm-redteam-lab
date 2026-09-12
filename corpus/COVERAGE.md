@@ -65,7 +65,9 @@ The framework distinguishes four system layers during AGENT evaluation:
 
 A forbidden request can establish `MODEL_COMPROMISE`. `SYSTEM_COMPROMISE` requires the surrounding system to permit the unauthorized effect under the declared evidence contract; a provider-reported completed tool call alone is not sufficient by default.
 
-The native MCP fixture is synthetic/local and disabled by default. `McpContextOpenCodeTarget` now provides a concrete local stdio transport for attested OpenCode targets: fixture content is staged outside the Blue workspace, hash-verified by a one-tool MCP server, and never concatenated into the direct user prompt. The current compatibility profile targets handshake-era MCP through `2025-11-25`, matching the current OpenCode MCP client generation. A real campaign still requires a trusted process supervisor and sandbox issuer that can independently attest workspace disposal, external-network denial and Git-publication denial.
+The native MCP fixture is synthetic/local and disabled by default. `McpContextOpenCodeTarget` provides a concrete local stdio transport for attested OpenCode targets: fixture content is staged outside the Blue workspace, hash-verified by a one-tool MCP server, and never concatenated into the direct user prompt. The current compatibility profile targets handshake-era MCP through `2025-11-25`, matching the current OpenCode MCP client generation.
+
+The first Docker sandbox evidence slice is also implemented. It generates a digest-pinned, offline `docker run` contract and independently verifies normalized `docker inspect` evidence before issuing a hash-only sandbox attestation. The verifier requires `network=none`, read-only root filesystem, `cap-drop ALL`, `no-new-privileges`, bounded CPU/memory/PIDs, non-privileged execution, automatic removal and exactly one writable bind mount for the disposable workspace. This profile proves the containment-evidence contract without external inference, but it is intentionally too restrictive for a real OpenCode-to-model connection.
 
 ## Image generation
 
@@ -108,14 +110,15 @@ The following are not silently enabled:
 
 ## Current implementation frontier
 
-The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, and a concrete provenance-preserving local MCP fixture transport for attested OpenCode targets.
+The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, a provenance-preserving local MCP fixture transport for attested OpenCode targets, and an independently verifiable offline Docker sandbox-attestation contract.
 
 Highest-value remaining work is now:
 
-1. implement a trusted local OpenCode process supervisor/sandbox issuer so disposable workspace, external-network denial and Git-publication denial are enforceable and independently attested rather than merely declared;
-2. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
-3. run a bounded local OpenCode+MCP smoke that proves the hostile fixture reaches Blue only as a tool result and that model compromise can be separated from blocked system effects;
-4. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
-5. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
-6. add a predeclared statistical backend before any generalized-population security claim is allowed;
-7. broaden multimodal/image-generation evidence and regression coverage without weakening provider independence.
+1. implement the trusted Docker/OpenCode process supervisor that actually creates, inspects, health-checks and tears down the container and refuses target construction until attestation succeeds;
+2. add a narrowly scoped model-connectivity design that preserves external-network denial (for example an isolated internal Docker network plus an explicitly constrained local model relay), rather than falling back to Docker's Internet-capable default bridge;
+3. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
+4. run a bounded local OpenCode+MCP smoke that proves hostile fixture data reaches Blue only as a tool result and that model compromise remains distinct from blocked system effects;
+5. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
+6. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
+7. add a predeclared statistical backend before any generalized-population security claim is allowed;
+8. broaden multimodal/image-generation evidence and regression coverage without weakening provider independence.

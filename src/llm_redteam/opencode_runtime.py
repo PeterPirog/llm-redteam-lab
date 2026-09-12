@@ -225,6 +225,7 @@ class AgentSandboxPolicy(StrictModel):
 
     version: int = Field(ge=1, default=1)
     enforcement_kind: SandboxEnforcementKind
+    enforcement_profile_sha256: str | None = Field(default=None, pattern=_HASH_PATTERN)
     disposable_workspace: bool = True
     external_network_denied: bool = True
     git_publication_denied: bool = True
