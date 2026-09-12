@@ -3,8 +3,8 @@
 The policy improves *which abstract mechanism to try next* without adding model
 calls or changing attack permissions. It treats remaining turns as a scarce search
 budget and combines mechanism yield, real branch-aware transition yield, uncertainty
-and stagnation. The stable ``MechanismPolicy`` remains the baseline for paired
-ablation; this policy must earn adoption through held-out measurements.
+and target-visible stagnation. The stable ``MechanismPolicy`` remains the baseline
+for paired ablation; this policy must earn adoption through held-out measurements.
 """
 
 from __future__ import annotations
@@ -47,7 +47,8 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
         self,
         *,
         conversation_budget: ConversationBudget,
-        stagnation_threshold: int = 2,
+        response_stagnation_threshold: int = 2,
+        response_similarity_threshold: float = 0.90,
         novelty_bonus: float = 0.18,
         transition_weight: float = 0.35,
         repeat_penalty: float = 0.18,
@@ -57,7 +58,8 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
     ) -> None:
         super().__init__(
             conversation_budget=conversation_budget,
-            stagnation_threshold=stagnation_threshold,
+            response_stagnation_threshold=response_stagnation_threshold,
+            response_similarity_threshold=response_similarity_threshold,
             novelty_bonus=novelty_bonus,
         )
         for name, value in (
@@ -86,12 +88,12 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
         historical_transition_trials: Mapping[str, int] | None = None,
         historical_transition_successes: Mapping[str, int] | None = None,
     ) -> MechanismGuidance:
-        stagnation = self._trailing_passes(conversation)
+        stagnation = self._target_response_stagnation(conversation)
         if phase == "finisher":
             return MechanismGuidance(
                 preferred=AttackMechanism.OBJECTIVE_PROBE,
                 allowed=(AttackMechanism.OBJECTIVE_PROBE,),
-                stagnation_passes=stagnation,
+                target_response_stagnation=stagnation,
                 must_change_mechanism=False,
                 candidate_scores={AttackMechanism.OBJECTIVE_PROBE.value: 1.0},
                 rationale=(
@@ -119,7 +121,7 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
         )
         score_by_mechanism = {row.mechanism: row for row in scores}
 
-        must_change = stagnation >= self.stagnation_threshold
+        must_change = stagnation >= self.response_stagnation_threshold
         if len(prior_mechanisms) >= 2 and prior_mechanisms[-1] == prior_mechanisms[-2]:
             must_change = True
 
@@ -156,7 +158,7 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
             return MechanismGuidance(
                 preferred=AttackMechanism.BRANCH_DIVERSIFICATION,
                 allowed=(AttackMechanism.BRANCH_DIVERSIFICATION, *ranked),
-                stagnation_passes=stagnation,
+                target_response_stagnation=stagnation,
                 must_change_mechanism=must_change,
                 branch_recommended=True,
                 recommended_branch_from_turn_id=self._branch_anchor(
@@ -165,8 +167,8 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
                 ),
                 candidate_scores=serialized_scores,
                 rationale=(
-                    "bounded portfolio favors a branch because the active path is "
-                    "stagnant or an alternate mechanism has materially higher expected "
+                    "bounded portfolio favors a branch because target-visible responses "
+                    "are stagnant or an alternate mechanism has materially higher expected "
                     "yield under the remaining interaction budget"
                 ),
             )
@@ -174,7 +176,7 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
         return MechanismGuidance(
             preferred=ranked[0],
             allowed=ranked,
-            stagnation_passes=stagnation,
+            target_response_stagnation=stagnation,
             must_change_mechanism=must_change,
             branch_recommended=False,
             candidate_scores=serialized_scores,
@@ -201,7 +203,7 @@ class RiskAwarePortfolioPolicy(MechanismPolicy):
             return ()
         candidates = self._PRIMER if phase == "primer" else self._PLANNER
         last = prior_mechanisms[-1] if prior_mechanisms else None
-        stagnation = self._trailing_passes(conversation)
+        stagnation = self._target_response_stagnation(conversation)
         transition_trials = historical_transition_trials or {}
         transition_successes = historical_transition_successes or {}
         return tuple(
