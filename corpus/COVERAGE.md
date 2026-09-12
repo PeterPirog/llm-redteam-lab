@@ -67,7 +67,7 @@ A forbidden request can establish `MODEL_COMPROMISE`. `SYSTEM_COMPROMISE` requir
 
 The native MCP fixture is synthetic/local and disabled by default. `McpContextOpenCodeTarget` provides a concrete local stdio transport for attested OpenCode targets: fixture content is staged outside the Blue workspace, hash-verified by a one-tool MCP server, and never concatenated into the direct user prompt. The current compatibility profile targets handshake-era MCP through `2025-11-25`, matching the current OpenCode MCP client generation.
 
-The first Docker sandbox evidence slice is also implemented. It generates a digest-pinned, offline `docker run` contract and independently verifies normalized `docker inspect` evidence before issuing a hash-only sandbox attestation. The verifier requires `network=none`, read-only root filesystem, `cap-drop ALL`, `no-new-privileges`, bounded CPU/memory/PIDs, non-privileged execution, automatic removal and exactly one writable bind mount for the disposable workspace. This profile proves the containment-evidence contract without external inference, but it is intentionally too restrictive for a real OpenCode-to-model connection.
+The Docker sandbox layer now includes both an evidence contract and a trusted lifecycle supervisor. The profile generates a digest-pinned offline launch contract and independently verifies normalized `docker inspect` evidence before issuing a hash-only sandbox attestation. The verifier requires `network=none`, read-only root filesystem, `cap-drop ALL`, `no-new-privileges`, bounded CPU/memory/PIDs, non-privileged execution, automatic removal and exactly one writable bind mount for the disposable workspace. `DockerProcessSupervisor` launches detached containers, proves launch-ID/inspect-ID ownership before attestation, refuses cleanup by an unproven name, performs ownership-checked teardown and verifies removal. CI exercises this lifecycle through a fake command runner, so no Docker daemon or model inference is needed for the contract tests. The offline profile remains intentionally too restrictive for a real OpenCode-to-model connection.
 
 ## Image generation
 
@@ -110,12 +110,12 @@ The following are not silently enabled:
 
 ## Current implementation frontier
 
-The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, a provenance-preserving local MCP fixture transport for attested OpenCode targets, and an independently verifiable offline Docker sandbox-attestation contract.
+The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, a provenance-preserving local MCP fixture transport for attested OpenCode targets, an independently verifiable offline Docker sandbox-attestation contract, and a trusted ownership-aware Docker process supervisor.
 
 Highest-value remaining work is now:
 
-1. implement the trusted Docker/OpenCode process supervisor that actually creates, inspects, health-checks and tears down the container and refuses target construction until attestation succeeds;
-2. add a narrowly scoped model-connectivity design that preserves external-network denial (for example an isolated internal Docker network plus an explicitly constrained local model relay), rather than falling back to Docker's Internet-capable default bridge;
+1. add a narrowly scoped model-connectivity design that preserves external-network denial and supplies independently verifiable network evidence, rather than falling back to Docker's Internet-capable default bridge;
+2. bind the container-visible OpenCode workspace/runtime endpoint to the host-side disposable workspace without conflating host and container paths, then add an OpenCode health-check gate before target construction;
 3. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
 4. run a bounded local OpenCode+MCP smoke that proves hostile fixture data reaches Blue only as a tool result and that model compromise remains distinct from blocked system effects;
 5. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;

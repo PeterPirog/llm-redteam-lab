@@ -61,6 +61,7 @@ class DockerSandboxProfile(StrictModel):
         container_name: str,
         workspace_host_path: str,
         command: tuple[str, ...],
+        detach: bool = False,
     ) -> tuple[str, ...]:
         """Build a fail-closed Docker CLI launch command without executing it."""
 
@@ -69,10 +70,12 @@ class DockerSandboxProfile(StrictModel):
         _normalize_host_path(workspace_host_path)
         if not command:
             raise ValueError("container command must be non-empty")
+        detach_args = ("--detach",) if detach else ()
         return (
             "docker",
             "run",
             "--rm",
+            *detach_args,
             "--pull",
             "never",
             "--name",
