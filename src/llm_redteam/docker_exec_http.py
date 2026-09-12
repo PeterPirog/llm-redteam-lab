@@ -37,11 +37,16 @@ _EXEC_HTTP_SCRIPT = (
     "req=urllib.request.Request(url,data=body,method=method);"
     "[req.add_header(k,v) for k,v in headers.items()];"
     "password=os.getenv(password_env) if password_env else None;"
-    "req.add_header('Authorization','Basic '+base64.b64encode((username+':'+password).encode()).decode()) if password else None;"
+    "auth=base64.b64encode((username+':'+password).encode()).decode() if password else '';"
+    "req.add_header('Authorization','Basic '+auth) if auth else None;"
     "status=0;rh=[];data=b'';"
-    "\ntry:\n r=urllib.request.urlopen(req,timeout=120);status=r.status;rh=list(r.headers.items());data=r.read();r.close()"
-    "\nexcept urllib.error.HTTPError as e:\n status=e.code;rh=list(e.headers.items());data=e.read();e.close()"
-    "\nprint(json.dumps({'status':status,'headers':rh,'body_b64':base64.b64encode(data).decode()},separators=(',',':')))"
+    "\ntry:\n "
+    "r=urllib.request.urlopen(req,timeout=120);"
+    "status=r.status;rh=list(r.headers.items());data=r.read();r.close()"
+    "\nexcept urllib.error.HTTPError as e:\n "
+    "status=e.code;rh=list(e.headers.items());data=e.read();e.close()"
+    "\nprint(json.dumps({'status':status,'headers':rh,"
+    "'body_b64':base64.b64encode(data).decode()},separators=(',',':')))"
 )
 
 
@@ -79,7 +84,9 @@ class DockerExecHttpTransport(httpx.AsyncBaseTransport):
     ) -> None:
         if command_timeout_seconds <= 0:
             raise ValueError("command_timeout_seconds must be positive")
-        if not python_executable or any(character.isspace() for character in python_executable):
+        if not python_executable or any(
+            character.isspace() for character in python_executable
+        ):
             raise ValueError("python_executable must be one executable token")
         self.runtime_profile = runtime_profile
         self.container = container
@@ -170,7 +177,10 @@ class DockerExecHttpTransport(httpx.AsyncBaseTransport):
         path = parsed.path or "/"
         if parsed.query:
             path += "?" + parsed.query
-        host = f"[{self.runtime_profile.hostname}]" if ":" in self.runtime_profile.hostname else self.runtime_profile.hostname
+        if ":" in self.runtime_profile.hostname:
+            host = f"[{self.runtime_profile.hostname}]"
+        else:
+            host = self.runtime_profile.hostname
         return f"http://{host}:{expected_port}{path}"
 
     @staticmethod
