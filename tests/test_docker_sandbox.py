@@ -42,6 +42,7 @@ def _runtime_profile() -> OpenCodeRuntimeProfile:
 def _policy(**updates: object) -> AgentSandboxPolicy:
     values: dict[str, object] = {
         "enforcement_kind": SandboxEnforcementKind.DOCKER,
+        "enforcement_profile_sha256": _docker_profile().profile_sha256,
         "disposable_workspace": True,
         "external_network_denied": True,
         "git_publication_denied": True,
@@ -119,6 +120,31 @@ def test_profile_requires_digest_pinned_image_and_absolute_workspace() -> None:
 
     with pytest.raises(ValueError, match="absolute"):
         _docker_profile(container_workspace="relative/workspace")
+
+
+def test_docker_enforcement_profile_is_part_of_stable_policy_identity() -> None:
+    base_profile = _docker_profile()
+    changed_profile = _docker_profile(memory_limit_bytes=2_147_483_648)
+    base_policy = _policy(enforcement_profile_sha256=base_profile.profile_sha256)
+    changed_policy = _policy(enforcement_profile_sha256=changed_profile.profile_sha256)
+
+    assert base_profile.profile_sha256 != changed_profile.profile_sha256
+    assert base_policy.policy_sha256 != changed_policy.policy_sha256
+
+
+def test_docker_policy_must_bind_exact_enforcement_profile() -> None:
+    inspection = DockerContainerInspection.from_docker_inspect(_inspect_payload())
+    wrong_profile = _docker_profile(memory_limit_bytes=2_147_483_648)
+    policy = _policy(enforcement_profile_sha256=wrong_profile.profile_sha256)
+
+    with pytest.raises(ValueError, match="does not bind"):
+        attest_offline_docker_sandbox(
+            docker_profile=_docker_profile(),
+            runtime_profile=_runtime_profile(),
+            sandbox_policy=policy,
+            inspection=inspection,
+            workspace_host_path=_WORKSPACE,
+        )
 
 
 def test_docker_inspection_issues_hash_only_attestation() -> None:
