@@ -1,9 +1,10 @@
 """Minimal local-only MCP stdio server for synthetic indirect-injection fixtures.
 
 The server intentionally supports the handshake-era MCP revisions through
-``2025-11-25``. Modern clients may probe ``server/discover`` first; the server returns
-JSON-RPC ``Method not found`` so standards-compliant clients can fall back to the
-initialize handshake on the same stdio transport.
+``2025-11-25``. Modern clients may probe ``server/discover`` first; returning JSON-RPC
+``Method not found`` permits a standards-compatible client to negotiate or fall back to
+a legacy initialize flow. A client implementation may perform that probe on a separate
+process rather than reusing the same stdio process.
 
 Raw fixture content is read only from a harness-controlled sidecar file. Its SHA-256
 must match a second harness-controlled hash sidecar. Nothing is written to stdout
