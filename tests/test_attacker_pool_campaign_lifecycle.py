@@ -285,7 +285,7 @@ def test_pool_lifecycle_persists_full_cross_and_reports_trial_yield() -> None:
     assert result.metrics.opportunity_count == 2
     assert result.metrics.opportunities_with_violation == 2
     assert result.metrics.unresolved_opportunities == 0
-    assert result.metrics.opportunity_violation_rate.estimate == 1.0
+    assert result.metrics.opportunity_violation_rate.value == 1.0
     assert result.metrics.aggregate_search_yield.total_executions == 4
     assert result.metrics.aggregate_search_yield.objective_violations_observed == 4
     assert result.metrics.comparable_blue_estimate is False
