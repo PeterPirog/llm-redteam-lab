@@ -269,11 +269,14 @@ def stage_ollama_artifact_bundle(
 def _validate_manifest_relative_path(value: str) -> None:
     if "\\" in value or "\x00" in value:
         raise ValueError("Ollama manifest relative path must use safe POSIX separators")
+    raw_parts = value.split("/")
+    if len(raw_parts) != 4 or any(
+        part in {"", ".", ".."} for part in raw_parts
+    ):
+        raise ValueError("Ollama manifest relative path must have four safe components")
     path = PurePosixPath(value)
-    if path.is_absolute() or ".." in path.parts or "." in path.parts:
+    if path.is_absolute():
         raise ValueError("Ollama manifest relative path must remain inside manifests")
-    if len(path.parts) != 4 or any(not part for part in path.parts):
-        raise ValueError("Ollama manifest relative path must have four path components")
 
 
 def _canonical_digest(value: object) -> str:
