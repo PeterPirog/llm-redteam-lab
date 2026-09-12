@@ -30,6 +30,10 @@ from llm_redteam.runtime_config import BudgetConfigDocument, RuntimePolicy
 from llm_redteam.storage.attacker_pool_execution import load_attacker_pool_trial_records
 from llm_redteam.storage.measurement_repository import load_campaign_measurement_snapshot
 from llm_redteam.storage.repository import ExperimentRepository
+from llm_redteam.target_trial_isolation import (
+    InMemoryFreshTargetLeaseProvider,
+    TargetIsolationLevel,
+)
 from llm_redteam.targets.base import SessionMode
 from llm_redteam.targets.mock_multiturn import EscalatingVaultTarget
 
@@ -167,7 +171,7 @@ def _case(case_id: str) -> AttackCase:
     )
 
 
-def _plan() -> AttackerPoolCampaignPlan:
+def _plan(*, session_mode: SessionMode = SessionMode.REPLAY) -> AttackerPoolCampaignPlan:
     return AttackerPoolCampaignPlan(
         purpose=CampaignPurpose.DISCOVERY,
         target_class=TargetClass.WRITING,
@@ -175,7 +179,7 @@ def _plan() -> AttackerPoolCampaignPlan:
         budget_profile="pool",
         red_policy=RedPolicyKind.ADAPTIVE,
         replicates=1,
-        session_mode=SessionMode.REPLAY,
+        session_mode=session_mode,
     )
 
 
@@ -192,6 +196,14 @@ def _scripts(trials: int) -> ScriptedRoleModelClient:
             ]
         )
     return ScriptedRoleModelClient({ModelRole.RED_PLANNER: rows})
+
+
+def _provider(provider_id: str = "pool-lifecycle-fresh-target") -> InMemoryFreshTargetLeaseProvider:
+    return InMemoryFreshTargetLeaseProvider(
+        target_factory=lambda: EscalatingVaultTarget(canary=CANARY),
+        provider_id=provider_id,
+        isolation_level=TargetIsolationLevel.APPLICATION_INSTANCE,
+    )
 
 
 def test_pool_preflight_multiplies_trial_and_interaction_counts() -> None:
@@ -236,7 +248,7 @@ def test_pool_preflight_accounts_minimum_variant_planner_token_reservations() ->
     )
 
 
-def test_pool_plan_rejects_evaluation_and_target_managed_state() -> None:
+def test_pool_plan_rejects_evaluation_but_target_managed_requires_provider() -> None:
     with pytest.raises(ValueError, match="DISCOVERY only"):
         AttackerPoolCampaignPlan(
             purpose=CampaignPurpose.EVALUATION,
@@ -245,14 +257,27 @@ def test_pool_plan_rejects_evaluation_and_target_managed_state() -> None:
             red_policy=RedPolicyKind.ADAPTIVE,
         )
 
-    with pytest.raises(ValueError, match="per-trial target leases"):
-        AttackerPoolCampaignPlan(
-            purpose=CampaignPurpose.DISCOVERY,
-            target_class=TargetClass.WRITING,
-            target_mode=TargetMode.MODEL,
-            red_policy=RedPolicyKind.ADAPTIVE,
-            session_mode=SessionMode.TARGET_MANAGED,
-        )
+    plan = _plan(session_mode=SessionMode.TARGET_MANAGED)
+    without_provider = preflight_attacker_pool_campaign(
+        plan=plan,
+        cases=(_case("case-a"),),
+        budgets=_budgets(),
+        models=_models(),
+    )
+    assert without_provider.ready is False
+    assert any(
+        issue.code == "ATTACKER_POOL_TARGET_ISOLATION_REQUIRED"
+        for issue in without_provider.issues
+    )
+
+    with_provider = preflight_attacker_pool_campaign(
+        plan=plan,
+        cases=(_case("case-a"),),
+        budgets=_budgets(),
+        models=_models(),
+        target_lease_provider=_provider(),
+    )
+    assert with_provider.ready is True
 
 
 def test_pool_lifecycle_persists_full_cross_and_reports_trial_yield() -> None:
@@ -281,6 +306,7 @@ def test_pool_lifecycle_persists_full_cross_and_reports_trial_yield() -> None:
     assert result.status.value == "completed"
     assert len(result.executions) == 4
     assert len(result.trial_records) == 4
+    assert result.isolation_records == ()
     assert result.metrics.total_trials == 4
     assert result.metrics.opportunity_count == 2
     assert result.metrics.opportunities_with_violation == 2
@@ -316,6 +342,43 @@ def test_pool_lifecycle_persists_full_cross_and_reports_trial_yield() -> None:
     assert measurement.metric_definition_version == ATTACKER_POOL_METRIC_DEFINITION_VERSION
     assert measurement.attack_policy_fingerprint
     assert measurement.protocol.purpose == CampaignPurpose.DISCOVERY
+
+
+def test_target_managed_pool_lifecycle_uses_fresh_isolation_for_each_attacker() -> None:
+    target = EscalatingVaultTarget(canary=CANARY)
+    repository = ExperimentRepository.from_url("sqlite+pysqlite:///:memory:")
+    provider = _provider()
+    executor = AttackerPoolCampaignLifecycleExecutor(
+        target=target,
+        judge=DeterministicJudge(canary=CANARY),
+        repository=repository,
+        budgets=_budgets(),
+        judge_policy_descriptor=deterministic_judge_policy_descriptor(canary=CANARY),
+        models=_models(),
+        red_model_client=_scripts(trials=2),
+        target_lease_provider=provider,
+    )
+
+    result = asyncio.run(
+        executor.run(
+            plan=_plan(session_mode=SessionMode.TARGET_MANAGED),
+            cases=(_case("case-isolated"),),
+            campaign_id="campaign-pool-isolated-lifecycle",
+        )
+    )
+
+    assert result.status.value == "completed"
+    assert len(result.executions) == 2
+    assert len(result.trial_records) == 2
+    assert len(result.isolation_records) == 2
+    assert len({record.lease_id_hash for record in result.isolation_records}) == 2
+    assert all(record.cleanup_complete is True for record in result.isolation_records)
+    assert all(record.teardown_proof_hash is not None for record in result.isolation_records)
+    assert all(execution.model_compromise for execution in result.executions)
+
+    measurement = load_campaign_measurement_snapshot(repository.engine, result.campaign_id)
+    assert measurement is not None
+    assert measurement.attack_policy_fingerprint
 
 
 def test_pool_lifecycle_requires_explicit_pool_configuration() -> None:
