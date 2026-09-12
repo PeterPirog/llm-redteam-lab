@@ -218,6 +218,12 @@ class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMix
                     turn.turn_id,
                     turn.evidence,
                 )
+            self._add_evidence(
+                session,
+                result.execution.execution_id,
+                None,
+                self._execution_only_evidence(result),
+            )
 
     def save_forensic_report(
         self,
@@ -312,6 +318,28 @@ class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMix
     @staticmethod
     def content_hash(content: str) -> str:
         return sha256(content.encode()).hexdigest()
+
+    @staticmethod
+    def _execution_only_evidence(
+        result: ConversationRunResult,
+    ) -> tuple[EvidenceRecord, ...]:
+        """Return execution evidence not already persisted against a conversation turn.
+
+        Execution evidence normally contains the flattened turn evidence. Some trusted
+        control-plane facts (for example fixture or isolation teardown proofs) are added
+        only after the bounded conversation has finished. Treat evidence as a multiset so
+        structurally identical records from different turns are each consumed once rather
+        than accidentally collapsing legitimate repeated observations.
+        """
+
+        remaining = list(result.execution.evidence)
+        for turn in result.turns:
+            for record in turn.evidence:
+                try:
+                    remaining.remove(record)
+                except ValueError:
+                    continue
+        return tuple(remaining)
 
     @staticmethod
     def _add_execution(
