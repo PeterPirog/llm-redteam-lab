@@ -93,6 +93,16 @@ class TargetTrialLease:
 class TargetTrialLeaseProvider(Protocol):
     """Trusted control-plane boundary that owns Blue state creation and teardown."""
 
+    @property
+    def provider_fingerprint(self) -> str:
+        """Stable hash of the provider policy/configuration used for this campaign."""
+        ...
+
+    @property
+    def isolation_level(self) -> TargetIsolationLevel:
+        """Maximum isolation strength the provider is configured to attest."""
+        ...
+
     def acquire(
         self,
         *,
@@ -206,6 +216,14 @@ class InMemoryFreshTargetLeaseProvider:
                 "isolation_level": isolation_level.name,
             }
         )
+
+    @property
+    def provider_fingerprint(self) -> str:
+        return self._provider_fingerprint
+
+    @property
+    def isolation_level(self) -> TargetIsolationLevel:
+        return self._isolation_level
 
     def acquire(
         self,
