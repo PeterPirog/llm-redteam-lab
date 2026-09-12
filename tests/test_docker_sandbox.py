@@ -117,9 +117,8 @@ def test_profile_requires_digest_pinned_image_and_absolute_workspace() -> None:
     with pytest.raises(ValueError):
         _docker_profile(image_ref="llm-redteam-opencode:latest")
 
-    profile = _docker_profile(container_workspace="relative/workspace")
     with pytest.raises(ValueError, match="absolute"):
-        DockerSandboxProfile.model_validate(profile.model_dump())
+        _docker_profile(container_workspace="relative/workspace")
 
 
 def test_docker_inspection_issues_hash_only_attestation() -> None:
