@@ -1,9 +1,8 @@
 """Persisted fixed full-cross execution for explicit Red attacker pools.
 
-This runner executes the predeclared attacker x case x replicate allocation under one
-shared campaign BudgetLedger. It is intentionally limited to REPLAY sessions in this
-first slice: target-managed/AGENT campaigns need a per-trial target lease/reset boundary
-before cross-attacker comparisons can be considered isolated.
+REPLAY trials can share a stateless target adapter. TARGET_MANAGED trials require a trusted
+per-trial target lease provider so application/session/workspace state cannot leak between
+attacker variants or replicates.
 """
 
 from __future__ import annotations
@@ -35,6 +34,12 @@ from ..storage.attacker_pool_execution import (
 from ..storage.measurement_repository import fingerprint_budget
 from ..storage.repository import ExperimentRepository
 from ..targets.base import SessionMode, TargetAdapter
+from ..targets.lease import (
+    TargetLease,
+    TargetLeaseProvider,
+    TargetLeaseReceipt,
+    TargetLeaseRequest,
+)
 from .multiturn import ConversationRunResult, MultiTurnCampaignEngine
 
 
@@ -44,6 +49,7 @@ class PersistedAttackerPoolRunResult:
     conversations: tuple[ConversationRunResult, ...]
     executions: tuple[ExecutionResult, ...]
     trial_records: tuple[AttackerPoolTrialRecord, ...]
+    target_lease_receipts: tuple[TargetLeaseReceipt, ...]
     budget: BudgetSnapshot
 
 
@@ -109,11 +115,13 @@ class PersistedAttackerPoolRunner:
         judge: Judge,
         repository: ExperimentRepository,
         runtime: RedAttackerPoolRuntime,
+        lease_provider: TargetLeaseProvider | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
         self.repository = repository
         self.runtime = runtime
+        self.lease_provider = lease_provider
 
     async def run(
         self,
@@ -149,6 +157,7 @@ class PersistedAttackerPoolRunner:
         by_id = {case.id: case for case in cases}
         conversations: list[ConversationRunResult] = []
         executions: list[ExecutionResult] = []
+        lease_receipts: list[TargetLeaseReceipt] = []
 
         for assignment in schedule:
             case = by_id[assignment.case_id]
@@ -173,27 +182,57 @@ class PersistedAttackerPoolRunner:
                 assignment=assignment,
             )
 
+            lease: TargetLease | None = None
+            trial_target = self.target
+            if red_runtime.session_mode == SessionMode.TARGET_MANAGED:
+                if self.lease_provider is None:
+                    raise RuntimeError(
+                        "TARGET_MANAGED attacker-pool trial requires target lease provider"
+                    )
+                lease = await self.lease_provider.acquire(
+                    TargetLeaseRequest(
+                        campaign_id=campaign_id,
+                        attack_instance_id=attack_instance_id,
+                        variant_id=assignment.variant_id,
+                        case_id=assignment.case_id,
+                        replicate=assignment.replicate,
+                        order_index=assignment.order_index,
+                    )
+                )
+                trial_target = lease.target
+
             before = self.runtime.budget.snapshot()
-            engine = MultiTurnCampaignEngine(
-                target=self.target,
-                judge=self.judge,
-                conversation_budget=red_runtime.conversation_budget,
-                budget=self.runtime.budget,
-            )
-            conversation = await engine.run_case(
-                case,
-                strategy,
-                session_mode=SessionMode.REPLAY,
-                conversation_id=conversation_id,
-            )
-            self.repository.save_conversation(
-                conversation,
-                attack_instance_id=attack_instance_id,
-                target_snapshot_id=contract.target_snapshot_id,
-            )
-            red_runtime.observe(case=case, strategy=strategy, result=conversation)
-            after = self.runtime.budget.snapshot()
-            delta = _trial_resource_delta(before, after)
+            try:
+                if trial_target.identity != self.target.identity:
+                    raise RuntimeError(
+                        "target lease changed stable Blue target identity during trial"
+                    )
+                engine = MultiTurnCampaignEngine(
+                    target=trial_target,
+                    judge=self.judge,
+                    conversation_budget=red_runtime.conversation_budget,
+                    budget=self.runtime.budget,
+                )
+                conversation = await engine.run_case(
+                    case,
+                    strategy,
+                    session_mode=red_runtime.session_mode,
+                    conversation_id=conversation_id,
+                )
+                if lease is not None:
+                    conversation = _with_target_lease_evidence(conversation, lease.receipt)
+                self.repository.save_conversation(
+                    conversation,
+                    attack_instance_id=attack_instance_id,
+                    target_snapshot_id=contract.target_snapshot_id,
+                )
+                red_runtime.observe(case=case, strategy=strategy, result=conversation)
+                after = self.runtime.budget.snapshot()
+                delta = _trial_resource_delta(before, after)
+            finally:
+                if lease is not None and self.lease_provider is not None:
+                    await self.lease_provider.release(lease)
+
             complete_attacker_pool_assignment(
                 self.repository.engine,
                 attack_instance_id=attack_instance_id,
@@ -202,6 +241,8 @@ class PersistedAttackerPoolRunner:
             )
             conversations.append(conversation)
             executions.append(conversation.execution)
+            if lease is not None:
+                lease_receipts.append(lease.receipt)
 
         records = load_attacker_pool_trial_records(
             self.repository.engine,
@@ -221,6 +262,7 @@ class PersistedAttackerPoolRunner:
             conversations=tuple(conversations),
             executions=tuple(executions),
             trial_records=records,
+            target_lease_receipts=tuple(lease_receipts),
             budget=self.runtime.budget.snapshot(),
         )
 
@@ -253,15 +295,28 @@ class PersistedAttackerPoolRunner:
         if observed != expected:
             raise ValueError("attacker-pool contract variants do not match runtime variants")
 
+        session_modes = {
+            self.runtime.runtime_for(variant_id).session_mode
+            for variant_id in self.runtime.variant_ids
+        }
+        if len(session_modes) != 1:
+            raise ValueError("attacker-pool variants must use one shared session mode")
+        session_mode = next(iter(session_modes))
+        if session_mode == SessionMode.TARGET_MANAGED:
+            if self.lease_provider is None:
+                raise ValueError(
+                    "persisted TARGET_MANAGED attacker-pool runner requires per-trial "
+                    "target lease provider"
+                )
+            if self.lease_provider.target_identity != self.target.identity:
+                raise ValueError(
+                    "target lease provider identity does not match campaign Blue target"
+                )
+
         for variant_id in self.runtime.variant_ids:
             red_runtime = self.runtime.runtime_for(variant_id)
             if red_runtime.purpose != contract.purpose:
                 raise ValueError("attacker-pool purpose does not match Red runtime")
-            if red_runtime.session_mode != SessionMode.REPLAY:
-                raise ValueError(
-                    "persisted attacker-pool runner requires REPLAY until per-trial "
-                    "target lease/reset isolation is available"
-                )
             if red_runtime.target_class != self.target.identity.target_class:
                 raise ValueError("attacker-pool Red target class does not match Blue target")
             if red_runtime.target_mode != self.target.identity.target_mode:
@@ -272,9 +327,24 @@ class PersistedAttackerPoolRunner:
                 raise ValueError("attacker-pool runner currently requires multi_turn cases")
             if case.payload.fixture is not None:
                 raise ValueError(
-                    "attacker-pool fixture execution requires per-trial target leases "
-                    "and is deferred"
+                    "attacker-pool fixture execution requires a fixture-aware target lease "
+                    "provider and remains deferred"
                 )
+
+
+def _with_target_lease_evidence(
+    conversation: ConversationRunResult,
+    receipt: TargetLeaseReceipt,
+) -> ConversationRunResult:
+    execution = conversation.execution.model_copy(
+        update={
+            "evidence": (
+                *conversation.execution.evidence,
+                receipt.evidence_record(),
+            )
+        }
+    )
+    return conversation.model_copy(update={"execution": execution})
 
 
 def _pool_attack_instance_id(
