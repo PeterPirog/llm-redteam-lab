@@ -1,9 +1,8 @@
-"""Fail-closed OpenCode launch profiles for authorized local AGENT campaigns.
+"""Fail-closed OpenCode runtime profiles for authorized local AGENT campaigns.
 
-This module does not start processes. It builds a deterministic launch contract that
-must be paired with an independent sandbox attestation before a local OpenCode server
-may be treated as a restricted Blue target. OpenCode permissions are defense in depth;
-they are not used as proof of host/network containment.
+This module builds deterministic OpenCode launch policy and optional synthetic MCP
+fixture transport. It does not start processes. OpenCode permissions are defense in
+depth and are never treated as proof of host/network containment.
 """
 
 from __future__ import annotations
@@ -12,16 +11,23 @@ import json
 from enum import StrEnum
 from hashlib import sha256
 from ipaddress import ip_address
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
 from .domain import StrictModel, TargetIdentity
-from .targets.base import TargetRequest, TargetResponse
+from .targets.base import (
+    TargetRequest,
+    TargetResponse,
+    UntrustedContextChannel,
+)
 from .targets.opencode import OpenCodeConfig, OpenCodeTarget
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
+_MCP_CONTEXT_FILE_ENV = "LLM_REDTEAM_MCP_CONTEXT_FILE"
+_MCP_CONTEXT_HASH_FILE_ENV = "LLM_REDTEAM_MCP_CONTEXT_HASH_FILE"
 
 
 class SandboxEnforcementKind(StrEnum):
@@ -31,6 +37,63 @@ class SandboxEnforcementKind(StrEnum):
     WINDOWS_SANDBOX = "windows_sandbox"
     OS_POLICY = "os_policy"
     TRUSTED_HARNESS = "trusted_harness"
+
+
+class McpFixtureBridgeProfile(StrictModel):
+    """Stable local MCP transport configuration for ephemeral fixture context."""
+
+    version: int = Field(ge=1, default=1)
+    server_name: str = Field(min_length=1, default="mcp_rt_fixture")
+    python_executable: str = Field(min_length=1, default="python")
+    context_file_path: str = Field(min_length=1)
+    context_hash_file_path: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def bridge_paths_and_name_are_valid(self) -> McpFixtureBridgeProfile:
+        if not _identifier_like(self.server_name):
+            raise ValueError("MCP fixture server_name must be identifier-like")
+        if self.context_file_path == self.context_hash_file_path:
+            raise ValueError("MCP context and hash sidecars must use distinct paths")
+        if "\x00" in self.context_file_path or "\x00" in self.context_hash_file_path:
+            raise ValueError("MCP sidecar paths cannot contain NUL")
+        return self
+
+    @property
+    def tool_prefix(self) -> str:
+        return f"{self.server_name}_*"
+
+    @property
+    def bridge_sha256(self) -> str:
+        return canonical_json_hash(
+            {
+                "version": self.version,
+                "server_name": self.server_name,
+                "python_executable": self.python_executable,
+                "context_file_path_sha256": sha256(
+                    _normalize_workspace(self.context_file_path).encode()
+                ).hexdigest(),
+                "context_hash_file_path_sha256": sha256(
+                    _normalize_workspace(self.context_hash_file_path).encode()
+                ).hexdigest(),
+                "server_module": "llm_redteam.mcp_fixture_server",
+                "transport": "stdio",
+            }
+        )
+
+    def opencode_server_config(self) -> dict[str, object]:
+        return {
+            "type": "local",
+            "command": [
+                self.python_executable,
+                "-m",
+                "llm_redteam.mcp_fixture_server",
+            ],
+            "enabled": True,
+            "environment": {
+                _MCP_CONTEXT_FILE_ENV: self.context_file_path,
+                _MCP_CONTEXT_HASH_FILE_ENV: self.context_hash_file_path,
+            },
+        }
 
 
 class OpenCodeRuntimeProfile(StrictModel):
@@ -43,6 +106,7 @@ class OpenCodeRuntimeProfile(StrictModel):
     port: int = Field(ge=1, le=65535, default=4096)
     shell_allowlist: tuple[str, ...] = ()
     server_password_env: str | None = None
+    mcp_fixture_bridge: McpFixtureBridgeProfile | None = None
 
     @model_validator(mode="after")
     def restricted_profile_is_valid(self) -> OpenCodeRuntimeProfile:
@@ -77,6 +141,13 @@ class OpenCodeRuntimeProfile(StrictModel):
                     "shell allowlist cannot explicitly authorize publication or network tools"
                 )
             normalized.append(candidate)
+
+        bridge = self.mcp_fixture_bridge
+        if bridge is not None:
+            if _path_is_within(bridge.context_file_path, self.workspace_root):
+                raise ValueError("MCP context sidecar must remain outside Blue workspace")
+            if _path_is_within(bridge.context_hash_file_path, self.workspace_root):
+                raise ValueError("MCP hash sidecar must remain outside Blue workspace")
         return self
 
     @property
@@ -94,6 +165,11 @@ class OpenCodeRuntimeProfile(StrictModel):
                 "port": self.port,
                 "shell_allowlist": list(self.shell_allowlist),
                 "server_password_env": self.server_password_env,
+                "mcp_fixture_bridge_sha256": (
+                    self.mcp_fixture_bridge.bridge_sha256
+                    if self.mcp_fixture_bridge is not None
+                    else None
+                ),
                 "pure": True,
                 "share": "disabled",
                 "autoupdate": False,
@@ -108,28 +184,37 @@ class OpenCodeRuntimeProfile(StrictModel):
         for pattern in self.shell_allowlist:
             shell_rules[pattern] = "allow"
 
-        return {
+        permissions: dict[str, object] = {
+            "*": "deny",
+            "read": {
+                "*": "allow",
+                "*.env": "deny",
+                "*.env.*": "deny",
+                "*.env.example": "allow",
+            },
+            "glob": "allow",
+            "grep": "allow",
+            "edit": "allow",
+            "bash": shell_rules,
+            "task": "deny",
+            "webfetch": "deny",
+            "websearch": "deny",
+            "external_directory": "deny",
+        }
+        document: dict[str, object] = {
             "$schema": "https://opencode.ai/config.json",
             "share": "disabled",
             "autoupdate": False,
-            "permission": {
-                "*": "deny",
-                "read": {
-                    "*": "allow",
-                    "*.env": "deny",
-                    "*.env.*": "deny",
-                    "*.env.example": "allow",
-                },
-                "glob": "allow",
-                "grep": "allow",
-                "edit": "allow",
-                "bash": shell_rules,
-                "task": "deny",
-                "webfetch": "deny",
-                "websearch": "deny",
-                "external_directory": "deny",
-            },
+            "permission": permissions,
         }
+        if self.mcp_fixture_bridge is not None:
+            permissions[self.mcp_fixture_bridge.tool_prefix] = "allow"
+            document["mcp"] = {
+                self.mcp_fixture_bridge.server_name: (
+                    self.mcp_fixture_bridge.opencode_server_config()
+                )
+            }
+        return document
 
     def config_json(self) -> str:
         return json.dumps(self.config_document(), separators=(",", ":"), ensure_ascii=True)
@@ -160,11 +245,7 @@ class AgentSandboxPolicy(StrictModel):
 
 
 class AgentSandboxAttestation(StrictModel):
-    """Per-run hash-only evidence issued by a trusted isolation harness.
-
-    Unlike ``AgentSandboxPolicy``, this object contains ephemeral run identity and proof.
-    It is execution evidence and MUST NOT change the Blue target identity by itself.
-    """
+    """Per-run hash-only evidence issued by a trusted isolation harness."""
 
     version: int = Field(ge=1, default=1)
     issuer: str = Field(min_length=1)
@@ -190,6 +271,7 @@ class OpenCodeLaunchPlan(StrictModel):
     sandbox_policy_sha256: str = Field(pattern=_HASH_PATTERN)
     sandbox_attestation_sha256: str = Field(pattern=_HASH_PATTERN)
     workspace_root_sha256: str = Field(pattern=_HASH_PATTERN)
+    mcp_fixture_bridge_sha256: str | None = Field(default=None, pattern=_HASH_PATTERN)
 
     @property
     def launch_sha256(self) -> str:
@@ -206,6 +288,7 @@ class OpenCodeLaunchPlan(StrictModel):
                 "runtime_profile_sha256": self.runtime_profile_sha256,
                 "sandbox_policy_sha256": self.sandbox_policy_sha256,
                 "workspace_root_sha256": self.workspace_root_sha256,
+                "mcp_fixture_bridge_sha256": self.mcp_fixture_bridge_sha256,
             }
         )
 
@@ -251,6 +334,90 @@ class AttestedOpenCodeTarget:
 
     async def aclose(self) -> None:
         await self._target.aclose()
+
+
+class McpContextOpenCodeTarget:
+    """Transport `MCP_CONTEXT` through a real local MCP sidecar, never the user prompt."""
+
+    def __init__(
+        self,
+        target: AttestedOpenCodeTarget,
+        bridge: McpFixtureBridgeProfile,
+    ) -> None:
+        if target.launch_plan.mcp_fixture_bridge_sha256 != bridge.bridge_sha256:
+            raise ValueError("OpenCode launch plan is not bound to this MCP fixture bridge")
+        self._target = target
+        self.bridge = bridge
+
+    @property
+    def identity(self) -> TargetIdentity:
+        base = self._target.identity
+        return base.model_copy(
+            update={
+                "capabilities": base.capabilities | frozenset({"untrusted_context", "mcp"})
+            }
+        )
+
+    async def execute(self, request: TargetRequest) -> TargetResponse:
+        if not request.untrusted_context:
+            return await self._target.execute(request)
+        if len(request.untrusted_context) != 1:
+            raise ValueError("MCP fixture transport requires exactly one untrusted context item")
+        context = request.untrusted_context[0]
+        if context.channel != UntrustedContextChannel.MCP_CONTEXT:
+            raise ValueError("MCP fixture transport accepts only mcp_context channel")
+
+        self._stage_context(content=context.content, content_sha256=context.content_sha256)
+        try:
+            forwarded = request.model_copy(update={"untrusted_context": ()})
+            response = await self._target.execute(forwarded)
+        finally:
+            self._clear_context()
+
+        metadata = dict(response.provider_metadata)
+        metadata.update(
+            {
+                "untrusted_context_transport": "mcp_stdio_sidecar_v1",
+                "mcp_fixture_server": self.bridge.server_name,
+                "mcp_fixture_content_sha256": context.content_sha256,
+            }
+        )
+        return response.model_copy(update={"provider_metadata": metadata})
+
+    async def aclose(self) -> None:
+        self._clear_context(ignore_missing=True)
+        await self._target.aclose()
+
+    def _stage_context(self, *, content: str, content_sha256: str) -> None:
+        content_path = Path(self.bridge.context_file_path)
+        hash_path = Path(self.bridge.context_hash_file_path)
+        if content_path.exists() or hash_path.exists():
+            raise RuntimeError(
+                "MCP fixture sidecar already exists; concurrent/reused trial refused"
+            )
+        if not content_path.parent.is_dir() or not hash_path.parent.is_dir():
+            raise RuntimeError("MCP fixture sidecar parent directory must already exist")
+        if sha256(content.encode()).hexdigest() != content_sha256:
+            raise ValueError("MCP fixture context hash mismatch before transport")
+        try:
+            content_path.write_text(content, encoding="utf-8")
+            hash_path.write_text(content_sha256 + "\n", encoding="ascii")
+        except OSError:
+            content_path.unlink(missing_ok=True)
+            hash_path.unlink(missing_ok=True)
+            raise
+
+    def _clear_context(self, *, ignore_missing: bool = False) -> None:
+        content_path = Path(self.bridge.context_file_path)
+        hash_path = Path(self.bridge.context_hash_file_path)
+        errors: list[OSError] = []
+        for path in (content_path, hash_path):
+            try:
+                path.unlink(missing_ok=ignore_missing)
+            except OSError as exc:
+                errors.append(exc)
+        if errors:
+            raise RuntimeError("MCP fixture sidecar cleanup failed") from errors[0]
 
 
 def build_attested_opencode_launch_plan(
@@ -306,6 +473,11 @@ def build_attested_opencode_launch_plan(
         sandbox_policy_sha256=sandbox_policy.policy_sha256,
         sandbox_attestation_sha256=attestation.attestation_sha256,
         workspace_root_sha256=profile.workspace_root_sha256,
+        mcp_fixture_bridge_sha256=(
+            profile.mcp_fixture_bridge.bridge_sha256
+            if profile.mcp_fixture_bridge is not None
+            else None
+        ),
     )
 
 
@@ -376,3 +548,22 @@ def _normalize_workspace(value: str) -> str:
     if not normalized:
         raise ValueError("workspace_root cannot normalize to empty")
     return normalized
+
+
+def _path_is_within(candidate: str, root: str) -> bool:
+    normalized_candidate = candidate.replace("\\", "/")
+    normalized_root = root.replace("\\", "/")
+    windows = (
+        (len(normalized_candidate) >= 2 and normalized_candidate[1] == ":")
+        or (len(normalized_root) >= 2 and normalized_root[1] == ":")
+        or normalized_candidate.startswith("//")
+        or normalized_root.startswith("//")
+    )
+    path_type = PureWindowsPath if windows else PurePosixPath
+    path = path_type(candidate)
+    root_path = path_type(root)
+    try:
+        path.relative_to(root_path)
+    except ValueError:
+        return False
+    return True

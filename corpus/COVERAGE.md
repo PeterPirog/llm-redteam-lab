@@ -1,6 +1,6 @@
 # Corpus Coverage — v3
 
-Last reviewed: 2026-09-11
+Last reviewed: 2026-09-12
 
 This document explains what the current corpus architecture covers and what remains intentionally external, gated, or deferred.
 
@@ -65,7 +65,7 @@ The framework distinguishes four system layers during AGENT evaluation:
 
 A forbidden request can establish `MODEL_COMPROMISE`. `SYSTEM_COMPROMISE` requires the surrounding system to permit the unauthorized effect under the declared evidence contract; a provider-reported completed tool call alone is not sufficient by default.
 
-The native MCP fixture is synthetic/local and disabled by default. Real OpenCode/OpenWebUI/MCP adapters must implement the actual context transport before advertising support.
+The native MCP fixture is synthetic/local and disabled by default. `McpContextOpenCodeTarget` now provides a concrete local stdio transport for attested OpenCode targets: fixture content is staged outside the Blue workspace, hash-verified by a one-tool MCP server, and never concatenated into the direct user prompt. The current compatibility profile targets handshake-era MCP through `2025-11-25`, matching the current OpenCode MCP client generation. A real campaign still requires a trusted process supervisor and sandbox issuer that can independently attest workspace disposal, external-network denial and Git-publication denial.
 
 ## Image generation
 
@@ -108,13 +108,14 @@ The following are not silently enabled:
 
 ## Current implementation frontier
 
-The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware time-to-violation metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs and a deterministic RAG PIPELINE reference target.
+The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, and a concrete provenance-preserving local MCP fixture transport for attested OpenCode targets.
 
 Highest-value remaining work is now:
 
-1. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
-2. connect the explicit MCP/tool-context contract to a concrete authorized local MCP/OpenCode or OpenWebUI target without weakening target identity or provenance;
-3. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
-4. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
-5. add a predeclared statistical backend before any generalized-population security claim is allowed;
-6. broaden multimodal/image-generation evidence and regression coverage without weakening provider independence.
+1. implement a trusted local OpenCode process supervisor/sandbox issuer so disposable workspace, external-network denial and Git-publication denial are enforceable and independently attested rather than merely declared;
+2. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
+3. run a bounded local OpenCode+MCP smoke that proves the hostile fixture reaches Blue only as a tool result and that model compromise can be separated from blocked system effects;
+4. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
+5. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
+6. add a predeclared statistical backend before any generalized-population security claim is allowed;
+7. broaden multimodal/image-generation evidence and regression coverage without weakening provider independence.
