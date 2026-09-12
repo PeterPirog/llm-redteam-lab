@@ -108,15 +108,20 @@ def minimum_isolation_level(
     target_mode: TargetMode,
     session_mode: SessionMode,
 ) -> TargetIsolationLevel | None:
-    """Return the minimum clean-state boundary required for a comparable trial."""
+    """Return the minimum clean-state boundary required for a comparable trial.
 
-    if session_mode == SessionMode.REPLAY:
-        return None
-    if target_mode == TargetMode.MODEL:
-        return TargetIsolationLevel.SESSION_NAMESPACE
+    REPLAY controls only transcript delivery. Pipeline caches, RAG/application memory,
+    agent workspaces, tool state and other system state may persist independently of the
+    transcript, so non-MODEL targets still require a fresh system boundary under REPLAY.
+    """
+
+    if target_mode == TargetMode.AGENT:
+        return TargetIsolationLevel.DISPOSABLE_SANDBOX
     if target_mode == TargetMode.PIPELINE:
         return TargetIsolationLevel.APPLICATION_INSTANCE
-    return TargetIsolationLevel.DISPOSABLE_SANDBOX
+    if session_mode == SessionMode.TARGET_MANAGED:
+        return TargetIsolationLevel.SESSION_NAMESPACE
+    return None
 
 
 def validate_target_trial_lease(
