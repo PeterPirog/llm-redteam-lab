@@ -9,7 +9,7 @@ bind, read-only root filesystem, no added Linux capabilities and bounded resourc
 from __future__ import annotations
 
 from hashlib import sha256
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any
 
 from pydantic import Field, model_validator
@@ -24,7 +24,8 @@ from .opencode_runtime import (
 )
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
-_IMAGE_PATTERN = r"^.+@sha256:[0-9a-f]{64}$"
+_IMAGE_REF_PATTERN = r"^.+@sha256:[0-9a-f]{64}$"
+_IMAGE_ID_PATTERN = r"^sha256:[0-9a-f]{64}$"
 _CONTAINER_WORKSPACE = "/workspace"
 
 
@@ -32,7 +33,8 @@ class DockerSandboxProfile(StrictModel):
     """Stable security-relevant Docker policy for an offline coding-agent container."""
 
     version: int = Field(ge=1, default=1)
-    image: str = Field(pattern=_IMAGE_PATTERN)
+    image_ref: str = Field(pattern=_IMAGE_REF_PATTERN)
+    image_id: str = Field(pattern=_IMAGE_ID_PATTERN)
     container_workspace: str = Field(default=_CONTAINER_WORKSPACE, min_length=1)
     memory_limit_bytes: int = Field(ge=64 * 1024 * 1024)
     pids_limit: int = Field(ge=16)
@@ -46,8 +48,8 @@ class DockerSandboxProfile(StrictModel):
         return self
 
     @property
-    def image_digest(self) -> str:
-        return self.image.rsplit("@sha256:", 1)[1]
+    def image_manifest_digest(self) -> str:
+        return self.image_ref.rsplit("@sha256:", 1)[1]
 
     @property
     def profile_sha256(self) -> str:
@@ -64,8 +66,7 @@ class DockerSandboxProfile(StrictModel):
 
         if not container_name or any(character.isspace() for character in container_name):
             raise ValueError("container_name must be non-empty and contain no whitespace")
-        if not workspace_host_path.strip():
-            raise ValueError("workspace_host_path must be non-empty")
+        _normalize_host_path(workspace_host_path)
         if not command:
             raise ValueError("container command must be non-empty")
         return (
@@ -96,7 +97,7 @@ class DockerSandboxProfile(StrictModel):
             ),
             "--workdir",
             self.container_workspace,
-            self.image,
+            self.image_ref,
             *command,
         )
 
@@ -114,7 +115,7 @@ class DockerContainerInspection(StrictModel):
     """Security-relevant normalized subset of a Docker inspect record."""
 
     container_id_sha256: str = Field(pattern=_HASH_PATTERN)
-    image_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    image_id: str = Field(pattern=_IMAGE_ID_PATTERN)
     running: bool
     auto_remove: bool
     privileged: bool
@@ -144,7 +145,7 @@ class DockerContainerInspection(StrictModel):
         for raw in mounts_raw:
             if not isinstance(raw, dict):
                 raise ValueError("Docker inspect mount entry must be an object")
-            source = _required_str(raw, "Source")
+            source = _normalize_host_path(_required_str(raw, "Source"))
             mounts.append(
                 DockerMountInspection(
                     mount_type=_required_str(raw, "Type"),
@@ -202,8 +203,8 @@ def attest_offline_docker_sandbox(
         raise ValueError("Docker attestation requires git_publication_denied")
 
     failures: list[str] = []
-    if inspection.image_id != f"sha256:{docker_profile.image_digest}":
-        failures.append("image_digest")
+    if inspection.image_id != docker_profile.image_id:
+        failures.append("image_id")
     if not inspection.running:
         failures.append("running")
     if not inspection.auto_remove:
@@ -218,7 +219,9 @@ def attest_offline_docker_sandbox(
         failures.append("cap_add")
     if "ALL" not in {cap.upper() for cap in inspection.cap_drop}:
         failures.append("cap_drop_all")
-    if not any(option.casefold() == "no-new-privileges:true" for option in inspection.security_opt):
+    if not any(
+        option.casefold() == "no-new-privileges:true" for option in inspection.security_opt
+    ):
         failures.append("no_new_privileges")
     if inspection.pids_limit <= 0 or inspection.pids_limit > docker_profile.pids_limit:
         failures.append("pids_limit")
@@ -231,7 +234,7 @@ def attest_offline_docker_sandbox(
     if inspection.nano_cpus <= 0 or inspection.nano_cpus > requested_nano_cpus:
         failures.append("cpu_limit")
 
-    expected_source = sha256(workspace_host_path.encode()).hexdigest()
+    expected_source = sha256(_normalize_host_path(workspace_host_path).encode()).hexdigest()
     if len(inspection.mounts) != 1:
         failures.append("mount_count")
     else:
@@ -256,6 +259,23 @@ def attest_offline_docker_sandbox(
         workspace_root_sha256=runtime_profile.workspace_root_sha256,
         proof_sha256=inspection.proof_sha256,
     )
+
+
+def _normalize_host_path(value: str) -> str:
+    raw = value.strip()
+    if not raw or "\x00" in raw:
+        raise ValueError("host path must be non-empty and contain no NUL")
+    windows = (
+        (len(raw) >= 2 and raw[1] == ":")
+        or raw.startswith("\\\\")
+        or raw.startswith("//")
+        or "\\" in raw
+    )
+    path = PureWindowsPath(raw) if windows else PurePosixPath(raw)
+    if not path.is_absolute():
+        raise ValueError("host path must be absolute")
+    normalized = str(path).replace("\\", "/")
+    return normalized.casefold() if windows else normalized
 
 
 def _required_dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
