@@ -9,6 +9,7 @@ those phases without changing the historical plan or base Docker profiles.
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 
 from pydantic import Field, model_validator
 
@@ -42,7 +43,9 @@ class OpenCodePrelaunchContract(StrictModel):
         for name in self.public_environment:
             if _ENV_NAME.fullmatch(name) is None:
                 raise ValueError("public environment contains an invalid variable name")
-        if len(set(self.required_secret_env_names)) != len(self.required_secret_env_names):
+        if len(set(self.required_secret_env_names)) != len(
+            self.required_secret_env_names
+        ):
             raise ValueError("secret environment variable names must be unique")
         for name in self.required_secret_env_names:
             if _ENV_NAME.fullmatch(name) is None:
@@ -94,7 +97,9 @@ class DockerOpenCodeNetworkedAgentProfile(DockerNetworkedAgentProfile):
         detach: bool = False,
     ) -> tuple[str, ...]:
         if command != self.runtime_launch.command:
-            raise ValueError("Docker OpenCode launch command differs from prelaunch contract")
+            raise ValueError(
+                "Docker OpenCode launch command differs from prelaunch contract"
+            )
         base = super().docker_run_command(
             container_name=container_name,
             workspace_host_path=workspace_host_path,
@@ -105,7 +110,9 @@ class DockerOpenCodeNetworkedAgentProfile(DockerNetworkedAgentProfile):
         try:
             image_index = base.index(self.image_ref)
         except ValueError as exc:
-            raise RuntimeError("Docker launch command does not contain the declared image") from exc
+            raise RuntimeError(
+                "Docker launch command does not contain the declared image"
+            ) from exc
 
         environment_args: list[str] = []
         for name in sorted(self.runtime_launch.public_environment):
@@ -117,6 +124,21 @@ class DockerOpenCodeNetworkedAgentProfile(DockerNetworkedAgentProfile):
             # itself is deliberately absent from argv and from this stable contract.
             environment_args.extend(("--env", name))
         return (*base[:image_index], *environment_args, *base[image_index:])
+
+
+class OpenCodeDockerProcessObservation(StrictModel):
+    """Hash-only proof that Docker process state matches the prelaunch contract."""
+
+    prelaunch_contract_sha256: str = Field(pattern=_HASH_PATTERN)
+    command_sha256: str = Field(pattern=_HASH_PATTERN)
+    working_directory_sha256: str = Field(pattern=_HASH_PATTERN)
+    public_environment_sha256: str = Field(pattern=_HASH_PATTERN)
+    secret_environment_names_sha256: str = Field(pattern=_HASH_PATTERN)
+    entrypoint_empty: bool
+
+    @property
+    def proof_sha256(self) -> str:
+        return canonical_json_hash(self.model_dump(mode="json"))
 
 
 class OpenCodeAttestedLaunchBinding(StrictModel):
@@ -169,6 +191,74 @@ def build_opencode_prelaunch_contract(
     )
 
 
+def verify_opencode_docker_process(
+    *,
+    payload: dict[str, object],
+    prelaunch: OpenCodePrelaunchContract,
+) -> OpenCodeDockerProcessObservation:
+    """Verify independent Docker inspect state without persisting secret values."""
+
+    config = payload.get("Config")
+    if not isinstance(config, dict):
+        raise ValueError("Docker OpenCode inspect payload lacks Config")
+
+    failures: list[str] = []
+    entrypoint = config.get("Entrypoint")
+    if entrypoint not in (None, []):
+        failures.append("entrypoint")
+
+    command = config.get("Cmd")
+    if not isinstance(command, list) or not all(
+        isinstance(value, str) for value in command
+    ):
+        failures.append("command_shape")
+        observed_command: list[str] = []
+    else:
+        observed_command = command
+        if tuple(command) != prelaunch.command:
+            failures.append("command")
+
+    working_directory = config.get("WorkingDir")
+    if working_directory != prelaunch.cwd:
+        failures.append("working_directory")
+
+    raw_environment = config.get("Env")
+    environment_values: dict[str, list[str]] = {}
+    if not isinstance(raw_environment, list) or not all(
+        isinstance(value, str) and "=" in value for value in raw_environment
+    ):
+        failures.append("environment_shape")
+    else:
+        for item in raw_environment:
+            name, value = item.split("=", 1)
+            environment_values.setdefault(name, []).append(value)
+
+        for name, expected in prelaunch.public_environment.items():
+            if environment_values.get(name) != [expected]:
+                failures.append(f"public_environment:{name}")
+        for name in prelaunch.required_secret_env_names:
+            values = environment_values.get(name)
+            if values is None or len(values) != 1 or not values[0]:
+                failures.append(f"secret_environment:{name}")
+
+    if failures:
+        raise ValueError(
+            "Docker OpenCode process verification failed closed: "
+            + ", ".join(sorted(failures))
+        )
+
+    return OpenCodeDockerProcessObservation(
+        prelaunch_contract_sha256=prelaunch.contract_sha256,
+        command_sha256=canonical_json_hash(observed_command),
+        working_directory_sha256=sha256(prelaunch.cwd.encode()).hexdigest(),
+        public_environment_sha256=canonical_json_hash(prelaunch.public_environment),
+        secret_environment_names_sha256=canonical_json_hash(
+            sorted(prelaunch.required_secret_env_names)
+        ),
+        entrypoint_empty=True,
+    )
+
+
 def bind_attested_opencode_launch(
     *,
     prelaunch: OpenCodePrelaunchContract,
@@ -180,7 +270,9 @@ def bind_attested_opencode_launch(
     comparisons = {
         "cwd": launch_plan.cwd == prelaunch.cwd,
         "command": launch_plan.command == prelaunch.command,
-        "public_environment": launch_plan.public_environment == prelaunch.public_environment,
+        "public_environment": (
+            launch_plan.public_environment == prelaunch.public_environment
+        ),
         "required_secret_env_names": (
             launch_plan.required_secret_env_names == prelaunch.required_secret_env_names
         ),
