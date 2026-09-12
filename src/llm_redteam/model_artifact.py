@@ -8,7 +8,7 @@ small binding contract for model-service peers.
 
 from __future__ import annotations
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from .agent_actions import canonical_json_hash
 from .domain import StrictModel
