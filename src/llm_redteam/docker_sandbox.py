@@ -193,6 +193,8 @@ def attest_offline_docker_sandbox(
 
     if sandbox_policy.enforcement_kind != SandboxEnforcementKind.DOCKER:
         raise ValueError("Docker attestation requires enforcement_kind=docker")
+    if sandbox_policy.enforcement_profile_sha256 != docker_profile.profile_sha256:
+        raise ValueError("Docker sandbox policy does not bind the requested Docker profile")
     if not sandbox_policy.disposable_workspace:
         raise ValueError("Docker attestation requires disposable_workspace")
     if not sandbox_policy.external_network_denied:
