@@ -144,10 +144,10 @@ def test_networked_launch_preserves_hardening_and_uses_exact_network() -> None:
         detach=True,
     )
 
-    assert ("--network", _NETWORK_NAME) == (
+    assert (
         command[command.index("--network")],
         command[command.index("--network") + 1],
-    )
+    ) == ("--network", _NETWORK_NAME)
     assert "none" not in command
     assert "--read-only" in command
     assert command[command.index("--cap-drop") + 1] == "ALL"
