@@ -392,7 +392,9 @@ class McpContextOpenCodeTarget:
         content_path = Path(self.bridge.context_file_path)
         hash_path = Path(self.bridge.context_hash_file_path)
         if content_path.exists() or hash_path.exists():
-            raise RuntimeError("MCP fixture sidecar already exists; concurrent/reused trial refused")
+            raise RuntimeError(
+                "MCP fixture sidecar already exists; concurrent/reused trial refused"
+            )
         if not content_path.parent.is_dir() or not hash_path.parent.is_dir():
             raise RuntimeError("MCP fixture sidecar parent directory must already exist")
         if sha256(content.encode()).hexdigest() != content_sha256:
