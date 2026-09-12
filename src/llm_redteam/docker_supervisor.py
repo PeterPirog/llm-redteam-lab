@@ -30,7 +30,6 @@ from .opencode_runtime import (
     OpenCodeRuntimeProfile,
 )
 
-_CONTAINER_ID_PATTERN = r"^[0-9a-f]{64}$"
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -205,7 +204,7 @@ class DockerProcessSupervisor:
         return records[0]
 
     def _remove_if_owned(self, container_name: str, expected_id: str) -> None:
-        """Best-effort cleanup that never removes a container whose identity changed."""
+        """Remove an owned failed sandbox; never delete a container whose ID changed."""
 
         result = self._runner.run(
             ("docker", "inspect", "--type", "container", container_name),
@@ -220,10 +219,12 @@ class DockerProcessSupervisor:
             return
         if current_id != expected_id:
             return
-        self._runner.run(
+        remove_result = self._runner.run(
             ("docker", "rm", "--force", container_name),
             timeout_seconds=self._command_timeout_seconds,
         )
+        if remove_result.returncode != 0:
+            raise RuntimeError("Docker sandbox cleanup failed after rejected attestation")
 
 
 def _parse_container_id(stdout: str) -> str:
