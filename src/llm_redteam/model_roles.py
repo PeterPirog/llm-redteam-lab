@@ -60,8 +60,11 @@ class ModelRoleConfig(StrictModel):
 
     @property
     def configuration_fingerprint(self) -> str:
+        normalized = self.model_dump(mode="json", by_alias=True)
+        normalized["capabilities"] = sorted(self.capabilities)
+        normalized["fallback"] = list(self.fallback)
         payload = json.dumps(
-            self.model_dump(mode="json", by_alias=True),
+            normalized,
             sort_keys=True,
             separators=(",", ":"),
         )
