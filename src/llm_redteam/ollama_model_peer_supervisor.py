@@ -1,9 +1,9 @@
 """Trusted lifecycle for one verified Ollama model peer in an isolated AGENT trial.
 
-The supervisor composes ADR-060 model-peer confinement with ADR-063/064 artifact
-qualification. It verifies the exact staged bundle before launch and again after launch,
-proves network/container ownership independently from the model process, performs only a
-non-inference readiness check, and tears down only the exact owned container.
+The supervisor composes model-peer confinement with artifact qualification. It verifies
+one exact staged bundle before and after launch, proves network/container ownership
+independently from the model process, performs only a non-inference readiness check, and
+tears down only the exact owned container.
 """
 
 from __future__ import annotations
@@ -17,15 +17,11 @@ from pydantic import Field
 from .agent_actions import canonical_json_hash
 from .docker_model_network import DockerIsolatedModelNetworkProfile
 from .docker_model_network_supervisor import DockerModelNetworkLease
-from .docker_model_peer import (
-    DockerModelPeerProfile,
-    DockerModelPeerReadinessObservation,
-)
+from .docker_model_peer import DockerModelPeerProfile, DockerModelPeerReadinessObservation
 from .docker_supervisor import DockerCommandRunner, SubprocessDockerCommandRunner
 from .domain import StrictModel
 from .ollama_artifact_bundle import (
     OllamaArtifactBundleContract,
-    OllamaArtifactBundleVerification,
     verify_ollama_artifact_bundle,
 )
 from .ollama_model_peer import (
@@ -45,6 +41,7 @@ class OllamaModelPeerLease(StrictModel):
     profile_sha256: str = Field(pattern=_HASH_PATTERN)
     network_id_sha256: str = Field(pattern=_HASH_PATTERN)
     launch_command_sha256: str = Field(pattern=_HASH_PATTERN)
+    bundle_contract_sha256: str = Field(pattern=_HASH_PATTERN)
     prelaunch_bundle_proof_sha256: str = Field(pattern=_HASH_PATTERN)
     inspection: OllamaModelPeerAttestation
     readiness: DockerModelPeerReadinessObservation
@@ -55,6 +52,7 @@ class OllamaModelPeerRelease(StrictModel):
 
     container_id_sha256: str = Field(pattern=_HASH_PATTERN)
     cleanup_complete: bool
+    artifact_contract_matched: bool
     artifact_stable: bool
     post_bundle_proof_sha256: str | None = Field(default=None, pattern=_HASH_PATTERN)
 
@@ -135,14 +133,12 @@ class OllamaModelPeerSupervisor:
                 expected_network_name=network_lease.network_name,
             )
             self._require_owned_network(network_lease)
-
             postlaunch = verify_ollama_artifact_bundle(
                 models_root=bundle_host_path,
                 contract=bundle_contract,
             )
             if postlaunch != prelaunch:
                 raise RuntimeError("Ollama bundle changed during model-peer launch")
-
             readiness = self._probe_readiness(
                 peer=peer,
                 container_name=container_name,
@@ -158,6 +154,7 @@ class OllamaModelPeerSupervisor:
             profile_sha256=profile.profile_sha256,
             network_id_sha256=network_lease.network_id_sha256,
             launch_command_sha256=canonical_json_hash(list(launch_command)),
+            bundle_contract_sha256=bundle_contract.bundle_sha256,
             prelaunch_bundle_proof_sha256=prelaunch.proof_sha256,
             inspection=inspection,
             readiness=readiness,
@@ -170,20 +167,24 @@ class OllamaModelPeerSupervisor:
         bundle_contract: OllamaArtifactBundleContract,
         bundle_host_path: Path,
     ) -> OllamaModelPeerRelease:
-        """Always prioritize exact-container cleanup, while reporting artifact drift."""
+        """Prioritize exact-container cleanup; report contract mismatch or artifact drift."""
 
+        contract_matched = bundle_contract.bundle_sha256 == lease.bundle_contract_sha256
         artifact_stable = False
         post_bundle_proof: str | None = None
-        try:
-            verification = verify_ollama_artifact_bundle(
-                models_root=bundle_host_path,
-                contract=bundle_contract,
-            )
-            post_bundle_proof = verification.proof_sha256
-            artifact_stable = post_bundle_proof == lease.prelaunch_bundle_proof_sha256
-        except (OSError, ValueError, RuntimeError):
-            artifact_stable = False
+        if contract_matched:
+            try:
+                verification = verify_ollama_artifact_bundle(
+                    models_root=bundle_host_path,
+                    contract=bundle_contract,
+                )
+                post_bundle_proof = verification.proof_sha256
+                artifact_stable = post_bundle_proof == lease.prelaunch_bundle_proof_sha256
+            except (OSError, ValueError, RuntimeError):
+                artifact_stable = False
 
+        # Integrity failure must never strand a model process. Ownership is re-proved
+        # immediately before destructive cleanup.
         self._require_owned_container(lease)
         stopped = self._runner.run(
             (
@@ -219,6 +220,7 @@ class OllamaModelPeerSupervisor:
         return OllamaModelPeerRelease(
             container_id_sha256=lease.container_id_sha256,
             cleanup_complete=True,
+            artifact_contract_matched=contract_matched,
             artifact_stable=artifact_stable,
             post_bundle_proof_sha256=post_bundle_proof,
         )
