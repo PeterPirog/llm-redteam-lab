@@ -18,6 +18,7 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import Field
 
+from ..agent_actions import canonical_json_hash
 from ..domain import EvidenceKind, EvidenceRecord, StrictModel, TargetIdentity
 from .base import TargetAdapter
 
@@ -43,9 +44,7 @@ class TargetLeaseRequest(StrictModel):
 
     @property
     def request_fingerprint(self) -> str:
-        return sha256(
-            self.model_dump_json(exclude_none=True).encode()
-        ).hexdigest()
+        return canonical_json_hash(self.model_dump(mode="json"))
 
 
 class TargetLeaseReceipt(StrictModel):
