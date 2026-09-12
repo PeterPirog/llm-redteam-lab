@@ -127,8 +127,9 @@ def test_authorization_value_is_never_forwarded_in_process_arguments() -> None:
     assert "SYNTHETIC_SECRET" not in joined
     encoded_headers = runner.calls[1][-4]
     forwarded = json.loads(base64.b64decode(encoded_headers).decode())
-    assert "Authorization" not in forwarded
-    assert forwarded["Content-Type"] == "application/json"
+    lowered = {name.casefold(): value for name, value in forwarded.items()}
+    assert "authorization" not in lowered
+    assert lowered["content-type"] == "application/json"
 
 
 def test_different_origin_is_rejected_before_any_docker_command() -> None:
