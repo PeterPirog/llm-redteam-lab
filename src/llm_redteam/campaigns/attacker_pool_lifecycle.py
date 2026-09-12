@@ -49,7 +49,9 @@ from ..storage.measurement_repository import (
     save_campaign_measurement_snapshot,
 )
 from ..storage.repository import ExperimentRepository
-from ..targets.base import SessionMode, TargetAdapter
+from ..storage.target_trial_isolation import TargetTrialIsolationRecord
+from ..target_trial_isolation import TargetTrialLeaseProvider, minimum_isolation_level
+from ..targets.base import TargetAdapter
 from .attacker_pool_runner import (
     PersistedAttackerPoolRunner,
     attacker_pool_scope_manifest_hash,
@@ -57,7 +59,7 @@ from .attacker_pool_runner import (
 )
 
 ATTACKER_POOL_METRIC_DEFINITION_VERSION = "attacker-pool-trials-v1"
-_ATTACKER_POOL_POLICY_VERSION = 1
+_ATTACKER_POOL_POLICY_VERSION = 2
 
 
 class AttackerPoolExecutionMode(StrEnum):
@@ -79,10 +81,6 @@ class AttackerPoolCampaignPlan(CampaignPlan):
             )
         if not self.red_policy.model_backed:
             raise ValueError("attacker-pool lifecycle requires a model-backed Red policy")
-        if self.session_mode != SessionMode.REPLAY:
-            raise ValueError(
-                "attacker-pool lifecycle requires REPLAY until per-trial target leases exist"
-            )
         return self
 
 
@@ -122,6 +120,7 @@ class AttackerPoolCampaignLifecycleResult:
     status: CampaignTerminalStatus
     executions: tuple[ExecutionResult, ...]
     trial_records: tuple[AttackerPoolTrialRecord, ...]
+    isolation_records: tuple[TargetTrialIsolationRecord, ...]
     metrics: AttackerPoolTrialMetrics
     red_diagnostics: dict[str, RedRuntimeDiagnostics | None]
     budget: BudgetSnapshot
@@ -133,8 +132,9 @@ def preflight_attacker_pool_campaign(
     cases: tuple[AttackCase, ...],
     budgets: BudgetConfigDocument,
     models: ModelsConfig | None,
+    target_lease_provider: TargetTrialLeaseProvider | None = None,
 ) -> CampaignPreflight:
-    """Extend ordinary preflight with fixed-pool allocation and minimum inference cost."""
+    """Extend ordinary preflight with full-cross, inference and isolation constraints."""
 
     base = preflight_campaign(
         plan=plan,
@@ -225,6 +225,39 @@ def preflight_attacker_pool_campaign(
                 ),
             )
 
+    required_isolation = minimum_isolation_level(
+        target_mode=plan.target_mode,
+        session_mode=plan.session_mode,
+    )
+    if required_isolation is not None:
+        if target_lease_provider is None:
+            _pool_error(
+                issues,
+                "ATTACKER_POOL_TARGET_ISOLATION_REQUIRED",
+                (
+                    "target/session mode requires an independently enforced per-trial "
+                    "Blue isolation provider"
+                ),
+            )
+        elif target_lease_provider.isolation_level < required_isolation:
+            _pool_error(
+                issues,
+                "ATTACKER_POOL_TARGET_ISOLATION_STRENGTH",
+                (
+                    f"provider isolation={target_lease_provider.isolation_level.name.lower()} "
+                    f"is weaker than required={required_isolation.name.lower()}"
+                ),
+            )
+
+    if target_lease_provider is not None and not _is_sha256(
+        target_lease_provider.provider_fingerprint
+    ):
+        _pool_error(
+            issues,
+            "ATTACKER_POOL_TARGET_ISOLATION_IDENTITY",
+            "target isolation provider must expose a stable SHA-256 policy fingerprint",
+        )
+
     selected = select_cases(
         cases,
         target_class=plan.target_class,
@@ -235,7 +268,10 @@ def preflight_attacker_pool_campaign(
         _pool_error(
             issues,
             "ATTACKER_POOL_FIXTURE_LEASE_REQUIRED",
-            "fixture-backed pool execution requires a clean per-trial target lease/reset",
+            (
+                "fixture-backed pool execution requires compound fixture and target "
+                "isolation and remains deferred"
+            ),
         )
 
     return base.model_copy(
@@ -261,6 +297,7 @@ class AttackerPoolCampaignLifecycleExecutor:
         judge_policy_descriptor: object,
         models: ModelsConfig,
         red_model_client: RoleModelClient,
+        target_lease_provider: TargetTrialLeaseProvider | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -269,6 +306,7 @@ class AttackerPoolCampaignLifecycleExecutor:
         self.judge_policy_descriptor = judge_policy_descriptor
         self.models = models
         self.red_model_client = red_model_client
+        self.target_lease_provider = target_lease_provider
 
     async def run(
         self,
@@ -282,6 +320,7 @@ class AttackerPoolCampaignLifecycleExecutor:
             cases=cases,
             budgets=self.budgets,
             models=self.models,
+            target_lease_provider=self.target_lease_provider,
         )
         if not preflight.ready:
             errors = [
@@ -316,6 +355,25 @@ class AttackerPoolCampaignLifecycleExecutor:
         if plan.target_snapshot_id is not None and plan.target_snapshot_id != target_snapshot_id:
             raise ValueError("configured target_snapshot_id does not match actual Blue target")
 
+        required_isolation = minimum_isolation_level(
+            target_mode=plan.target_mode,
+            session_mode=plan.session_mode,
+        )
+        isolation_descriptor = {
+            "required_level": (
+                required_isolation.name.lower() if required_isolation is not None else "none"
+            ),
+            "provider_fingerprint": (
+                self.target_lease_provider.provider_fingerprint
+                if required_isolation is not None and self.target_lease_provider is not None
+                else None
+            ),
+            "provider_level": (
+                self.target_lease_provider.isolation_level.name.lower()
+                if required_isolation is not None and self.target_lease_provider is not None
+                else None
+            ),
+        }
         attack_descriptor = {
             "kind": "attacker_pool",
             "version": _ATTACKER_POOL_POLICY_VERSION,
@@ -324,6 +382,7 @@ class AttackerPoolCampaignLifecycleExecutor:
             "session_mode": plan.session_mode.value,
             "pool_fingerprint": runtime.pool_fingerprint,
             "variants": runtime.descriptors(),
+            "target_isolation": isolation_descriptor,
             "live_judge_feedback_to_red": False,
         }
         attack_fingerprint = fingerprint_attack_policy(attack_descriptor)
@@ -395,6 +454,7 @@ class AttackerPoolCampaignLifecycleExecutor:
                 judge=self.judge,
                 repository=self.repository,
                 runtime=runtime,
+                target_lease_provider=self.target_lease_provider,
             )
             pool_result = await runner.run(
                 contract=contract,
@@ -426,6 +486,7 @@ class AttackerPoolCampaignLifecycleExecutor:
             status=CampaignTerminalStatus.COMPLETED,
             executions=pool_result.executions,
             trial_records=pool_result.trial_records,
+            isolation_records=pool_result.isolation_records,
             metrics=metrics,
             red_diagnostics={
                 variant_id: runtime.runtime_for(variant_id).diagnostics()
@@ -521,6 +582,10 @@ def summarize_attacker_pool_trial_metrics(
         aggregate_search_yield=summarize_discovery(executions, confidence_level),
         variant_metrics=variant_metrics,
     )
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
 def _pool_error(issues: list[PreflightIssue], code: str, message: str) -> None:
