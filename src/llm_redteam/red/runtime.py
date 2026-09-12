@@ -62,9 +62,10 @@ from .mechanisms import (
 )
 from .portfolio import RiskAwarePortfolioPolicy
 
-_RED_RUNTIME_VERSION = 3
-_AGENT_RED_RUNTIME_VERSION = 4
-_AGENT_FIXTURE_RED_RUNTIME_VERSION = 5
+_RED_RUNTIME_VERSION = 2
+_AGENT_RED_RUNTIME_VERSION = 3
+_AGENT_FIXTURE_RED_RUNTIME_VERSION = 4
+_MULTI_ATTACKER_VERSION_INCREMENT = 1
 
 
 class RedRuntimeDiagnostics(StrictModel):
@@ -124,14 +125,6 @@ def build_model_backed_red_policy_descriptor(
             conversation_budget=conversation_budget
         ).descriptor()
 
-    attacker_variant: dict[str, object] | None = None
-    if attacker_variant_id is not None:
-        variant = models.attacker_variant(attacker_variant_id)
-        attacker_variant = {
-            "id": variant.id,
-            "configuration_fingerprint": variant.configuration_fingerprint,
-        }
-
     descriptor: dict[str, object] = {
         "kind": policy.value,
         "runtime_version": _RED_RUNTIME_VERSION,
@@ -151,7 +144,6 @@ def build_model_backed_red_policy_descriptor(
         "stopping_policy": conversation_budget.stopping_policy,
         "red_planner": _model_role_descriptor(planner),
         "red_mutator": _model_role_descriptor(mutator),
-        "attacker_variant": attacker_variant,
         "mechanism_policy": mechanism_policy,
         "initial_learning_memory": "empty-v1",
     }
@@ -163,6 +155,15 @@ def build_model_backed_red_policy_descriptor(
         descriptor["runtime_version"] = _AGENT_FIXTURE_RED_RUNTIME_VERSION
         descriptor["fixture_priming"] = "immutable-environment-fixture-v1"
         descriptor["first_turn_source"] = "fixture_legitimate_task"
+    if attacker_variant_id is not None:
+        variant = models.attacker_variant(attacker_variant_id)
+        descriptor["runtime_version"] = (
+            int(descriptor["runtime_version"]) + _MULTI_ATTACKER_VERSION_INCREMENT
+        )
+        descriptor["attacker_variant"] = {
+            "id": variant.id,
+            "configuration_fingerprint": variant.configuration_fingerprint,
+        }
     return descriptor
 
 
@@ -468,5 +469,4 @@ def _model_role_descriptor(config: ModelRoleConfig) -> dict[str, object]:
         "enabled": config.enabled,
         "invoke": config.invoke,
         "fallback": list(config.fallback),
-        "configuration_fingerprint": config.configuration_fingerprint,
     }
