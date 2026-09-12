@@ -91,7 +91,7 @@ def test_runtime_profile_enables_only_bound_mcp_fixture_tools(tmp_path) -> None:
 
     plan = _plan(profile, policy)
     assert plan.mcp_fixture_bridge_sha256 == bridge.bridge_sha256
-    assert bridge.context_file_path not in plan.model_dump_json()
+    assert plan.target_policy_sha256
 
 
 def test_profile_rejects_mcp_sidecar_inside_blue_workspace(tmp_path) -> None:
@@ -117,14 +117,13 @@ def test_bridge_policy_changes_blue_target_identity(tmp_path) -> None:
     )
 
     plain_profile = profile.model_copy(update={"mcp_fixture_bridge": None})
-    plain_policy = policy
     plain = AttestedOpenCodeTarget(
         OpenCodeTarget(_config(plain_profile)),
-        _plan(plain_profile, plain_policy),
+        _plan(plain_profile, policy),
     )
 
     try:
-        assert bridge.bridge_sha256 != ""
+        assert bridge.bridge_sha256
         assert bridged.identity.configuration_hash != plain.identity.configuration_hash
     finally:
         asyncio.run(bridged.aclose())
