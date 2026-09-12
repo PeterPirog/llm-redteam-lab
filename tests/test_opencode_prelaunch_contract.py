@@ -7,6 +7,7 @@ from llm_redteam.opencode_prelaunch import (
     DockerOpenCodeNetworkedAgentProfile,
     bind_attested_opencode_launch,
     build_opencode_prelaunch_contract,
+    verify_opencode_docker_process,
 )
 from llm_redteam.opencode_runtime import (
     AgentSandboxAttestation,
@@ -19,6 +20,7 @@ from llm_redteam.opencode_runtime import (
 _IMAGE_ID = "sha256:" + "a" * 64
 _IMAGE_REF = "synthetic/opencode@sha256:" + "b" * 64
 _PROOF = "c" * 64
+_SECRET = "synthetic-secret-value"
 
 
 def _runtime(**updates: object) -> OpenCodeRuntimeProfile:
@@ -87,6 +89,26 @@ def _attestation(
     )
 
 
+def _inspect_payload(
+    *,
+    public_updates: dict[str, str] | None = None,
+    secret: str = _SECRET,
+    entrypoint: object = None,
+) -> dict[str, object]:
+    prelaunch = build_opencode_prelaunch_contract(_runtime())
+    environment = dict(prelaunch.public_environment)
+    environment.update(public_updates or {})
+    environment["OPENCODE_SERVER_PASSWORD"] = secret
+    return {
+        "Config": {
+            "Entrypoint": entrypoint,
+            "Cmd": list(prelaunch.command),
+            "WorkingDir": prelaunch.cwd,
+            "Env": [f"{name}={value}" for name, value in environment.items()],
+        }
+    }
+
+
 def test_prelaunch_contract_matches_historical_attested_plan() -> None:
     runtime = _runtime()
     prelaunch = build_opencode_prelaunch_contract(runtime)
@@ -135,6 +157,47 @@ def test_networked_docker_command_injects_exact_prelaunch_environment() -> None:
         item.startswith("OPENCODE_SERVER_PASSWORD=") for item in before_image
     )
     assert command[image_index + 1 :] == prelaunch.command
+
+
+def test_docker_process_state_matches_prelaunch_without_persisting_secret() -> None:
+    prelaunch = build_opencode_prelaunch_contract(_runtime())
+
+    observation = verify_opencode_docker_process(
+        payload=_inspect_payload(),
+        prelaunch=prelaunch,
+    )
+
+    assert observation.prelaunch_contract_sha256 == prelaunch.contract_sha256
+    assert observation.entrypoint_empty is True
+    assert len(observation.proof_sha256) == 64
+    assert _SECRET not in observation.model_dump_json()
+
+
+def test_docker_process_rejects_public_environment_drift() -> None:
+    prelaunch = build_opencode_prelaunch_contract(_runtime())
+
+    with pytest.raises(ValueError, match="OPENCODE_AUTO_SHARE"):
+        verify_opencode_docker_process(
+            payload=_inspect_payload(
+                public_updates={"OPENCODE_AUTO_SHARE": "true"}
+            ),
+            prelaunch=prelaunch,
+        )
+
+
+def test_docker_process_rejects_missing_secret_and_entrypoint() -> None:
+    prelaunch = build_opencode_prelaunch_contract(_runtime())
+
+    with pytest.raises(ValueError, match="secret_environment"):
+        verify_opencode_docker_process(
+            payload=_inspect_payload(secret=""),
+            prelaunch=prelaunch,
+        )
+    with pytest.raises(ValueError, match="entrypoint"):
+        verify_opencode_docker_process(
+            payload=_inspect_payload(entrypoint=["/bin/sh", "-c"]),
+            prelaunch=prelaunch,
+        )
 
 
 def test_prelaunch_policy_has_distinct_identity_without_changing_base_profile() -> None:
