@@ -31,6 +31,8 @@ class OllamaArtifactDeclaration(StrictModel):
     def roles_are_unique_and_non_empty(self) -> OllamaArtifactDeclaration:
         if any(not role.strip() for role in self.roles):
             raise ValueError("Ollama artifact roles must be non-empty")
+        if any(role != role.strip() for role in self.roles):
+            raise ValueError("Ollama artifact roles cannot contain surrounding whitespace")
         if len(self.roles) != len(set(self.roles)):
             raise ValueError("Ollama artifact roles must be unique per model")
         return self
@@ -47,17 +49,39 @@ class OllamaArtifactContractDocument(StrictModel):
 
     @model_validator(mode="after")
     def local_ollama_document_is_required(self) -> OllamaArtifactContractDocument:
-        if self.provider.casefold() != "ollama":
-            raise ValueError("offline artifact qualification currently supports provider=ollama")
+        if self.provider != "ollama":
+            raise ValueError("offline artifact qualification requires provider=ollama")
         if not self.require_local:
             raise ValueError("offline local artifact qualification requires require_local=true")
         if any(not model_id.strip() for model_id in self.artifacts):
             raise ValueError("Ollama artifact model IDs must be non-empty")
+        if any(model_id != model_id.strip() for model_id in self.artifacts):
+            raise ValueError("Ollama artifact model IDs cannot contain surrounding whitespace")
         return self
 
     @property
     def contracts_sha256(self) -> str:
-        return canonical_json_hash(self.model_dump(mode="json"))
+        normalized_artifacts: dict[str, object] = {}
+        for model_id, declaration in sorted(self.artifacts.items()):
+            contract = OllamaArtifactContract(
+                model_id=model_id,
+                expected_manifest_digest=declaration.digest,
+                require_local=self.require_local,
+            )
+            normalized_artifacts[model_id] = {
+                "manifest_digest": contract.manifest_digest,
+                "roles": sorted(declaration.roles),
+                "contract_sha256": contract.contract_sha256,
+            }
+        return canonical_json_hash(
+            {
+                "version": self.version,
+                "provider": "ollama",
+                "source": self.source,
+                "require_local": self.require_local,
+                "artifacts": normalized_artifacts,
+            }
+        )
 
 
 class VerifiedOllamaArtifact(StrictModel):
@@ -105,7 +129,7 @@ class OfflineOllamaQualificationReport(StrictModel):
             [
                 {
                     "model_id": item.model_id,
-                    "roles": list(item.roles),
+                    "roles": sorted(item.roles),
                     "artifact_identity_sha256": item.identity.identity_sha256,
                     "contract_sha256": item.contract_sha256,
                 }
@@ -117,7 +141,12 @@ class OfflineOllamaQualificationReport(StrictModel):
     def report_sha256(self) -> str:
         return canonical_json_hash(
             {
-                **self.model_dump(mode="json"),
+                "version": self.version,
+                "provider": self.provider,
+                "source": self.source,
+                "require_local": self.require_local,
+                "inventory_sha256": self.inventory_sha256,
+                "contracts_sha256": self.contracts_sha256,
                 "artifact_set_sha256": self.artifact_set_sha256,
             }
         )
