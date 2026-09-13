@@ -16,7 +16,7 @@ from llm_redteam.docker_model_network_supervisor import (
 from llm_redteam.docker_networked_sandbox import DockerNetworkedAgentProfile
 from llm_redteam.docker_networked_supervisor import DockerNetworkedAgentLease
 from llm_redteam.docker_sandbox import DockerSandboxProfile
-from llm_redteam.docker_supervisor import DockerCommandResult
+from llm_redteam.docker_supervisor import CommandResult
 from llm_redteam.opencode_prelaunch import (
     DockerOpenCodeNetworkedAgentProfile,
     build_opencode_prelaunch_contract,
@@ -212,7 +212,7 @@ class _FakeRunner:
         self.version = version
         self.commands: list[tuple[str, ...]] = []
 
-    def run(self, command: tuple[str, ...], *, timeout_seconds: float) -> DockerCommandResult:
+    def run(self, command: tuple[str, ...], *, timeout_seconds: float) -> CommandResult:
         del timeout_seconds
         self.commands.append(command)
         if command[:4] == ("docker", "inspect", "--type", "container"):
@@ -232,8 +232,7 @@ class _FakeRunner:
                     },
                 }
             ]
-            return DockerCommandResult(
-                command=command,
+            return CommandResult(
                 returncode=0,
                 stdout=json.dumps(payload),
                 stderr="",
@@ -244,8 +243,7 @@ class _FakeRunner:
                 "status": 200,
                 "body_b64": base64.b64encode(body).decode(),
             }
-            return DockerCommandResult(
-                command=command,
+            return CommandResult(
                 returncode=0,
                 stdout=json.dumps(envelope),
                 stderr="",
