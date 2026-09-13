@@ -1,12 +1,12 @@
 """Artifact-qualified campaign lifecycle admission and provenance persistence.
 
 This module provides the fail-closed lifecycle path for campaigns whose measurement
-apparatus uses model-backed Red and/or Judge roles.  It deliberately reuses
+apparatus uses model-backed Red and/or Judge roles. It deliberately reuses
 ``CampaignLifecycleExecutor`` for target execution, budgeting, evidence, judgment,
-metrics and terminal-state handling.  Only policy admission and model-role provenance
+metrics and terminal-state handling. Only policy admission and model-role provenance
 are added here.
 
-No provider call is made by this adapter.  The supplied ``ArtifactQualifiedCampaignPolicies``
+No provider call is made by this adapter. The supplied ``ArtifactQualifiedCampaignPolicies``
 must already have been built from independently verified ``ModelArtifactIdentity``
 objects (for example through the Ollama artifact registry edge).
 """
@@ -17,7 +17,6 @@ from collections.abc import Mapping
 
 from ..budget import BudgetLedger
 from ..campaign_plan import CampaignPlan, preflight_campaign
-from ..campaigns.multiturn import ConversationRunResult, MultiTurnStrategy
 from ..domain import AttackCase, CampaignBudget
 from ..evaluation_protocol import CampaignPurpose
 from ..evaluation_sets import HeldOutEvaluationManifest
@@ -34,12 +33,17 @@ from ..storage.model_role_repository import (
 )
 from ..storage.repository import ExperimentRepository
 from ..targets.base import TargetAdapter
-from .lifecycle import CampaignLifecycleExecutor, CampaignLifecycleResult, static_attack_policy_descriptor
+from .lifecycle import (
+    CampaignLifecycleExecutor,
+    CampaignLifecycleResult,
+    static_attack_policy_descriptor,
+)
 from .model_qualification import (
     ArtifactQualifiedCampaignPolicies,
     validate_artifact_qualified_campaign_policies,
     validate_qualified_runtime_policy_descriptors,
 )
+from .multiturn import ConversationBudget, ConversationRunResult, MultiTurnStrategy
 
 
 class _ArtifactQualifiedRedRuntime:
@@ -54,7 +58,7 @@ class _ArtifactQualifiedRedRuntime:
         self._qualified_descriptor = dict(qualified_descriptor)
 
     @property
-    def conversation_budget(self):  # type: ignore[no-untyped-def]
+    def conversation_budget(self) -> ConversationBudget:
         return self._runtime.conversation_budget
 
     def descriptor(self) -> dict[str, object]:
@@ -84,11 +88,11 @@ class _ArtifactQualifiedRedRuntime:
 class ArtifactQualifiedCampaignLifecycleExecutor(CampaignLifecycleExecutor):
     """Run a campaign only after exact measurement-model artifact admission.
 
-    Held-out EVALUATION with any model-backed measurement role is fail-closed: the plan
+    Held-out EVALUATION with model-backed measurement roles is fail-closed: the plan
     must already declare the exact artifact-qualified attack/Judge fingerprints.
 
     DISCOVERY remains usable with the historical executor for cheap deterministic/mock
-    development.  When callers choose this qualified executor, missing plan fingerprints
+    development. When callers choose this qualified executor, missing plan fingerprints
     are filled from the already-qualified policies so the resulting campaign configuration
     is still bound to exact model artifacts.
     """
@@ -168,7 +172,7 @@ class ArtifactQualifiedCampaignLifecycleExecutor(CampaignLifecycleExecutor):
         effective_budget: CampaignBudget,
         ledger: BudgetLedger,
         fixture_priming_enabled: bool,
-    ):
+    ) -> RedStrategyRuntime | _ArtifactQualifiedRedRuntime | None:
         runtime = super()._build_red_runtime(
             plan=plan,
             effective_budget=effective_budget,
@@ -240,9 +244,9 @@ class ArtifactQualifiedCampaignLifecycleExecutor(CampaignLifecycleExecutor):
     def _bind_discovery_fingerprints(self, plan: CampaignPlan) -> CampaignPlan:
         qualified = self.qualified_model_policies
         if plan.purpose == CampaignPurpose.EVALUATION:
-            # EVALUATION fingerprints are predeclared measurement identity.  Do not fill
-            # them implicitly here; the admission validator must see the operator-prepared
-            # values and reject missing or stale identity.
+            # EVALUATION fingerprints are predeclared measurement identity. Do not fill
+            # them implicitly here; admission must see the operator-prepared values and
+            # reject missing or stale identity.
             return plan
 
         updates: dict[str, object] = {}
