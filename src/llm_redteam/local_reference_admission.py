@@ -17,7 +17,7 @@ from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
 from .domain import StrictModel
-from .model_roles import ModelLocation, ModelRole, ModelsConfig
+from .model_roles import ModelLocation, ModelRole, ModelRoleConfig, ModelsConfig
 from .offline_ollama_qualification import OfflineOllamaQualificationReport
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
@@ -88,11 +88,13 @@ class LocalReferenceAdmissionBundle(StrictModel):
     def participant_set_is_complete_and_canonical(self) -> LocalReferenceAdmissionBundle:
         participants = tuple(item.participant for item in self.red_roles)
         expected = (
-            LocalReferenceParticipant.RED_MUTATOR,
             LocalReferenceParticipant.RED_PLANNER,
+            LocalReferenceParticipant.RED_MUTATOR,
         )
         if participants != expected:
-            raise ValueError("local Reference bundle must contain canonical planner/mutator roles")
+            raise ValueError(
+                "local Reference bundle must contain canonical planner/mutator roles"
+            )
         if len({item.participant for item in self.red_roles}) != len(self.red_roles):
             raise ValueError("local Reference Red participants must be unique")
         return self
@@ -104,12 +106,14 @@ class LocalReferenceAdmissionBundle(StrictModel):
 
 def load_offline_ollama_qualification_report(
     path: str | Path,
+    *,
+    expected_report_sha256: str | None = None,
 ) -> OfflineOllamaQualificationReport:
-    """Load a persisted report and re-check its stored semantic/report hashes.
+    """Load one persisted report and validate its stored content identities.
 
-    The CLI output stores two computed hashes outside the Pydantic report fields. They are
-    deliberately verified on reload so a modified report cannot be used as trusted admission
-    input merely because its nested objects remain schema-valid.
+    The hashes stored inside the JSON provide deterministic content identity, not a digital
+    signature. If an independently pinned report hash is available, callers should pass it as
+    ``expected_report_sha256`` so a rewritten file with recomputed self-hashes is also rejected.
     """
 
     source = Path(path)
@@ -127,16 +131,32 @@ def load_offline_ollama_qualification_report(
     declared_report = normalized.pop("report_sha256", None)
     if not isinstance(declared_artifact_set, str) or not isinstance(declared_report, str):
         raise ValueError(
-            "offline Ollama qualification report must include artifact_set_sha256 and report_sha256"
+            "offline Ollama qualification report must include "
+            "artifact_set_sha256 and report_sha256"
         )
     try:
         report = OfflineOllamaQualificationReport.model_validate(normalized)
     except (ValueError, TypeError) as exc:
         raise ValueError(f"invalid offline Ollama qualification report {source}: {exc}") from exc
+
     if declared_artifact_set != report.artifact_set_sha256:
-        raise ValueError("offline Ollama qualification artifact_set_sha256 does not match content")
+        raise ValueError(
+            "offline Ollama qualification artifact_set_sha256 does not match content"
+        )
     if declared_report != report.report_sha256:
         raise ValueError("offline Ollama qualification report_sha256 does not match content")
+    if expected_report_sha256 is not None and expected_report_sha256 != report.report_sha256:
+        raise ValueError("offline Ollama qualification report does not match pinned report hash")
+
+    for item in report.artifacts:
+        if item.model_id != item.identity.model_id:
+            raise ValueError("offline Ollama qualification model ID does not match observation")
+        if item.identity.provider_id != report.provider:
+            raise ValueError("offline Ollama qualification provider does not match observation")
+        if item.observation.source_response_sha256 != report.inventory_sha256:
+            raise ValueError(
+                "offline Ollama qualification observation does not match inventory hash"
+            )
     return report
 
 
@@ -151,29 +171,33 @@ def build_local_reference_admission_bundle(
 
     if not models.policy.local_first or models.policy.allow_cloud_fallback:
         raise ValueError(
-            "local Reference admission requires local_first=true and allow_cloud_fallback=false"
+            "local Reference admission requires local_first=true and "
+            "allow_cloud_fallback=false"
         )
     if models.red_attacker_pool.enabled:
-        raise ValueError(
-            "Reference Evaluation v1 admission requires the attacker pool disabled"
-        )
+        raise ValueError("Reference Evaluation v1 admission requires the attacker pool disabled")
     if models.blue.source != "campaign":
         raise ValueError("Reference Evaluation v1 requires campaign-selected Blue")
     if report.provider != "ollama" or not report.require_local:
-        raise ValueError("local Reference admission requires a local Ollama qualification report")
+        raise ValueError(
+            "local Reference admission requires a local Ollama qualification report"
+        )
     if blue_provider != report.provider:
         raise ValueError("Blue provider does not match the offline qualification provider")
 
     artifacts = report.artifact_identities()
     red_bindings: list[LocalReferenceRoleBinding] = []
     for role in _REQUIRED_RED_ROLES:
-        required_capabilities = {"text", "reasoning"} if role == ModelRole.RED_PLANNER else {"text"}
+        required_capabilities = (
+            {"text", "reasoning"} if role == ModelRole.RED_PLANNER else {"text"}
+        )
         config = models.role(role, required_capabilities=required_capabilities)
         _require_direct_local_ollama_role(role=role, config=config)
         artifact = artifacts.get((config.provider, config.model))
         if artifact is None:
             raise ValueError(
-                f"verified local artifact missing for configured role {role.value}: {config.model}"
+                f"verified local artifact missing for configured role "
+                f"{role.value}: {config.model}"
             )
         if not artifact.local_artifact:
             raise ValueError(f"configured role {role.value} resolved to a remote artifact")
@@ -196,7 +220,9 @@ def build_local_reference_admission_bundle(
 
     blue_artifact = artifacts.get((blue_provider, blue_model))
     if blue_artifact is None:
-        raise ValueError(f"verified local artifact missing for selected Blue model: {blue_model}")
+        raise ValueError(
+            f"verified local artifact missing for selected Blue model: {blue_model}"
+        )
     if not blue_artifact.local_artifact:
         raise ValueError("selected Blue model resolved to a remote artifact")
 
@@ -205,7 +231,7 @@ def build_local_reference_admission_bundle(
         inventory_sha256=report.inventory_sha256,
         artifact_set_sha256=report.artifact_set_sha256,
         models_config_sha256=_reference_models_config_sha256(models),
-        red_roles=tuple(sorted(red_bindings, key=lambda item: item.participant.value)),
+        red_roles=tuple(red_bindings),
         blue=LocalReferenceBlueBinding(
             provider=blue_provider,
             model=blue_model,
@@ -216,22 +242,20 @@ def build_local_reference_admission_bundle(
     )
 
 
-def _require_direct_local_ollama_role(*, role: ModelRole, config: object) -> None:
-    # Imported type is intentionally avoided in the public contract; ModelsConfig remains
-    # the authority for resolving and validating role capability/location policy.
-    provider = getattr(config, "provider")
-    location = getattr(config, "location")
-    endpoint = getattr(config, "endpoint")
-    fallback = getattr(config, "fallback")
-    if provider != "ollama":
+def _require_direct_local_ollama_role(
+    *,
+    role: ModelRole,
+    config: ModelRoleConfig,
+) -> None:
+    if config.provider != "ollama":
         raise ValueError(f"Reference role {role.value} must use provider=ollama")
-    if location != ModelLocation.LOCAL:
+    if config.location != ModelLocation.LOCAL:
         raise ValueError(f"Reference role {role.value} must be classified local")
-    if fallback:
+    if config.fallback:
         raise ValueError(f"Reference role {role.value} must not declare fallback models")
-    if not isinstance(endpoint, str) or not endpoint:
+    if not config.endpoint:
         raise ValueError(f"Reference role {role.value} requires a direct local endpoint")
-    parsed = urlparse(endpoint)
+    parsed = urlparse(config.endpoint)
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in _LOOPBACK_HOSTS:
         raise ValueError(f"Reference role {role.value} endpoint must use a loopback host")
     if parsed.username is not None or parsed.password is not None:
@@ -243,7 +267,7 @@ def _reference_models_config_sha256(models: ModelsConfig) -> str:
 
     roles = {
         role.value: models.role(role).configuration_fingerprint
-        for role in sorted(_REQUIRED_RED_ROLES, key=lambda item: item.value)
+        for role in _REQUIRED_RED_ROLES
     }
     return canonical_json_hash(
         {
