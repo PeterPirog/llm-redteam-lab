@@ -1,18 +1,20 @@
 """Provider-neutral binding of a Blue target to one exact model artifact.
 
-A target application's configuration and the model weights it executes are separate pieces
-of security-target identity. Mutable tags such as ``latest`` can preserve the configured
-model name while resolving to different weights. This module composes the existing
-``TargetIdentity`` with an independently verified ``ModelArtifactIdentity`` and delegates
-execution to the original target adapter without changing its permissions or protocol.
+A target application's provider and the provider of the model weights it executes are not
+necessarily the same thing.  Direct MODEL targets often have ``provider=ollama`` while an
+AGENT such as OpenCode has ``provider=opencode`` and executes a separately configured
+``ollama/<model>``.  This module keeps those identities separate and composes the existing
+application/runtime ``TargetIdentity`` with one independently verified model artifact.
 """
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from ..agent_actions import canonical_json_hash
-from ..domain import StrictModel, TargetIdentity
+from ..domain import StrictModel, TargetIdentity, TargetMode
 from ..model_artifact import ModelArtifactIdentity
 from .base import TargetAdapter, TargetRequest, TargetResponse
 
@@ -20,12 +22,53 @@ _HASH_PATTERN = r"^[0-9a-f]{64}$"
 _SHA256_PATTERN = r"^sha256:[0-9a-f]{64}$"
 
 
+class TargetModelReference(StrictModel):
+    """Stable reference from one Blue application/configuration to its model artifact."""
+
+    provider_id: str = Field(min_length=1, max_length=64)
+    model_id: str = Field(min_length=1, max_length=256)
+    source: Literal["target_identity", "application_config"]
+
+    @property
+    def reference_sha256(self) -> str:
+        return canonical_json_hash(self.model_dump(mode="json"))
+
+    @classmethod
+    def direct_model(cls, target: TargetIdentity) -> TargetModelReference:
+        """Derive the artifact reference only when the target itself is the model API."""
+
+        if target.target_mode != TargetMode.MODEL:
+            raise ValueError(
+                "application-backed Blue target requires an explicit model reference"
+            )
+        return cls(
+            provider_id=target.provider,
+            model_id=target.model,
+            source="target_identity",
+        )
+
+    @classmethod
+    def application_model(
+        cls,
+        *,
+        provider_id: str,
+        model_id: str,
+    ) -> TargetModelReference:
+        return cls(
+            provider_id=provider_id,
+            model_id=model_id,
+            source="application_config",
+        )
+
+
 class TargetModelArtifactBinding(StrictModel):
     """Stable proof that one configured Blue target uses one exact model artifact."""
 
-    version: int = Field(ge=1, default=1)
+    version: int = Field(ge=1, default=2)
     target_id: str = Field(min_length=1)
     target_configuration_hash: str = Field(min_length=1)
+    target_provider: str = Field(min_length=1)
+    model_reference_sha256: str = Field(pattern=_HASH_PATTERN)
     provider_id: str = Field(min_length=1, max_length=64)
     model_id: str = Field(min_length=1, max_length=256)
     artifact_identity_sha256: str = Field(pattern=_HASH_PATTERN)
@@ -52,6 +95,8 @@ class TargetModelArtifactBinding(StrictModel):
                 "version": self.version,
                 "target_id": self.target_id,
                 "base_configuration_hash": self.target_configuration_hash,
+                "target_provider": self.target_provider,
+                "model_reference_sha256": self.model_reference_sha256,
                 "model_artifact_identity_sha256": self.artifact_identity_sha256,
                 "binding_sha256": self.binding_sha256,
             }
@@ -62,13 +107,21 @@ def bind_target_model_artifact(
     *,
     target: TargetIdentity,
     artifact: ModelArtifactIdentity,
+    model_reference: TargetModelReference | None = None,
     require_local: bool = True,
 ) -> TargetModelArtifactBinding:
-    """Fail closed unless target configuration and artifact name the same model."""
+    """Fail closed unless the declared underlying model matches the exact artifact.
 
-    if target.provider != artifact.provider_id:
-        raise ValueError("Blue target provider does not match model artifact provider")
-    if target.model != artifact.model_id:
+    For direct ``MODEL`` targets the reference is derived from ``TargetIdentity``.  For
+    ``PIPELINE`` and ``AGENT`` targets it must be supplied explicitly from trusted
+    application configuration; application provider identity must never be mistaken for
+    model-artifact provider identity.
+    """
+
+    reference = model_reference or TargetModelReference.direct_model(target)
+    if reference.provider_id != artifact.provider_id:
+        raise ValueError("Blue target model provider does not match model artifact provider")
+    if reference.model_id != artifact.model_id:
         raise ValueError("Blue target model ID does not match model artifact ID")
     if target.model_digest is not None and target.model_digest != artifact.artifact_digest:
         raise ValueError("Blue target existing model_digest conflicts with verified artifact")
@@ -78,6 +131,8 @@ def bind_target_model_artifact(
     return TargetModelArtifactBinding(
         target_id=target.id,
         target_configuration_hash=target.configuration_hash,
+        target_provider=target.provider,
+        model_reference_sha256=reference.reference_sha256,
         provider_id=artifact.provider_id,
         model_id=artifact.model_id,
         artifact_identity_sha256=artifact.identity_sha256,
@@ -91,13 +146,15 @@ def qualify_target_identity(
     *,
     target: TargetIdentity,
     artifact: ModelArtifactIdentity,
+    model_reference: TargetModelReference | None = None,
     require_local: bool = True,
 ) -> TargetIdentity:
-    """Return a target identity whose configuration hash is exact-artifact sensitive."""
+    """Return target identity whose configuration hash is exact-artifact sensitive."""
 
     binding = bind_target_model_artifact(
         target=target,
         artifact=artifact,
+        model_reference=model_reference,
         require_local=require_local,
     )
     return target.model_copy(
@@ -116,14 +173,19 @@ class ArtifactQualifiedTarget:
         target: TargetAdapter,
         artifact: ModelArtifactIdentity,
         *,
+        model_reference: TargetModelReference | None = None,
         require_local: bool = True,
     ) -> None:
         self._target = target
         self._base_identity = target.identity
         self.artifact = artifact
+        self.model_reference = model_reference or TargetModelReference.direct_model(
+            self._base_identity
+        )
         self.binding = bind_target_model_artifact(
             target=self._base_identity,
             artifact=artifact,
+            model_reference=self.model_reference,
             require_local=require_local,
         )
         self._identity = self._base_identity.model_copy(
