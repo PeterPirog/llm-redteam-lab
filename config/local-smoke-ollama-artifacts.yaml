@@ -1,0 +1,41 @@
+version: 1
+provider: ollama
+source: operator_inventory_2026-09-13
+require_local: true
+
+# Predeclared artifact contracts for the local-only smoke profile and its documented
+# Blue alternatives. These are not inferred from model names at runtime. During local
+# qualification, `/api/tags` must resolve exactly one matching local record with no
+# `remote_model` / `remote_host`, and the manifest digest must match this file.
+artifacts:
+  gpt-oss:latest:
+    digest: sha256:17052f91a42e97930aa6e28a6c6c06a983e6a58dbb00434885a0cf5313e376f7
+    roles: [red_planner]
+
+  mistral:7b-instruct:
+    digest: sha256:f974a74358d62a017b37c6f424fcdf2744ca02926c4f952513ddf474b2fa5091
+    roles: [red_mutator]
+
+  nemotron-3.5-lightning:latest:
+    digest: sha256:e7a64ff15fb174c42b4f463e5c888c4f2c7b9cabf9e8d65a1c0874405426c1b2
+    roles: [judge_semantic, forensic]
+
+  llama3.2-vision:latest:
+    digest: sha256:6f2f9757ae97e8a3f8ea33d6adb2b11d93d9a35bef277cd2c0b1b5af8e8d0b1e
+    roles: [judge_multimodal]
+
+  qwen3.8:latest:
+    digest: sha256:22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643
+    roles: [red_attacker_variant, recommended_agent_blue]
+
+  ornith-1.5:9b:
+    digest: sha256:e5df7dcdd8a263994df62d610317e07be0d6af23f96fcbd8543273058fce575e
+    roles: [red_attacker_variant, recommended_model_blue]
+
+  gemma4:31b:
+    digest: sha256:6316f0629137b426c9d9b853ffc4c8209589f30ee39aebede6285096c0ff47e7
+    roles: [optional_stronger_model_blue]
+
+  granite4.2:30b:
+    digest: sha256:be22829aa92aad40153c3b2cfd628269ac9281967e74c44d96750568a5af8ed4
+    roles: [optional_stronger_model_blue]
