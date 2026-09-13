@@ -24,6 +24,11 @@ from .corpus import load_corpus_files
 from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
 from .judges.deterministic import DeterministicJudge
+from .local_reference_admission import (
+    LocalReferenceAdmissionBundle,
+    build_local_reference_admission_bundle,
+    load_offline_ollama_qualification_report,
+)
 from .model_client import OpenAICompatibleRoleModelClient
 from .model_roles import ModelRole, load_models_config
 from .offline_ollama_qualification import (
@@ -113,6 +118,72 @@ def qualify_ollama_inventory(
     console.print(
         "[green]QUALIFIED[/green] "
         f"{len(report.artifacts)} local artifacts; report_sha256={report.report_sha256}"
+    )
+
+
+@app.command("prepare-local-reference")
+def prepare_local_reference(
+    models_config: Annotated[
+        Path,
+        typer.Option("--models", help="Concrete local Reference Red model configuration."),
+    ],
+    qualification_report: Annotated[
+        Path,
+        typer.Option(
+            "--qualification-report",
+            help="Persisted offline Ollama qualification-report JSON.",
+        ),
+    ],
+    blue_model: Annotated[
+        str,
+        typer.Option("--blue-model", help="Campaign-selected local Blue model ID."),
+    ],
+    blue_provider: Annotated[
+        str,
+        typer.Option("--blue-provider", help="Provider for the selected Blue model."),
+    ] = "ollama",
+    expected_report_sha256: Annotated[
+        str | None,
+        typer.Option(
+            "--expected-report-sha256",
+            help="Optional independently pinned qualification report hash.",
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Optional JSON admission bundle path."),
+    ] = None,
+) -> None:
+    """Prepare exact local Red/Blue model admission without provider access or inference."""
+
+    try:
+        models = load_models_config(models_config)
+        report = load_offline_ollama_qualification_report(
+            qualification_report,
+            expected_report_sha256=expected_report_sha256,
+        )
+        bundle = build_local_reference_admission_bundle(
+            models=models,
+            report=report,
+            blue_model=blue_model,
+            blue_provider=blue_provider,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload = _local_reference_bundle_payload(bundle)
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if output is None:
+        typer.echo(rendered, nl=False)
+        return
+
+    try:
+        output.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        raise typer.BadParameter(f"cannot write local Reference bundle {output}: {exc}") from exc
+    console.print(
+        "[green]PREPARED[/green] exact local Reference model set; "
+        f"bundle_sha256={bundle.bundle_sha256}"
     )
 
 
@@ -358,6 +429,14 @@ def _offline_ollama_report_payload(
     payload = report.model_dump(mode="json")
     payload["artifact_set_sha256"] = report.artifact_set_sha256
     payload["report_sha256"] = report.report_sha256
+    return payload
+
+
+def _local_reference_bundle_payload(
+    bundle: LocalReferenceAdmissionBundle,
+) -> dict[str, object]:
+    payload = bundle.model_dump(mode="json")
+    payload["bundle_sha256"] = bundle.bundle_sha256
     return payload
 
 
