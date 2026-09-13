@@ -21,7 +21,10 @@ from ..domain import StrictModel
 from ..evaluation_protocol import CampaignPurpose
 from ..judges.provenance import qualify_judge_model_roles
 from ..model_artifact import ModelArtifactIdentity
-from ..model_role_artifact import bind_policy_descriptor_to_model_roles
+from ..model_role_artifact import (
+    QualifiedModelRoleSet,
+    bind_policy_descriptor_to_model_roles,
+)
 from ..model_roles import ModelRole, ModelsConfig
 from ..red.provenance import qualify_red_model_roles
 from ..storage.measurement_repository import (
@@ -44,17 +47,25 @@ class ArtifactQualifiedCampaignPolicies(StrictModel):
     judge_policy_descriptor: dict[str, object]
     attack_policy_fingerprint: str = Field(pattern=_HASH_PATTERN)
     judge_policy_fingerprint: str = Field(pattern=_HASH_PATTERN)
-    red_model_role_set_sha256: str | None = Field(default=None, pattern=_HASH_PATTERN)
-    judge_model_role_set_sha256: str | None = Field(default=None, pattern=_HASH_PATTERN)
+    red_model_roles: QualifiedModelRoleSet | None = None
+    judge_model_roles: QualifiedModelRoleSet | None = None
 
     @model_validator(mode="after")
-    def qualification_hash_presence_matches_roles(self) -> ArtifactQualifiedCampaignPolicies:
+    def qualification_presence_matches_roles(self) -> ArtifactQualifiedCampaignPolicies:
         required = set(self.required_model_roles)
-        if bool(required & _RED_ROLES) != (self.red_model_role_set_sha256 is not None):
-            raise ValueError("Red model-role qualification hash does not match required roles")
-        if bool(required & _JUDGE_ROLES) != (self.judge_model_role_set_sha256 is not None):
-            raise ValueError("Judge model-role qualification hash does not match required roles")
+        if bool(required & _RED_ROLES) != (self.red_model_roles is not None):
+            raise ValueError("Red model-role qualification does not match required roles")
+        if bool(required & _JUDGE_ROLES) != (self.judge_model_roles is not None):
+            raise ValueError("Judge model-role qualification does not match required roles")
         return self
+
+    @property
+    def red_model_role_set_sha256(self) -> str | None:
+        return self.red_model_roles.set_sha256 if self.red_model_roles is not None else None
+
+    @property
+    def judge_model_role_set_sha256(self) -> str | None:
+        return self.judge_model_roles.set_sha256 if self.judge_model_roles is not None else None
 
     @property
     def qualification_sha256(self) -> str:
@@ -104,7 +115,7 @@ def qualify_campaign_policy_descriptors(
         raise ValueError("campaign model artifact qualification requires ModelsConfig")
 
     bound_attack = dict(attack_policy_descriptor)
-    red_set_hash: str | None = None
+    qualified_red: QualifiedModelRoleSet | None = None
     if red_required:
         assert models is not None
         qualified_red = qualify_red_model_roles(
@@ -121,10 +132,9 @@ def qualify_campaign_policy_descriptors(
                 f"{prefix}{ModelRole.RED_MUTATOR.value}",
             ),
         )
-        red_set_hash = qualified_red.set_sha256
 
     bound_judge = dict(judge_policy_descriptor)
-    judge_set_hash: str | None = None
+    qualified_judge: QualifiedModelRoleSet | None = None
     if judge_required:
         assert models is not None
         semantic = ModelRole.JUDGE_SEMANTIC in judge_required
@@ -140,7 +150,6 @@ def qualify_campaign_policy_descriptors(
             qualified_roles=qualified_judge,
             required_route_ids=tuple(role.value for role in judge_required),
         )
-        judge_set_hash = qualified_judge.set_sha256
 
     return ArtifactQualifiedCampaignPolicies(
         required_model_roles=required,
@@ -148,8 +157,8 @@ def qualify_campaign_policy_descriptors(
         judge_policy_descriptor=bound_judge,
         attack_policy_fingerprint=fingerprint_attack_policy(bound_attack),
         judge_policy_fingerprint=fingerprint_judge_policy(bound_judge),
-        red_model_role_set_sha256=red_set_hash,
-        judge_model_role_set_sha256=judge_set_hash,
+        red_model_roles=qualified_red,
+        judge_model_roles=qualified_judge,
     )
 
 
