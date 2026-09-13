@@ -15,11 +15,12 @@ from pydantic import Field, model_validator
 from ..agent_actions import canonical_json_hash
 from ..campaign_plan import CampaignPlan, CampaignPreflight
 from ..domain import StrictModel
+from ..evaluation_protocol import CampaignPurpose
+from ..judges.provenance import qualify_judge_model_roles
 from ..model_artifact import ModelArtifactIdentity
 from ..model_role_artifact import bind_policy_descriptor_to_model_roles
 from ..model_roles import ModelRole, ModelsConfig
 from ..red.provenance import qualify_red_model_roles
-from ..judges.provenance import qualify_judge_model_roles
 from ..storage.measurement_repository import (
     fingerprint_attack_policy,
     fingerprint_judge_policy,
@@ -76,9 +77,8 @@ def build_artifact_qualified_campaign_policies(
     unrelated verified artifact, or silently downgraded to name-only provenance.
 
     If the campaign plan predeclares attack/Judge fingerprints, the freshly qualified
-    fingerprints must match exactly. This is especially important for held-out
-    EVALUATION: a mutable local tag that changed after plan preparation will fail before
-    campaign execution.
+    fingerprints must match exactly. Held-out EVALUATION additionally requires both
+    fingerprints to have been declared before this binding step.
     """
 
     if not preflight.ready:
@@ -103,12 +103,28 @@ def build_artifact_qualified_campaign_policies(
     red_required = set(required) & _RED_ROLES
     if red_required and red_required != _RED_ROLES:
         raise ValueError("model-backed Red must require both planner and mutator roles")
+    if plan.red_policy.model_backed != bool(red_required):
+        raise ValueError("campaign Red policy and required Red model roles are inconsistent")
     if not red_required and attacker_variant_id is not None:
         raise ValueError("attacker_variant_id requires model-backed Red roles")
 
     judge_required = set(required) & _JUDGE_ROLES
     if required and models is None:
         raise ValueError("campaign model artifact qualification requires ModelsConfig")
+
+    if plan.purpose == CampaignPurpose.EVALUATION:
+        missing = [
+            name
+            for name, value in (
+                ("attack_policy_fingerprint", plan.attack_policy_fingerprint),
+                ("judge_policy_fingerprint", plan.judge_policy_fingerprint),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(
+                "EVALUATION artifact qualification requires declared " + ", ".join(missing)
+            )
 
     bound_attack = dict(attack_policy_descriptor)
     red_set_hash: str | None = None
