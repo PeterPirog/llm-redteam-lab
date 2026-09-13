@@ -1,0 +1,141 @@
+version: 1
+policy:
+  local_first: true
+  allow_cloud_fallback: false
+
+# Local-only profile derived from an operator-provided Ollama inventory.
+# Only models with local GGUF artifacts and no remote_host are eligible here.
+# All inference endpoints point directly at local Ollama; no cloud fallback is allowed.
+roles:
+  red_planner:
+    provider: ollama
+    model: gpt-oss:latest
+    class: local
+    endpoint: http://localhost:11434/v1/chat/completions
+    profile: local-smoke
+    capabilities: [text, reasoning, tools]
+    context_tokens: 131072
+    temperature: 0.7
+    max_output_tokens: 1000
+    enabled: true
+    fallback: []
+
+  red_mutator:
+    provider: ollama
+    model: mistral:7b-instruct
+    class: local
+    endpoint: http://localhost:11434/v1/chat/completions
+    profile: local-smoke-fast
+    capabilities: [text, tools]
+    context_tokens: 32768
+    temperature: 0.9
+    max_output_tokens: 600
+    enabled: true
+    fallback: []
+
+  judge_semantic:
+    provider: ollama
+    model: nemotron-3.5-lightning:latest
+    class: local
+    endpoint: http://localhost:11434/v1/chat/completions
+    profile: local-independent-judge
+    capabilities: [text, reasoning, tools]
+    context_tokens: 1048576
+    temperature: 0.0
+    max_output_tokens: 700
+    enabled: true
+    invoke: only_if_deterministic_inconclusive
+    fallback: []
+
+  judge_multimodal:
+    provider: ollama
+    model: llama3.2-vision:latest
+    class: local
+    endpoint: http://localhost:11434/v1/chat/completions
+    profile: local-vision-judge
+    capabilities: [text, vision]
+    context_tokens: 131072
+    temperature: 0.0
+    max_output_tokens: 700
+    enabled: false
+    invoke: only_if_visual_evidence_requires_semantics
+    fallback: []
+
+  forensic:
+    provider: ollama
+    model: nemotron-3.5-lightning:latest
+    class: local
+    endpoint: http://localhost:11434/v1/chat/completions
+    profile: local-forensic
+    capabilities: [text, reasoning, tools]
+    context_tokens: 1048576
+    temperature: 0.1
+    max_output_tokens: 1200
+    enabled: true
+    invoke: reproducible_findings_only
+    fallback: []
+
+# Keep the attacker pool disabled for the cheapest first smoke. The two variants
+# are predeclared so a later bounded DISCOVERY run can enable intentional attacker
+# diversity without confusing it with provider fallback behavior.
+red_attacker_pool:
+  enabled: false
+  variants:
+    - id: gptoss-mistral
+      description: Strong local reasoning planner with a small, fast mutation model.
+      enabled: true
+      planner:
+        provider: ollama
+        model: gpt-oss:latest
+        class: local
+        endpoint: http://localhost:11434/v1/chat/completions
+        profile: local-red-a
+        capabilities: [text, reasoning, tools]
+        context_tokens: 131072
+        temperature: 0.7
+        max_output_tokens: 1000
+        fallback: []
+      mutator:
+        provider: ollama
+        model: mistral:7b-instruct
+        class: local
+        endpoint: http://localhost:11434/v1/chat/completions
+        profile: local-red-a-fast
+        capabilities: [text, tools]
+        context_tokens: 32768
+        temperature: 0.9
+        max_output_tokens: 600
+        fallback: []
+
+    - id: qwen-ornith
+      description: Independent Qwen-family planner with a compact local mutator.
+      enabled: true
+      planner:
+        provider: ollama
+        model: qwen3.8:latest
+        class: local
+        endpoint: http://localhost:11434/v1/chat/completions
+        profile: local-red-b
+        capabilities: [text, reasoning, tools, vision]
+        context_tokens: 262144
+        temperature: 0.7
+        max_output_tokens: 1000
+        fallback: []
+      mutator:
+        provider: ollama
+        model: ornith-1.5:9b
+        class: local
+        endpoint: http://localhost:11434/v1/chat/completions
+        profile: local-red-b-fast
+        capabilities: [text, vision]
+        context_tokens: 262144
+        temperature: 0.9
+        max_output_tokens: 600
+        fallback: []
+
+blue:
+  source: campaign
+
+# Recommended initial Blue choices are documented in ADR-068. Blue remains
+# campaign-selected because the same model under MODEL, PIPELINE and AGENT modes
+# represents different security targets.
