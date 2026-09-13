@@ -17,7 +17,7 @@ from typing import Protocol, runtime_checkable
 from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
-from .domain import StrictModel, TargetIdentity
+from .domain import AttackCase, StrictModel, TargetIdentity
 from .judges.base import Judge
 from .model_client import RoleModelClient
 from .model_roles import ModelsConfig
@@ -133,7 +133,7 @@ async def run_artifact_qualified_reference_evaluation_stage(
     *,
     stage: ReferenceEvaluationStage,
     spec: ReferenceEvaluationSpec,
-    cases: tuple,
+    cases: tuple[AttackCase, ...],
     budgets: BudgetConfigDocument,
     models: ModelsConfig,
     target: ArtifactQualifiedTargetAdapter,
