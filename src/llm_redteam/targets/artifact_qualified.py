@@ -146,6 +146,8 @@ class ArtifactQualifiedTarget:
         return self._base_identity
 
     async def execute(self, request: TargetRequest) -> TargetResponse:
-        """Delegate execution unchanged; artifact qualification grants no capability."""
+        """Reject post-admission target drift, then delegate the unchanged request."""
 
+        if self._target.identity != self._base_identity:
+            raise ValueError("Blue target runtime identity changed after artifact admission")
         return await self._target.execute(request)
