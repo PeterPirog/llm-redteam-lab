@@ -16,14 +16,16 @@ def _bridge() -> McpFixtureBridgeProfile:
 
 def _backend(tmp_path: Path) -> FilesystemMcpFixtureStagingBackend:
     root = tmp_path / "host-control"
-    root.mkdir()
+    root.mkdir(parents=True)
     return FilesystemMcpFixtureStagingBackend(
         context_host_path=root / "context.txt",
         hash_host_path=root / "context.sha256",
     )
 
 
-def test_host_staging_namespace_is_independent_from_target_visible_bridge(tmp_path: Path) -> None:
+def test_host_staging_namespace_is_independent_from_target_visible_bridge(
+    tmp_path: Path,
+) -> None:
     bridge = _bridge()
     backend = _backend(tmp_path)
     binding = backend.runtime_binding(bridge)
@@ -167,5 +169,6 @@ def test_runtime_binding_changes_with_host_namespace_but_bridge_identity_does_no
     second_binding = second.runtime_binding(bridge)
 
     assert first.staging_policy_sha256 == second.staging_policy_sha256
-    assert first_binding.bridge_sha256 == second_binding.bridge_sha256 == bridge.bridge_sha256
+    assert first_binding.bridge_sha256 == bridge.bridge_sha256
+    assert second_binding.bridge_sha256 == bridge.bridge_sha256
     assert first_binding.binding_sha256 != second_binding.binding_sha256
