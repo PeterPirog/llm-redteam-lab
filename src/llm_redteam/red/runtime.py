@@ -33,7 +33,6 @@ from ..model_client import (
 )
 from ..model_roles import ModelRole, ModelRoleConfig, ModelsConfig
 from ..targets.base import SessionMode
-from .adaptive import RedCampaignMemory, RedMemorySnapshot
 from .agent_adaptive import (
     TargetVisibleAgentAdaptiveRedStrategy,
     TargetVisibleAgentMechanismAwareAdaptiveRedStrategy,
@@ -48,6 +47,7 @@ from .fixture_adaptive import (
     FixturePrimedAgentMechanismAwareAdaptiveRedStrategy,
     FixturePrimer,
 )
+from .layer_memory import LayerAwareRedCampaignMemory, LayerAwareRedMemorySnapshot
 from .live_feedback import (
     LIVE_FEEDBACK_SCOPE,
     POST_RUN_DISCOVERY_FEEDBACK,
@@ -66,12 +66,14 @@ _RED_RUNTIME_VERSION = 2
 _AGENT_RED_RUNTIME_VERSION = 3
 _AGENT_FIXTURE_RED_RUNTIME_VERSION = 4
 _MULTI_ATTACKER_VERSION_INCREMENT = 1
+_POST_RUN_LAYER_LEARNING = "outcome-layers-v1"
+_INITIAL_LAYER_MEMORY = "empty-layer-aware-v2"
 
 
 class RedRuntimeDiagnostics(StrictModel):
     """Transcript-free adaptive-search diagnostics, never comparative Blue metrics."""
 
-    tactic_memory: dict[str, RedMemorySnapshot] = Field(default_factory=dict)
+    tactic_memory: dict[str, LayerAwareRedMemorySnapshot] = Field(default_factory=dict)
     mechanism_memory: dict[str, MechanismMemorySnapshot] = Field(default_factory=dict)
     mechanism_coverage: RedMechanismCoverage | None = None
     comparable_blue_estimate: bool = False
@@ -138,6 +140,11 @@ def build_model_backed_red_policy_descriptor(
             if purpose == CampaignPurpose.DISCOVERY
             else "disabled"
         ),
+        "post_run_learning_signal": (
+            _POST_RUN_LAYER_LEARNING
+            if purpose == CampaignPurpose.DISCOVERY
+            else "disabled"
+        ),
         "cross_trial_learning_enabled": purpose == CampaignPurpose.DISCOVERY,
         "duplicate_similarity_threshold": duplicate_similarity_threshold,
         "conversation_budget": conversation_budget.model_dump(mode="json"),
@@ -145,7 +152,7 @@ def build_model_backed_red_policy_descriptor(
         "red_planner": _model_role_descriptor(planner),
         "red_mutator": _model_role_descriptor(mutator),
         "mechanism_policy": mechanism_policy,
-        "initial_learning_memory": "empty-v1",
+        "initial_learning_memory": _INITIAL_LAYER_MEMORY,
     }
     if target_mode == TargetMode.AGENT:
         descriptor["runtime_version"] = _AGENT_RED_RUNTIME_VERSION
@@ -222,7 +229,7 @@ class RedStrategyRuntime:
         )
         self.duplicate_similarity_threshold = duplicate_similarity_threshold
         self.fixture_priming_enabled = fixture_priming_enabled
-        self.tactic_memory = RedCampaignMemory()
+        self.tactic_memory = LayerAwareRedCampaignMemory()
         self.mechanism_memory = MechanismCampaignMemory()
         self._observed_families: set[str] = set()
         self.conversation_budget = _conversation_budget(
@@ -326,7 +333,13 @@ class RedStrategyRuntime:
         if not callable(learn):
             raise TypeError("model-backed Red strategy does not expose learn(result)")
         learn(result)
-        self._observed_families.add(case.attack_family[0])
+        attack_family = case.attack_family[0]
+        self.tactic_memory.record_outcome_layers(
+            attack_family=attack_family,
+            model_compromise=result.execution.model_compromise,
+            system_compromise=result.execution.system_compromise,
+        )
+        self._observed_families.add(attack_family)
 
     def diagnostics(self) -> RedRuntimeDiagnostics | None:
         """Return learned search diagnostics only when discovery learning was enabled."""
