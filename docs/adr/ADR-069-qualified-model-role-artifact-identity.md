@@ -40,7 +40,7 @@ red-a:red_mutator
 
 so the same underlying model can be distinguished when it is intentionally configured as a different attacker variant.
 
-Duplicate role routes fail closed.
+Empty role sets, duplicate role routes, empty policy requirements and duplicate required routes fail closed.
 
 ## Policy binding
 
@@ -55,6 +55,16 @@ Deterministic Judges do not use this helper because they have no model artifact.
 
 A mutable tag resolving to new weights therefore changes the bound policy identity even if the role configuration itself did not change. Historical unqualified policy descriptors remain unchanged unless a caller explicitly opts into artifact-qualified provenance.
 
+## Ollama registry edge
+
+`OllamaArtifactRegistry` is the versioned operator/runtime edge for local qualification. It loads a predeclared YAML registry, constructs the existing `OllamaArtifactContract` for each requested model, verifies one later `/api/tags` inventory payload and returns an `OllamaArtifactQualification` containing provider-neutral artifact observations.
+
+The registry deliberately verifies only the explicitly requested model IDs. This allows a campaign to qualify exactly the Red/Judge/Blue models it needs without treating unrelated local models as part of campaign identity.
+
+The registry itself performs no HTTP requests and no inference. Network acquisition of `/api/tags` remains a later runtime concern.
+
+Role hints stored in the registry are operator metadata, not authorization. They are normalized into the registry fingerprint but never decide which role a model may execute; actual role selection still comes from `ModelsConfig` and campaign policy.
+
 ## Locality
 
 Role configuration locality and artifact locality must agree:
@@ -67,7 +77,9 @@ This check is intentionally provider-neutral. It supplements rather than replace
 For the planned local-only smoke profile, the practical path is:
 
 ```text
-predeclared Ollama manifest digest
+predeclared Ollama artifact registry
+        ↓
+local /api/tags payload
         ↓
 OllamaArtifactContract verification
         ↓
@@ -106,7 +118,8 @@ One bounded conversation remains one security trial.
 - forensic roles can use the same primitive when their provenance is persisted;
 - provider-specific artifact verification remains isolated from policy business logic;
 - explicit attacker variants remain distinct;
-- the mechanism can be exercised using deterministic tests before any real inference.
+- the local Ollama registry can be verified using deterministic payload fixtures before any real inference;
+- the full registry → artifact → Red/Judge fingerprint path is testable without Ollama or GPU access.
 
 ### Costs
 
