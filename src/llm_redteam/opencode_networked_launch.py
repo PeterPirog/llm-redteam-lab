@@ -11,6 +11,7 @@ import json
 from hashlib import sha256
 
 from .agent_actions import canonical_json_hash
+from .domain import StrictModel
 from .opencode_model_peer import OpenCodeModelPeerBinding
 from .opencode_runtime import (
     AgentSandboxAttestation,
@@ -18,7 +19,6 @@ from .opencode_runtime import (
     OpenCodeLaunchPlan,
     OpenCodeRuntimeProfile,
 )
-from .domain import StrictModel
 
 
 class OpenCodeNetworkedLaunchPolicy(StrictModel):
