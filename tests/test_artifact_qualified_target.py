@@ -139,7 +139,7 @@ def test_wrapper_delegates_request_without_expanding_target_capabilities() -> No
     assert wrapped.base_identity == base.identity
 
 
-def test_wrapper_freezes_identity_at_admission_time() -> None:
+def test_wrapper_rejects_post_admission_target_identity_drift_before_execution() -> None:
     class _MutableIdentityTarget(_RecordingTarget):
         def __init__(self) -> None:
             super().__init__()
@@ -156,7 +156,11 @@ def test_wrapper_freezes_identity_at_admission_time() -> None:
     wrapped = ArtifactQualifiedTarget(base, _artifact())
     admitted = wrapped.identity
     base.version = 2
+    request = TargetRequest(attack_id="A-2", prompt="must not reach changed target")
 
     assert wrapped.identity == admitted
     assert wrapped.base_identity.configuration_hash == "mutable-base-1"
     assert base.identity.configuration_hash == "mutable-base-2"
+    with pytest.raises(ValueError, match="changed after artifact admission"):
+        asyncio.run(wrapped.execute(request))
+    assert base.requests == []
