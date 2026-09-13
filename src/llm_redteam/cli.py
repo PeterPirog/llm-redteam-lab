@@ -26,6 +26,12 @@ from .evaluation_protocol import CampaignPurpose
 from .judges.deterministic import DeterministicJudge
 from .model_client import OpenAICompatibleRoleModelClient
 from .model_roles import ModelRole, load_models_config
+from .offline_ollama_qualification import (
+    OfflineOllamaQualificationReport,
+    load_ollama_artifact_contract_document,
+    load_ollama_tags_payload,
+    qualify_saved_ollama_inventory,
+)
 from .reference_evaluation import (
     ReferenceEvaluationStage,
     load_reference_evaluation_spec,
@@ -64,6 +70,49 @@ def validate_corpus(
     cases = load_corpus_files(paths)
     console.print(
         f"[green]VALID[/green] {len(cases)} attack cases across {len(paths)} file(s)"
+    )
+
+
+@app.command("qualify-ollama-inventory")
+def qualify_ollama_inventory(
+    contracts: Annotated[
+        Path,
+        typer.Option("--contracts", help="Predeclared local Ollama artifact YAML."),
+    ],
+    inventory: Annotated[
+        Path,
+        typer.Option("--inventory", help="Previously saved Ollama /api/tags JSON."),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Optional JSON qualification report path."),
+    ] = None,
+) -> None:
+    """Verify a saved local Ollama inventory without provider access or inference."""
+
+    try:
+        document = load_ollama_artifact_contract_document(contracts)
+        tags_payload = load_ollama_tags_payload(inventory)
+        report = qualify_saved_ollama_inventory(
+            document=document,
+            tags_payload=tags_payload,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload = _offline_ollama_report_payload(report)
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    if output is None:
+        typer.echo(rendered, nl=False)
+        return
+
+    try:
+        output.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        raise typer.BadParameter(f"cannot write qualification report {output}: {exc}") from exc
+    console.print(
+        "[green]QUALIFIED[/green] "
+        f"{len(report.artifacts)} local artifacts; report_sha256={report.report_sha256}"
     )
 
 
@@ -301,6 +350,15 @@ async def _execute_reference_run(
     finally:
         await red_client.aclose()
         await target.aclose()
+
+
+def _offline_ollama_report_payload(
+    report: OfflineOllamaQualificationReport,
+) -> dict[str, object]:
+    payload = report.model_dump(mode="json")
+    payload["artifact_set_sha256"] = report.artifact_set_sha256
+    payload["report_sha256"] = report.report_sha256
+    return payload
 
 
 def _reference_result_payload(result: ReferenceEvaluationRunResult) -> dict[str, object]:
