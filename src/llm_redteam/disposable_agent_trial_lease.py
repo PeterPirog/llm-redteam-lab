@@ -116,6 +116,7 @@ class _ActiveTrial:
     model_peer: OllamaModelPeerLease
     agent: DockerNetworkedAgentLease
     target_handle: DisposableAgentTargetHandle
+    expected_identity: TargetIdentity
     public_lease: TargetTrialLease
 
 
@@ -164,6 +165,9 @@ class DisposableAgentTrialLeaseProvider:
         self._agent_command = agent_command
         self._target_factory = target_factory
         self._active: dict[str, _ActiveTrial] = {}
+        self._seen_lease_ids: set[str] = set()
+        self._seen_workspace_ids: set[str] = set()
+        self._seen_fresh_state_proofs: set[str] = set()
         self._dirty = False
 
         # Fail fast on stable policy contradictions; detailed runtime ownership remains in
@@ -226,6 +230,10 @@ class DisposableAgentTrialLeaseProvider:
                 "target_configuration_hash": expected_identity.configuration_hash,
             }
         )
+        if lease_id_hash in self._seen_lease_ids:
+            raise ValueError("disposable AGENT trial lease identity was already used")
+        self._seen_lease_ids.add(lease_id_hash)
+
         suffix = lease_id_hash[:20]
         network_name = f"llmrt-net-{suffix}"
         agent_container_name = f"llmrt-agent-{suffix}"
@@ -237,6 +245,7 @@ class DisposableAgentTrialLeaseProvider:
         target_handle: DisposableAgentTargetHandle | None = None
         try:
             workspace = self._workspace_provider.acquire(trial_id=trial_id)
+            self._admit_fresh_workspace(workspace)
             network = self._network_supervisor.create(
                 profile=self._network_profile,
                 network_name=network_name,
@@ -312,6 +321,7 @@ class DisposableAgentTrialLeaseProvider:
                 model_peer=model_peer,
                 agent=agent,
                 target_handle=target_handle,
+                expected_identity=expected_identity,
                 public_lease=public_lease,
             )
             return public_lease
@@ -347,6 +357,11 @@ class DisposableAgentTrialLeaseProvider:
         model_release: OllamaModelPeerRelease | None = None
         workspace_release: DisposableAgentWorkspaceRelease | None = None
         cleanup_errors: list[str] = []
+        try:
+            if lease.target.identity != active.expected_identity:
+                cleanup_errors.append("target identity drift detected before release")
+        except Exception as exc:
+            cleanup_errors.append(f"target identity check failed: {type(exc).__name__}")
 
         try:
             target_release = self._target_factory.release(active.target_handle)
@@ -414,6 +429,14 @@ class DisposableAgentTrialLeaseProvider:
             cleanup_complete=True,
         )
 
+    def _admit_fresh_workspace(self, workspace: DisposableAgentWorkspaceLease) -> None:
+        if workspace.workspace_id_sha256 in self._seen_workspace_ids:
+            raise RuntimeError("disposable workspace identity was reused across trials")
+        if workspace.fresh_state_proof_sha256 in self._seen_fresh_state_proofs:
+            raise RuntimeError("disposable workspace fresh-state proof was reused across trials")
+        self._seen_workspace_ids.add(workspace.workspace_id_sha256)
+        self._seen_fresh_state_proofs.add(workspace.fresh_state_proof_sha256)
+
     def _validate_target_handle(
         self,
         *,
@@ -435,6 +458,10 @@ class DisposableAgentTrialLeaseProvider:
             != agent.sandbox_attestation.attestation_sha256
         ):
             raise ValueError("OpenCode health does not bind the AGENT sandbox attestation")
+        if expected_identity.application_version is None:
+            raise ValueError("disposable OpenCode AGENT target requires application_version")
+        if health.application_version != expected_identity.application_version:
+            raise ValueError("OpenCode health version does not match expected target version")
         if "runtime_health_verified" not in handle.target.identity.capabilities:
             raise ValueError("AGENT target is missing runtime health verification capability")
 
