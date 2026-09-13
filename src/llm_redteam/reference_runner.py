@@ -12,6 +12,7 @@ and runtime configuration.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from uuid import uuid4
@@ -19,6 +20,10 @@ from uuid import uuid4
 from .budget import BudgetLedger
 from .campaign_plan import RedPolicyKind
 from .campaigns.lifecycle import METRIC_DEFINITION_VERSION
+from .campaigns.model_qualification import (
+    ArtifactQualifiedCampaignPolicies,
+    validate_qualified_runtime_policy_descriptors,
+)
 from .campaigns.multiturn import ConversationRunResult, MultiTurnCampaignEngine
 from .domain import AttackCase, CampaignBudget
 from .evaluation_protocol import held_out_evaluation_protocol
@@ -50,6 +55,10 @@ from .reference_evaluation import (
     build_reference_evaluation_manifest,
     preflight_reference_evaluation,
 )
+from .reference_model_qualification import (
+    ArtifactQualifiedReferencePolicies,
+    validate_reference_runtime_policy_descriptors,
+)
 from .runtime_config import BudgetConfigDocument
 from .storage.ablation_repository import (
     build_red_ablation_experiment_snapshot,
@@ -65,6 +74,11 @@ from .storage.measurement_repository import (
     fingerprint_corpus_snapshot,
     fingerprint_judge_policy,
     save_campaign_measurement_snapshot,
+)
+from .storage.model_role_repository import (
+    ModelRolePolicyScope,
+    build_campaign_model_role_provenance,
+    save_campaign_model_role_provenance,
 )
 from .storage.repository import ExperimentRepository
 from .targets.base import SessionMode, TargetAdapter
@@ -128,6 +142,7 @@ async def run_reference_evaluation_stage(
     red_model_client: RoleModelClient,
     repository: ExperimentRepository,
     run_id: str | None = None,
+    qualified_model_policies: ArtifactQualifiedReferencePolicies | None = None,
 ) -> ReferenceEvaluationRunResult:
     """Execute one frozen reference stage and persist its paired evidence.
 
@@ -135,6 +150,10 @@ async def run_reference_evaluation_stage(
     deterministic counterbalanced pair order declared by ``PairedRedAblationContract``. This
     avoids turning wall-clock order into an uncontrolled treatment while preserving separate
     arm-wide budgets.
+
+    During migration, ``qualified_model_policies`` is optional so historical deterministic
+    tests remain usable. Real local Reference Evaluation must supply it before this legacy
+    path is retired.
     """
 
     preflight = preflight_reference_evaluation(
@@ -164,10 +183,6 @@ async def run_reference_evaluation_stage(
     )
     profile_name, effective_budget = budgets.profile(stage_plan.budget_profile)
 
-    repository.create_schema()
-    target_snapshot_id = repository.save_target(target.identity)
-    save_evaluation_set_manifest(repository.engine, manifest)
-
     judge_fingerprint = fingerprint_judge_policy(judge_policy_descriptor)
     budget_fingerprint = fingerprint_budget(effective_budget.model_dump(mode="json"))
     baseline_descriptor = build_model_backed_red_policy_descriptor(
@@ -191,6 +206,31 @@ async def run_reference_evaluation_stage(
     baseline_fingerprint = fingerprint_attack_policy(baseline_descriptor)
     treatment_fingerprint = fingerprint_attack_policy(treatment_descriptor)
 
+    if qualified_model_policies is not None:
+        if not isinstance(judge_policy_descriptor, Mapping):
+            raise ValueError("artifact-qualified reference Judge descriptor must be a mapping")
+        _validate_reference_qualification_binding(
+            qualified=qualified_model_policies,
+            stage=stage,
+            spec=spec,
+            profile_name=profile_name,
+            budget_fingerprint=budget_fingerprint,
+        )
+        validate_reference_runtime_policy_descriptors(
+            qualified=qualified_model_policies,
+            baseline_runtime_descriptor=baseline_descriptor,
+            treatment_runtime_descriptor=treatment_descriptor,
+            judge_policy_descriptor=judge_policy_descriptor,
+        )
+        baseline_fingerprint = qualified_model_policies.baseline.attack_policy_fingerprint
+        treatment_fingerprint = qualified_model_policies.treatment.attack_policy_fingerprint
+        judge_fingerprint = qualified_model_policies.judge_policy_fingerprint
+        budget_fingerprint = qualified_model_policies.budget_fingerprint
+
+    repository.create_schema()
+    target_snapshot_id = repository.save_target(target.identity)
+    save_evaluation_set_manifest(repository.engine, manifest)
+
     resolved_run_id = run_id or uuid4().hex
     experiment_id = f"{spec.experiment_id}:{stage.value.lower()}:{resolved_run_id}"
     baseline_campaign_id = f"{experiment_id}:baseline"
@@ -210,43 +250,67 @@ async def run_reference_evaluation_stage(
         pairing_mode=PairingMode.CASE_REPLICATE,
     )
 
-    baseline = _start_arm(
-        arm=AblationArm.BASELINE,
-        campaign_id=baseline_campaign_id,
-        policy=spec.baseline_policy,
-        policy_fingerprint=baseline_fingerprint,
-        repository=repository,
-        target=target,
-        judge_fingerprint=judge_fingerprint,
-        budget_fingerprint=budget_fingerprint,
-        budget_profile=profile_name,
-        effective_budget=effective_budget,
-        models=models,
-        red_model_client=red_model_client,
-        manifest=manifest,
-        spec=spec,
-        stage=stage,
-    )
-    treatment = _start_arm(
-        arm=AblationArm.TREATMENT,
-        campaign_id=treatment_campaign_id,
-        policy=spec.treatment_policy,
-        policy_fingerprint=treatment_fingerprint,
-        repository=repository,
-        target=target,
-        judge_fingerprint=judge_fingerprint,
-        budget_fingerprint=budget_fingerprint,
-        budget_profile=profile_name,
-        effective_budget=effective_budget,
-        models=models,
-        red_model_client=red_model_client,
-        manifest=manifest,
-        spec=spec,
-        stage=stage,
-    )
-    arms = {AblationArm.BASELINE: baseline, AblationArm.TREATMENT: treatment}
-
+    baseline: _ArmRuntime | None = None
+    treatment: _ArmRuntime | None = None
     try:
+        baseline = _start_arm(
+            arm=AblationArm.BASELINE,
+            campaign_id=baseline_campaign_id,
+            policy=spec.baseline_policy,
+            policy_fingerprint=baseline_fingerprint,
+            repository=repository,
+            target=target,
+            judge_fingerprint=judge_fingerprint,
+            budget_fingerprint=budget_fingerprint,
+            budget_profile=profile_name,
+            effective_budget=effective_budget,
+            models=models,
+            red_model_client=red_model_client,
+            manifest=manifest,
+            spec=spec,
+            stage=stage,
+            qualified_policy=(
+                qualified_model_policies.baseline.qualified_policies
+                if qualified_model_policies is not None
+                else None
+            ),
+            judge_policy_descriptor=judge_policy_descriptor,
+            reference_qualification_sha256=(
+                qualified_model_policies.qualification_sha256
+                if qualified_model_policies is not None
+                else None
+            ),
+        )
+        treatment = _start_arm(
+            arm=AblationArm.TREATMENT,
+            campaign_id=treatment_campaign_id,
+            policy=spec.treatment_policy,
+            policy_fingerprint=treatment_fingerprint,
+            repository=repository,
+            target=target,
+            judge_fingerprint=judge_fingerprint,
+            budget_fingerprint=budget_fingerprint,
+            budget_profile=profile_name,
+            effective_budget=effective_budget,
+            models=models,
+            red_model_client=red_model_client,
+            manifest=manifest,
+            spec=spec,
+            stage=stage,
+            qualified_policy=(
+                qualified_model_policies.treatment.qualified_policies
+                if qualified_model_policies is not None
+                else None
+            ),
+            judge_policy_descriptor=judge_policy_descriptor,
+            reference_qualification_sha256=(
+                qualified_model_policies.qualification_sha256
+                if qualified_model_policies is not None
+                else None
+            ),
+        )
+        arms = {AblationArm.BASELINE: baseline, AblationArm.TREATMENT: treatment}
+
         for pair in build_counterbalanced_pair_plan(
             contract=contract,
             manifest=manifest,
@@ -280,16 +344,13 @@ async def run_reference_evaluation_stage(
             manifest=manifest,
         )
     except Exception:
-        finish_campaign(
-            repository.engine,
-            campaign_id=baseline.campaign_id,
-            status=CampaignTerminalStatus.FAILED,
-        )
-        finish_campaign(
-            repository.engine,
-            campaign_id=treatment.campaign_id,
-            status=CampaignTerminalStatus.FAILED,
-        )
+        for context in (baseline, treatment):
+            if context is not None:
+                finish_campaign(
+                    repository.engine,
+                    campaign_id=context.campaign_id,
+                    status=CampaignTerminalStatus.FAILED,
+                )
         raise
 
     finish_campaign(
@@ -332,6 +393,28 @@ async def run_reference_evaluation_stage(
     )
 
 
+def _validate_reference_qualification_binding(
+    *,
+    qualified: ArtifactQualifiedReferencePolicies,
+    stage: ReferenceEvaluationStage,
+    spec: ReferenceEvaluationSpec,
+    profile_name: str,
+    budget_fingerprint: str,
+) -> None:
+    if qualified.experiment_id != spec.experiment_id:
+        raise ValueError("reference model qualification experiment_id does not match spec")
+    if qualified.stage != stage:
+        raise ValueError("reference model qualification stage does not match requested stage")
+    if qualified.budget_profile != profile_name:
+        raise ValueError("reference model qualification budget profile does not match stage")
+    if qualified.budget_fingerprint != budget_fingerprint:
+        raise ValueError("reference model qualification budget fingerprint does not match stage")
+    if qualified.baseline.policy != spec.baseline_policy:
+        raise ValueError("reference baseline Red policy does not match qualified identity")
+    if qualified.treatment.policy != spec.treatment_policy:
+        raise ValueError("reference treatment Red policy does not match qualified identity")
+
+
 def _start_arm(
     *,
     arm: AblationArm,
@@ -349,6 +432,9 @@ def _start_arm(
     manifest: HeldOutEvaluationManifest,
     spec: ReferenceEvaluationSpec,
     stage: ReferenceEvaluationStage,
+    qualified_policy: ArtifactQualifiedCampaignPolicies | None = None,
+    judge_policy_descriptor: object | None = None,
+    reference_qualification_sha256: str | None = None,
 ) -> _ArmRuntime:
     ledger = BudgetLedger(effective_budget)
     red_runtime = RedStrategyRuntime(
@@ -362,20 +448,34 @@ def _start_arm(
         model_client=red_model_client,
         budget=ledger,
     )
-    configuration_hash = _canonical_hash(
-        {
-            "reference_experiment": spec.experiment_id,
-            "stage": stage.value,
-            "arm": arm.value,
-            "target_snapshot_id": repository.target_snapshot_id(target.identity),
-            "budget_profile": budget_profile,
-            "budget_fingerprint": budget_fingerprint,
-            "attack_policy_fingerprint": policy_fingerprint,
-            "judge_policy_fingerprint": judge_fingerprint,
-            "evaluation_manifest_hash": manifest.content_hash,
-            "metric_definition_version": METRIC_DEFINITION_VERSION,
-        }
-    )
+    if qualified_policy is not None:
+        if not isinstance(judge_policy_descriptor, Mapping):
+            raise ValueError("artifact-qualified reference Judge descriptor must be a mapping")
+        validate_qualified_runtime_policy_descriptors(
+            qualified=qualified_policy,
+            attack_policy_descriptor=red_runtime.descriptor(),
+            judge_policy_descriptor=judge_policy_descriptor,
+        )
+        if qualified_policy.red_model_roles is None:
+            raise ValueError("artifact-qualified reference arm is missing Red model roles")
+
+    configuration_payload: dict[str, object] = {
+        "reference_experiment": spec.experiment_id,
+        "stage": stage.value,
+        "arm": arm.value,
+        "target_snapshot_id": repository.target_snapshot_id(target.identity),
+        "budget_profile": budget_profile,
+        "budget_fingerprint": budget_fingerprint,
+        "attack_policy_fingerprint": policy_fingerprint,
+        "judge_policy_fingerprint": judge_fingerprint,
+        "evaluation_manifest_hash": manifest.content_hash,
+        "metric_definition_version": METRIC_DEFINITION_VERSION,
+    }
+    if reference_qualification_sha256 is not None:
+        configuration_payload["reference_qualification_sha256"] = (
+            reference_qualification_sha256
+        )
+    configuration_hash = _canonical_hash(configuration_payload)
     target_snapshot_id = repository.target_snapshot_id(target.identity)
     repository.start_campaign(
         campaign_id=campaign_id,
@@ -383,18 +483,36 @@ def _start_arm(
         configuration_hash=configuration_hash,
         metric_definition_version=METRIC_DEFINITION_VERSION,
     )
-    measurement = build_evaluation_campaign_measurement_snapshot(
-        campaign_id=campaign_id,
-        target_snapshot_id=target_snapshot_id,
-        campaign_configuration_hash=configuration_hash,
-        metric_definition_version=METRIC_DEFINITION_VERSION,
-        protocol=held_out_evaluation_protocol(),
-        attack_policy_fingerprint=policy_fingerprint,
-        manifest=manifest,
-        judge_policy_fingerprint=judge_fingerprint,
-        budget_fingerprint=budget_fingerprint,
-    )
-    measurement_hash = save_campaign_measurement_snapshot(repository.engine, measurement)
+    try:
+        if qualified_policy is not None:
+            assert qualified_policy.red_model_roles is not None
+            provenance = build_campaign_model_role_provenance(
+                campaign_id=campaign_id,
+                policy_scope=ModelRolePolicyScope.ATTACK,
+                role_set=qualified_policy.red_model_roles,
+            )
+            save_campaign_model_role_provenance(repository.engine, provenance)
+
+        measurement = build_evaluation_campaign_measurement_snapshot(
+            campaign_id=campaign_id,
+            target_snapshot_id=target_snapshot_id,
+            campaign_configuration_hash=configuration_hash,
+            metric_definition_version=METRIC_DEFINITION_VERSION,
+            protocol=held_out_evaluation_protocol(),
+            attack_policy_fingerprint=policy_fingerprint,
+            manifest=manifest,
+            judge_policy_fingerprint=judge_fingerprint,
+            budget_fingerprint=budget_fingerprint,
+        )
+        measurement_hash = save_campaign_measurement_snapshot(repository.engine, measurement)
+    except Exception:
+        finish_campaign(
+            repository.engine,
+            campaign_id=campaign_id,
+            status=CampaignTerminalStatus.FAILED,
+        )
+        raise
+
     return _ArmRuntime(
         arm=arm,
         policy_fingerprint=policy_fingerprint,
