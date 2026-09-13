@@ -47,9 +47,16 @@ Layer-aware memory is Red search diagnostics and attacker state. It is not a Blu
 
 A contained model compromise remains a model compromise and not a system compromise. The new memory exists to make Red search more effective at finding the latter without weakening that distinction.
 
+## Known follow-up: successful-path credit
+
+This ADR adds aggregate compromise-layer memory but does not redefine branch/sequence success credit inside `AdaptiveRedStrategy.learn()` or `MechanismAwareAdaptiveRedStrategy.learn()`. Those strategies currently use the first generic objective-violation turn as the successful logical-path endpoint. For an AGENT run that reaches `MODEL_COMPROMISE` and later reaches `SYSTEM_COMPROMISE`, that endpoint can stop too early and omit the later system-escalation step from successful tactic/mechanism credit.
+
+Issue #75 tracks the required follow-up: post-run DISCOVERY credit should prefer the first confirmed system-compromise turn, then the first model-compromise turn, while preserving branch lineage and the live Judge boundary. PR #74 must not be interpreted as resolving that separate genealogy-credit issue.
+
 ## Consequences
 
 - Red can learn that one family reliably reaches the model layer but not the system layer and can adapt later discovery trials accordingly.
 - The feature improves AGENT discovery without leaking a Judge oracle into the current conversation.
 - Multi-attacker variants continue to own separate learning memories, so one attacker does not receive another attacker's private search state.
 - Fixed held-out evaluation remains comparable because cross-trial learning is still frozen.
+- System-layer successful-path credit remains a separate, explicit high-priority task rather than a hidden limitation.
