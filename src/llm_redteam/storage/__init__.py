@@ -32,6 +32,14 @@ from .measurement_repository import (
     load_campaign_measurement_snapshot,
     save_campaign_measurement_snapshot,
 )
+from .model_role_models import CampaignModelRoleQualificationRow
+from .model_role_repository import (
+    CampaignModelRoleProvenance,
+    ModelRolePolicyScope,
+    build_campaign_model_role_provenance,
+    load_campaign_model_role_provenance,
+    save_campaign_model_role_provenance,
+)
 from .models import Base
 from .repository import ExperimentRepository
 
@@ -39,14 +47,18 @@ __all__ = [
     "Base",
     "CampaignMeasurementProtocolRow",
     "CampaignMeasurementSnapshot",
+    "CampaignModelRoleProvenance",
+    "CampaignModelRoleQualificationRow",
     "EvaluationSetManifestRow",
     "ExperimentRepository",
     "JudgeCalibrationObservationRow",
     "JudgeCalibrationRunRow",
+    "ModelRolePolicyScope",
     "RedAblationExperimentRow",
     "RedAblationExperimentSnapshot",
     "RedAblationObservationRow",
     "build_campaign_measurement_snapshot",
+    "build_campaign_model_role_provenance",
     "build_evaluation_campaign_measurement_snapshot",
     "build_red_ablation_experiment_snapshot",
     "fingerprint_attack_policy",
@@ -55,12 +67,14 @@ __all__ = [
     "fingerprint_corpus_snapshot",
     "fingerprint_judge_policy",
     "load_campaign_measurement_snapshot",
+    "load_campaign_model_role_provenance",
     "load_evaluation_set_manifest",
     "load_evaluation_set_manifest_by_id",
     "load_judge_calibration",
     "load_red_ablation_experiment",
     "load_red_ablation_observations",
     "save_campaign_measurement_snapshot",
+    "save_campaign_model_role_provenance",
     "save_evaluation_set_manifest",
     "save_judge_calibration",
     "save_red_ablation_experiment",
