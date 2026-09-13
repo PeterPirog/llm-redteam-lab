@@ -133,11 +133,26 @@ def test_persisted_offline_report_reloads_only_when_hashes_match(tmp_path: Path)
     report = _report()
     _write_report(path, report)
 
-    loaded = load_offline_ollama_qualification_report(path)
+    loaded = load_offline_ollama_qualification_report(
+        path,
+        expected_report_sha256=report.report_sha256,
+    )
 
     assert loaded == report
     assert loaded.report_sha256 == report.report_sha256
     assert loaded.artifact_set_sha256 == report.artifact_set_sha256
+
+
+def test_persisted_report_rejects_wrong_independently_pinned_hash(tmp_path: Path) -> None:
+    path = tmp_path / "qualification-report.json"
+    report = _report()
+    _write_report(path, report)
+
+    with pytest.raises(ValueError, match="does not match pinned report hash"):
+        load_offline_ollama_qualification_report(
+            path,
+            expected_report_sha256="0" * 64,
+        )
 
 
 def test_modified_persisted_report_is_rejected_before_admission(tmp_path: Path) -> None:
@@ -151,6 +166,18 @@ def test_modified_persisted_report_is_rejected_before_admission(tmp_path: Path) 
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ValueError, match="artifact_set_sha256"):
+        load_offline_ollama_qualification_report(path)
+
+
+def test_persisted_report_rejects_observation_inventory_hash_drift(tmp_path: Path) -> None:
+    path = tmp_path / "qualification-report.json"
+    report = _report()
+    payload = report.model_dump(mode="json")
+    payload["artifacts"][0]["observation"]["source_response_sha256"] = "0" * 64
+    modified = OfflineOllamaQualificationReport.model_validate(payload)
+    _write_report(path, modified)
+
+    with pytest.raises(ValueError, match="observation does not match inventory hash"):
         load_offline_ollama_qualification_report(path)
 
 
@@ -171,8 +198,8 @@ def test_bundle_maps_models_config_to_exact_artifacts_not_role_labels() -> None:
     )
 
     assert tuple(item.participant for item in bundle.red_roles) == (
-        LocalReferenceParticipant.RED_MUTATOR,
         LocalReferenceParticipant.RED_PLANNER,
+        LocalReferenceParticipant.RED_MUTATOR,
     )
     by_participant = {item.participant: item for item in bundle.red_roles}
     assert by_participant[LocalReferenceParticipant.RED_PLANNER].model == "planner:latest"
