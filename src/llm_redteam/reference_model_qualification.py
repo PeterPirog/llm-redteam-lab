@@ -1,12 +1,12 @@
 """Exact model-artifact identity for paired Reference Evaluation Red arms.
 
 Reference Evaluation v1 compares two Red search policies under a paired/counterbalanced
-experimental design.  The changed component is the Red search policy, not the underlying
-attacker model.  Both arms therefore must be bound to the same exact planner/mutator
+experimental design. The changed component is the Red search policy, not the underlying
+attacker model. Both arms therefore must be bound to the same exact planner/mutator
 artifacts and the same Judge policy before their attack-policy fingerprints are admitted
 into the paired experiment contract.
 
-This module performs no inference and no provider/network operation.  It consumes already
+This module performs no inference and no provider/network operation. It consumes already
 verified ``ModelArtifactIdentity`` objects.
 """
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
 from .campaign_plan import RedPolicyKind
@@ -33,6 +33,7 @@ from .reference_evaluation import ReferenceEvaluationSpec, ReferenceEvaluationSt
 from .runtime_config import BudgetConfigDocument
 from .storage.measurement_repository import fingerprint_budget
 
+_HASH_PATTERN = r"^[0-9a-f]{64}$"
 _REQUIRED_RED_ROLES = (ModelRole.RED_PLANNER, ModelRole.RED_MUTATOR)
 
 
@@ -47,14 +48,17 @@ class ArtifactQualifiedReferenceArm(StrictModel):
     def arm_has_exact_red_only_model_roles(self) -> ArtifactQualifiedReferenceArm:
         if not self.policy.model_backed:
             raise ValueError("reference arm requires a model-backed Red policy")
-        if self.qualified_policies.required_model_roles != tuple(
-            sorted(_REQUIRED_RED_ROLES, key=lambda role: role.value)
-        ):
-            raise ValueError("reference arm must qualify exactly Red planner and mutator roles")
+        expected_roles = tuple(sorted(_REQUIRED_RED_ROLES, key=lambda role: role.value))
+        if self.qualified_policies.required_model_roles != expected_roles:
+            raise ValueError(
+                "reference arm must qualify exactly Red planner and mutator roles"
+            )
         if self.qualified_policies.red_model_roles is None:
             raise ValueError("reference arm is missing Red model-role qualification")
         if self.qualified_policies.judge_model_roles is not None:
-            raise ValueError("Reference Evaluation v1 deterministic Judge has no model artifact")
+            raise ValueError(
+                "Reference Evaluation v1 deterministic Judge has no model artifact"
+            )
         return self
 
     @property
@@ -76,10 +80,11 @@ class ArtifactQualifiedReferenceArm(StrictModel):
 class ArtifactQualifiedReferencePolicies(StrictModel):
     """Paired reference identity with model artifacts held constant across arms."""
 
-    version: int = 1
+    version: int = Field(ge=1, default=1)
+    experiment_id: str = Field(min_length=1)
     stage: ReferenceEvaluationStage
-    budget_profile: str
-    budget_fingerprint: str
+    budget_profile: str = Field(min_length=1)
+    budget_fingerprint: str = Field(pattern=_HASH_PATTERN)
     baseline: ArtifactQualifiedReferenceArm
     treatment: ArtifactQualifiedReferenceArm
 
@@ -93,14 +98,25 @@ class ArtifactQualifiedReferencePolicies(StrictModel):
             raise ValueError("treatment reference arm has incorrect arm identity")
         if self.baseline.policy == self.treatment.policy:
             raise ValueError("reference arms must use different Red search policies")
-        if self.baseline.red_model_role_set_sha256 != self.treatment.red_model_role_set_sha256:
+        if (
+            self.baseline.red_model_role_set_sha256
+            != self.treatment.red_model_role_set_sha256
+        ):
             raise ValueError(
                 "paired reference arms must use the same exact Red model artifacts"
             )
-        if self.baseline.judge_policy_fingerprint != self.treatment.judge_policy_fingerprint:
+        if (
+            self.baseline.judge_policy_fingerprint
+            != self.treatment.judge_policy_fingerprint
+        ):
             raise ValueError("paired reference arms must use the same Judge policy")
-        if self.baseline.attack_policy_fingerprint == self.treatment.attack_policy_fingerprint:
-            raise ValueError("different reference Red policies must have distinct fingerprints")
+        if (
+            self.baseline.attack_policy_fingerprint
+            == self.treatment.attack_policy_fingerprint
+        ):
+            raise ValueError(
+                "different reference Red policies must have distinct fingerprints"
+            )
         return self
 
     @property
@@ -115,14 +131,20 @@ class ArtifactQualifiedReferencePolicies(StrictModel):
     def qualification_sha256(self) -> str:
         return canonical_json_hash(self.model_dump(mode="json"))
 
-    def paired_contract_inputs(self) -> dict[str, str]:
-        """Return exact fingerprints consumed by the paired ablation contract."""
+    def ablation_contract_fingerprints(self) -> dict[str, str]:
+        """Return only fingerprint fields accepted by ``PairedRedAblationContract``."""
 
         return {
             "baseline_policy_fingerprint": self.baseline.attack_policy_fingerprint,
             "treatment_policy_fingerprint": self.treatment.attack_policy_fingerprint,
             "judge_fingerprint": self.judge_policy_fingerprint,
             "budget_fingerprint": self.budget_fingerprint,
+        }
+
+    def provenance_identity(self) -> dict[str, str]:
+        """Return additional exact identity retained alongside the paired contract."""
+
+        return {
             "red_model_role_set_sha256": self.red_model_role_set_sha256,
             "reference_qualification_sha256": self.qualification_sha256,
         }
@@ -139,7 +161,7 @@ def qualify_reference_model_policies(
 ) -> ArtifactQualifiedReferencePolicies:
     """Prepare both paired Red arms with exact artifacts and one deterministic Judge.
 
-    Reference Evaluation v1 intentionally requires a deterministic canary Judge.  A
+    Reference Evaluation v1 intentionally requires a deterministic canary Judge. A
     model-backed Judge would add a second model-artifact treatment dimension and must be
     introduced by a future reference protocol version rather than silently here.
     """
@@ -151,7 +173,9 @@ def qualify_reference_model_policies(
     if judge_policy_descriptor.get("kind") != "deterministic":
         raise ValueError("Reference Evaluation v1 Judge descriptor must be deterministic")
     if "model_role_artifacts" in judge_policy_descriptor:
-        raise ValueError("deterministic Reference Evaluation Judge cannot bind model artifacts")
+        raise ValueError(
+            "deterministic Reference Evaluation Judge cannot bind model artifacts"
+        )
 
     profile_name = (
         spec.smoke_budget_profile
@@ -181,6 +205,7 @@ def qualify_reference_model_policies(
     )
 
     return ArtifactQualifiedReferencePolicies(
+        experiment_id=spec.experiment_id,
         stage=stage,
         budget_profile=resolved_profile,
         budget_fingerprint=budget_fingerprint,
