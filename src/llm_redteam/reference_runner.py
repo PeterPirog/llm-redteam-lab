@@ -20,7 +20,10 @@ from uuid import uuid4
 from .budget import BudgetLedger
 from .campaign_plan import RedPolicyKind
 from .campaigns.lifecycle import METRIC_DEFINITION_VERSION
-from .campaigns.model_qualification import ArtifactQualifiedCampaignPolicies
+from .campaigns.model_qualification import (
+    ArtifactQualifiedCampaignPolicies,
+    validate_qualified_runtime_policy_descriptors,
+)
 from .campaigns.multiturn import ConversationRunResult, MultiTurnCampaignEngine
 from .domain import AttackCase, CampaignBudget
 from .evaluation_protocol import held_out_evaluation_protocol
@@ -448,8 +451,6 @@ def _start_arm(
     if qualified_policy is not None:
         if not isinstance(judge_policy_descriptor, Mapping):
             raise ValueError("artifact-qualified reference Judge descriptor must be a mapping")
-        from .campaigns.model_qualification import validate_qualified_runtime_policy_descriptors
-
         validate_qualified_runtime_policy_descriptors(
             qualified=qualified_policy,
             attack_policy_descriptor=red_runtime.descriptor(),
@@ -458,21 +459,23 @@ def _start_arm(
         if qualified_policy.red_model_roles is None:
             raise ValueError("artifact-qualified reference arm is missing Red model roles")
 
-    configuration_hash = _canonical_hash(
-        {
-            "reference_experiment": spec.experiment_id,
-            "stage": stage.value,
-            "arm": arm.value,
-            "target_snapshot_id": repository.target_snapshot_id(target.identity),
-            "budget_profile": budget_profile,
-            "budget_fingerprint": budget_fingerprint,
-            "attack_policy_fingerprint": policy_fingerprint,
-            "judge_policy_fingerprint": judge_fingerprint,
-            "evaluation_manifest_hash": manifest.content_hash,
-            "reference_qualification_sha256": reference_qualification_sha256,
-            "metric_definition_version": METRIC_DEFINITION_VERSION,
-        }
-    )
+    configuration_payload: dict[str, object] = {
+        "reference_experiment": spec.experiment_id,
+        "stage": stage.value,
+        "arm": arm.value,
+        "target_snapshot_id": repository.target_snapshot_id(target.identity),
+        "budget_profile": budget_profile,
+        "budget_fingerprint": budget_fingerprint,
+        "attack_policy_fingerprint": policy_fingerprint,
+        "judge_policy_fingerprint": judge_fingerprint,
+        "evaluation_manifest_hash": manifest.content_hash,
+        "metric_definition_version": METRIC_DEFINITION_VERSION,
+    }
+    if reference_qualification_sha256 is not None:
+        configuration_payload["reference_qualification_sha256"] = (
+            reference_qualification_sha256
+        )
+    configuration_hash = _canonical_hash(configuration_payload)
     target_snapshot_id = repository.target_snapshot_id(target.identity)
     repository.start_campaign(
         campaign_id=campaign_id,
@@ -480,27 +483,36 @@ def _start_arm(
         configuration_hash=configuration_hash,
         metric_definition_version=METRIC_DEFINITION_VERSION,
     )
-    if qualified_policy is not None:
-        assert qualified_policy.red_model_roles is not None
-        provenance = build_campaign_model_role_provenance(
-            campaign_id=campaign_id,
-            policy_scope=ModelRolePolicyScope.ATTACK,
-            role_set=qualified_policy.red_model_roles,
-        )
-        save_campaign_model_role_provenance(repository.engine, provenance)
+    try:
+        if qualified_policy is not None:
+            assert qualified_policy.red_model_roles is not None
+            provenance = build_campaign_model_role_provenance(
+                campaign_id=campaign_id,
+                policy_scope=ModelRolePolicyScope.ATTACK,
+                role_set=qualified_policy.red_model_roles,
+            )
+            save_campaign_model_role_provenance(repository.engine, provenance)
 
-    measurement = build_evaluation_campaign_measurement_snapshot(
-        campaign_id=campaign_id,
-        target_snapshot_id=target_snapshot_id,
-        campaign_configuration_hash=configuration_hash,
-        metric_definition_version=METRIC_DEFINITION_VERSION,
-        protocol=held_out_evaluation_protocol(),
-        attack_policy_fingerprint=policy_fingerprint,
-        manifest=manifest,
-        judge_policy_fingerprint=judge_fingerprint,
-        budget_fingerprint=budget_fingerprint,
-    )
-    measurement_hash = save_campaign_measurement_snapshot(repository.engine, measurement)
+        measurement = build_evaluation_campaign_measurement_snapshot(
+            campaign_id=campaign_id,
+            target_snapshot_id=target_snapshot_id,
+            campaign_configuration_hash=configuration_hash,
+            metric_definition_version=METRIC_DEFINITION_VERSION,
+            protocol=held_out_evaluation_protocol(),
+            attack_policy_fingerprint=policy_fingerprint,
+            manifest=manifest,
+            judge_policy_fingerprint=judge_fingerprint,
+            budget_fingerprint=budget_fingerprint,
+        )
+        measurement_hash = save_campaign_measurement_snapshot(repository.engine, measurement)
+    except Exception:
+        finish_campaign(
+            repository.engine,
+            campaign_id=campaign_id,
+            status=CampaignTerminalStatus.FAILED,
+        )
+        raise
+
     return _ArmRuntime(
         arm=arm,
         policy_fingerprint=policy_fingerprint,
