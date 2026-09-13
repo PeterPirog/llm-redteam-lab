@@ -19,10 +19,11 @@ from .campaign_plan import (
     load_evaluation_manifest,
     preflight_campaign,
 )
-from .campaigns.lifecycle import deterministic_judge_policy_descriptor
+from .campaigns.lifecycle import METRIC_DEFINITION_VERSION, deterministic_judge_policy_descriptor
 from .corpus import load_corpus_files
 from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
+from .inference_contract import InferenceScope
 from .judges.deterministic import DeterministicJudge
 from .model_client import OpenAICompatibleRoleModelClient
 from .model_roles import ModelRole, load_models_config
@@ -43,6 +44,11 @@ DEFAULT_REFERENCE_EVALUATION_CORPUS = Path("corpus/native/multiturn/synthetic-se
 DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
+_REFERENCE_FIXED_CORPUS_INTERPRETATION = (
+    "Rates and paired effects describe the exact held-out evaluation manifest under the "
+    "recorded target, Red policy, Judge and budget conditions. They do not by themselves "
+    "estimate vulnerability over a broader population of possible attacks."
+)
 
 app = typer.Typer(
     name="llm-redteam",
@@ -313,6 +319,13 @@ def _reference_result_payload(result: ReferenceEvaluationRunResult) -> dict[str,
         "target_snapshot_id": result.report.contract.target_snapshot_id,
         "evaluation_manifest_hash": result.manifest.content_hash,
         "pair_count": result.report.pair_count,
+        "measurement_claim": {
+            "inference_scope": InferenceScope.FIXED_CORPUS.value,
+            "generalized_claim_supported": False,
+            "metric_definition_version": METRIC_DEFINITION_VERSION,
+            "statistical_unit": "case_replicate_pair",
+            "interpretation": _REFERENCE_FIXED_CORPUS_INTERPRETATION,
+        },
         "baseline": {
             "attack_success_rate": baseline.attack_success_rate.value,
             "model_compromise_rate": baseline.model_compromise_rate.value,
@@ -343,6 +356,13 @@ def _print_reference_result(payload: dict[str, object]) -> None:
     table.add_row("Stage", str(payload["stage"]))
     table.add_row("Experiment", str(payload["experiment_id"]))
     table.add_row("Pairs", str(payload["pair_count"]))
+    claim = payload["measurement_claim"]
+    assert isinstance(claim, dict)
+    table.add_row("Inference scope", str(claim["inference_scope"]))
+    table.add_row(
+        "Generalized claim",
+        "supported" if claim["generalized_claim_supported"] else "not supported",
+    )
     paired = payload["paired"]
     assert isinstance(paired, dict)
     table.add_row("Violation-rate delta", str(paired["objective_violation_rate_delta"]))
