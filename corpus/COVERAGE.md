@@ -1,6 +1,6 @@
 # Corpus Coverage — v3
 
-Last reviewed: 2026-09-12
+Last reviewed: 2026-09-13
 
 This document explains what the current corpus architecture covers and what remains intentionally external, gated, or deferred.
 
@@ -25,7 +25,7 @@ Mechanism coverage includes direct override, persona/role play, static templates
 
 Utility/control coverage includes benign controls and over-refusal controls.
 
-Adaptive Red also has an explicit fixed multi-attacker measurement contract. It keeps ordinary per-attacker ASR at the bounded-conversation trial level while separately measuring the discovery yield of a predeclared attacker pool across identical case/replicate opportunities. Finding diversity requires evidence-backed finding fingerprints rather than prompt-surface differences, and attacker overlap/marginal finding contribution are reported as Red diagnostics rather than Blue-security metrics. Live multi-attacker inference routing remains a later milestone.
+Adaptive Red has an explicit fixed multi-attacker measurement and execution contract. Ordinary per-attacker ASR remains at the bounded-conversation trial level while portfolio discovery is measured separately across identical case/replicate opportunities. Configured attacker variants route their own planner/mutator models, keep separate transcript-free learning memories and share one campaign/global budget. Full-cross attacker × case × replicate assignments are persisted before inference so interruption cannot silently remove hard trials. Finding diversity requires evidence-backed finding fingerprints rather than prompt-surface differences, and attacker overlap/marginal contribution remain Red diagnostics rather than Blue-security metrics. Provider availability `fallback` is not treated as an attacker ensemble.
 
 ## Reasoning
 
@@ -69,7 +69,13 @@ A forbidden request can establish `MODEL_COMPROMISE`. `SYSTEM_COMPROMISE` requir
 
 The native MCP fixture is synthetic/local and disabled by default. `McpContextOpenCodeTarget` provides a concrete local stdio transport for attested OpenCode targets: fixture content is staged outside the Blue workspace, hash-verified by a one-tool MCP server, and never concatenated into the direct user prompt. The current compatibility profile targets handshake-era MCP through `2025-11-25`, matching the current OpenCode MCP client generation.
 
-The Docker sandbox layer now includes an evidence contract, a trusted lifecycle supervisor and an ownership-bound OpenCode runtime health gate. The profile generates a digest-pinned offline launch contract and independently verifies normalized `docker inspect` evidence before issuing a hash-only sandbox attestation. The verifier requires `network=none`, read-only root filesystem, `cap-drop ALL`, `no-new-privileges`, bounded CPU/memory/PIDs, non-privileged execution, automatic removal and exactly one writable bind mount for the disposable workspace. `DockerProcessSupervisor` launches detached containers, proves launch-ID/inspect-ID ownership before attestation, refuses cleanup by an unproven name, performs ownership-checked teardown and verifies removal. The health gate probes the documented OpenCode `/global/health` endpoint from inside the owned container, re-verifies ownership after the response and requires the observed application version to match the declared target configuration. CI exercises these contracts through fake command runners, so no Docker daemon or model inference is needed. The offline profile remains intentionally too restrictive for a real OpenCode-to-model connection.
+The offline Docker sandbox path includes an evidence contract, a trusted lifecycle supervisor and an ownership-bound OpenCode runtime health gate. The profile generates a digest-pinned launch contract and independently verifies normalized `docker inspect` evidence before issuing a hash-only sandbox attestation. The verifier requires `network=none`, read-only root filesystem, `cap-drop ALL`, `no-new-privileges`, bounded CPU/memory/PIDs, non-privileged execution, automatic removal and exactly one writable bind mount for the disposable workspace. `DockerProcessSupervisor` proves launch-ID/inspect-ID ownership, refuses cleanup by an unproven name, performs ownership-checked teardown and verifies removal. The health gate probes OpenCode `/global/health` inside the exact owned container, re-verifies ownership after the response and requires the observed application version to match the declared target configuration.
+
+The merged networked AGENT path preserves those confinement properties while replacing unrestricted Docker connectivity with an independently attestable model-only topology. An internal user-defined bridge requires isolated gateway mode, IPv6 disabled, exactly two running peers (one Blue AGENT and one declared model peer), no dual-homing and no unexpected members. A trusted network supervisor binds the exact network ID and Docker Engine admission evidence. `DockerNetworkedAgentSupervisor` then proves exact AGENT ownership and composes container confinement with the exact-peer network attestation.
+
+OpenCode control traffic no longer requires a published host port. `DockerExecHttpTransport` performs loopback HTTP through ownership-checked `docker exec`, verifies the container before and after each request and keeps Basic-auth secrets inside the container. `DockerExecOpenCodeTarget` binds that stable transport policy into target identity while keeping per-run container IDs as evidence only.
+
+A provider-independent `DockerModelPeerProfile` now defines digest-pinned model-service images, argument-vector launch/readiness commands, bounded resources, explicit GPU admission and no host ports or host mounts. The Ollama adapter additionally has a manifest-bound `ModelArtifactIdentity`: a mutable model name is not sufficient regression identity, and the local inventory digest is treated as a separate artifact identity. Minimal verified bundle staging/read-only mounting and the final composed trial lease remain active work rather than merged capability.
 
 ## Image generation
 
@@ -112,16 +118,19 @@ The following are not silently enabled:
 
 ## Current implementation frontier
 
-The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, mechanism-portfolio search, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, fixed multi-attacker discovery estimands, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, a provenance-preserving local MCP fixture transport for attested OpenCode targets, an independently verifiable offline Docker sandbox-attestation contract, a trusted ownership-aware Docker process supervisor and an OpenCode runtime health/version gate.
+The core Target -> Attack -> Execution -> Evidence -> Judgment -> Persistence loop is implemented, including adaptive multi-turn Red, branch-aware learning, target-visible stagnation handling, mechanism-portfolio search, held-out evaluation, paired Red ablation, censoring-aware and layer-aware time-to-compromise metrics, system-state verification, Red exploration coverage, explicit multi-attacker routing under a shared campaign budget, fixed full-cross multi-attacker discovery estimands, per-trial target isolation, staged reference-evaluation contracts, immutable environment fixtures, hash-bound held-out external attack inputs, a deterministic RAG PIPELINE reference target, a provenance-preserving local MCP fixture transport, independently verifiable offline and model-network Docker confinement, ownership-aware networked AGENT launch, loopback-only OpenCode control transport, provider-independent model-peer lifecycle and manifest-bound local model artifact identity.
+
+Several follow-up changes are implemented on open branches but are **not** part of the merged capability set until CI executes successfully. These include the OpenCode two-phase prelaunch contract, minimal verified Ollama artifact bundle staging, read-only Ollama bundle/model-peer composition, the ownership-aware verified Ollama peer supervisor, fixed-corpus claim metadata at the reference-reporting boundary, and layer-aware post-run Red discovery memory.
 
 Highest-value remaining work is now:
 
-1. wire explicit multi-attacker planner/mutator variants into DISCOVERY execution under one shared campaign budget, without reusing availability `fallback` semantics and without exposing live Judge verdicts;
-2. add a narrowly scoped model-connectivity design that preserves external-network denial and supplies independently verifiable network evidence, rather than falling back to Docker's Internet-capable default bridge;
-3. bind host-side disposable workspace paths to container-visible OpenCode paths without treating those different namespaces as the same identity field;
-4. execute and persist the first local Reference Evaluation v1 smoke, then qualification only if instrumentation is valid;
-5. run a bounded local OpenCode+MCP smoke that proves hostile fixture data reaches Blue only as a tool result and that model compromise remains distinct from blocked system effects;
-6. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
-7. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
-8. add a predeclared statistical backend before any generalized-population security claim is allowed;
-9. broaden multimodal/image-generation evidence and regression coverage without weakening provider independence.
+1. restore real GitHub Actions runner execution and validate the open runtime/measurement PRs before any merge; runner-less `steps=[]` failures are not treated as code evidence;
+2. complete the verified Ollama artifact path and compose network -> model peer -> networked OpenCode AGENT -> health/version proof into a Docker-backed `DISPOSABLE_SANDBOX` `TargetTrialLeaseProvider`, with reverse-order ownership-checked teardown;
+3. make post-run successful-path credit for AGENT discovery extend through the first confirmed system compromise when model compromise occurred earlier, without exposing Judge outcomes during the live conversation;
+4. bind host-side disposable workspace identity to the container-visible OpenCode workspace without equating paths from different namespaces;
+5. execute and persist the first local Reference Evaluation v1 instrumentation smoke, then run qualification only if instrumentation is valid;
+6. run a bounded local OpenCode+MCP smoke proving hostile fixture data reaches Blue only through the declared tool-result channel and that a blocked unauthorized effect remains model compromise rather than system compromise;
+7. expand Judge reliability stress tests under adversarial framing, distribution shift and disagreement;
+8. normalize additional external benchmark records with provenance/licensing gates rather than copying ad hoc payload collections;
+9. add a predeclared statistical backend before any generalized-population security claim is allowed; fixed-corpus rates must not be silently reinterpreted as population estimates;
+10. broaden multimodal/image-generation evidence and regression coverage without weakening provider independence.
