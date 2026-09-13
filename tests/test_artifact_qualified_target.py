@@ -7,6 +7,7 @@ from llm_redteam.model_artifact import ModelArtifactIdentity
 from llm_redteam.storage.repository import ExperimentRepository
 from llm_redteam.targets.artifact_qualified import (
     ArtifactQualifiedTarget,
+    TargetModelReference,
     bind_target_model_artifact,
     qualify_target_identity,
 )
@@ -27,6 +28,21 @@ def _target_identity(*, model_digest: str | None = None) -> TargetIdentity:
         system_prompt_hash="c" * 64,
         configuration_hash="base-blue-config-v1",
         capabilities=frozenset({"text"}),
+    )
+
+
+def _agent_identity() -> TargetIdentity:
+    return TargetIdentity(
+        id="opencode-blue",
+        target_class=TargetClass.CODING,
+        target_mode=TargetMode.AGENT,
+        model="ollama/qwen-local",
+        provider="opencode",
+        runtime="docker-exec",
+        application="OpenCode",
+        application_version="1.2.3",
+        configuration_hash="opencode-config-v1",
+        capabilities=frozenset({"text", "tools", "filesystem"}),
     )
 
 
@@ -81,7 +97,7 @@ def test_same_base_configuration_and_artifact_produce_stable_identity() -> None:
 @pytest.mark.parametrize(
     ("target", "artifact", "message"),
     [
-        (_target_identity(), _artifact(provider="other"), "provider"),
+        (_target_identity(), _artifact(provider="other"), "model provider"),
         (_target_identity(), _artifact(model="other:latest"), "model ID"),
         (
             _target_identity(model_digest="sha256:" + "d" * 64),
@@ -98,6 +114,46 @@ def test_target_artifact_binding_rejects_identity_or_locality_drift(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         bind_target_model_artifact(target=target, artifact=artifact)
+
+
+def test_application_target_requires_explicit_underlying_model_reference() -> None:
+    agent = _agent_identity()
+    artifact = _artifact(model="qwen-local")
+
+    with pytest.raises(ValueError, match="requires an explicit model reference"):
+        bind_target_model_artifact(target=agent, artifact=artifact)
+
+    reference = TargetModelReference.application_model(
+        provider_id="ollama",
+        model_id="qwen-local",
+    )
+    qualified = qualify_target_identity(
+        target=agent,
+        artifact=artifact,
+        model_reference=reference,
+    )
+
+    assert qualified.provider == "opencode"
+    assert qualified.model == "ollama/qwen-local"
+    assert qualified.model_digest == artifact.artifact_digest
+    assert qualified.configuration_hash != agent.configuration_hash
+
+
+def test_application_provider_is_not_confused_with_model_artifact_provider() -> None:
+    reference = TargetModelReference.application_model(
+        provider_id="ollama",
+        model_id="qwen-local",
+    )
+    binding = bind_target_model_artifact(
+        target=_agent_identity(),
+        artifact=_artifact(model="qwen-local"),
+        model_reference=reference,
+    )
+
+    assert binding.target_provider == "opencode"
+    assert binding.provider_id == "ollama"
+    assert binding.model_id == "qwen-local"
+    assert binding.model_reference_sha256 == reference.reference_sha256
 
 
 def test_remote_artifact_may_be_bound_only_when_caller_explicitly_allows_it() -> None:
