@@ -5,13 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from llm_redteam.domain import (
-    AttackCase,
-    CampaignBudget,
-    TargetClass,
-    TargetIdentity,
-    TargetMode,
-)
+from llm_redteam.domain import CampaignBudget, TargetClass, TargetIdentity, TargetMode
 from llm_redteam.model_artifact import ModelArtifactIdentity
 from llm_redteam.model_roles import ModelsConfig
 from llm_redteam.red.qualification import RedPolicyQualificationPolicy
@@ -163,7 +157,10 @@ def test_reference_blue_admission_binds_exact_local_artifact() -> None:
     assert admission.experiment_id == "reference-blue-artifact-v1"
     assert admission.target_configuration_hash == target.identity.configuration_hash
     assert admission.model_artifact_digest == "sha256:" + "a" * 64
-    assert admission.model_artifact_identity_sha256 == target.binding.artifact_identity_sha256
+    assert (
+        admission.model_artifact_identity_sha256
+        == target.binding.artifact_identity_sha256
+    )
     assert admission.model_artifact_binding_sha256 == target.binding.binding_sha256
     assert admission.local_artifact is True
     assert admission.require_local is True
@@ -174,7 +171,10 @@ def test_reference_blue_admission_rejects_unqualified_target() -> None:
     ordinary = _Target()
 
     with pytest.raises(TypeError, match="artifact-qualified Blue target"):
-        build_reference_blue_artifact_admission(spec=_spec(), target=ordinary)  # type: ignore[arg-type]
+        build_reference_blue_artifact_admission(  # type: ignore[arg-type]
+            spec=_spec(),
+            target=ordinary,
+        )
 
     assert ordinary.calls == 0
 
@@ -205,11 +205,16 @@ def test_mutable_blue_tag_weight_change_changes_reference_admission_identity() -
 
     assert first.identity.model == second.identity.model == "blue:latest"
     assert first_admission.model_artifact_digest != second_admission.model_artifact_digest
-    assert first_admission.target_configuration_hash != second_admission.target_configuration_hash
+    assert (
+        first_admission.target_configuration_hash
+        != second_admission.target_configuration_hash
+    )
     assert first_admission.admission_sha256 != second_admission.admission_sha256
 
 
-def test_reference_wrapper_admits_blue_before_delegating_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reference_wrapper_admits_blue_before_delegating_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import llm_redteam.reference_target_qualification as module
 
     target = _qualified_target()
@@ -242,13 +247,18 @@ def test_reference_wrapper_admits_blue_before_delegating_runner(monkeypatch: pyt
     )
 
     assert isinstance(result, ArtifactQualifiedReferenceRunResult)
-    assert result.blue_admission.target_configuration_hash == target.identity.configuration_hash
+    assert (
+        result.blue_admission.target_configuration_hash
+        == target.identity.configuration_hash
+    )
     assert len(delegated) == 1
     assert delegated[0]["target"] is target
     assert target.base_identity.configuration_hash == "base-reference-blue-v1"
 
 
-def test_reference_wrapper_rejects_runner_target_identity_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reference_wrapper_rejects_runner_target_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import llm_redteam.reference_target_qualification as module
 
     target = _qualified_target()
