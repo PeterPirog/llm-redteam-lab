@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,7 +24,15 @@ def _h(char: str) -> str:
     return char * 64
 
 
-def _identity(*, config: str = "agent-config-v1") -> TargetIdentity:
+def _counter_hash(value: int) -> str:
+    return f"{value:064x}"
+
+
+def _identity(
+    *,
+    config: str = "agent-config-v1",
+    application_version: str | None = "1.2.3",
+) -> TargetIdentity:
     return TargetIdentity(
         id="qualified-opencode-agent",
         target_class=TargetClass.CODING,
@@ -32,15 +41,9 @@ def _identity(*, config: str = "agent-config-v1") -> TargetIdentity:
         provider="ollama",
         runtime="opencode-docker",
         application="opencode",
-        application_version="1.2.3",
+        application_version=application_version,
         configuration_hash=config,
-        capabilities=frozenset(
-            {
-                "text",
-                "tools",
-                "runtime_health_verified",
-            }
-        ),
+        capabilities=frozenset({"text", "tools", "runtime_health_verified"}),
     )
 
 
@@ -59,18 +62,29 @@ class _Target:
 class _WorkspaceProvider:
     provider_fingerprint = _h("1")
 
-    def __init__(self, events: list[str], *, fail_release: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        fail_release: bool = False,
+        reuse_workspace: bool = False,
+        reuse_fresh_proof: bool = False,
+    ) -> None:
         self.events = events
         self.fail_release = fail_release
+        self.reuse_workspace = reuse_workspace
+        self.reuse_fresh_proof = reuse_fresh_proof
         self.counter = 0
 
     def acquire(self, *, trial_id: str) -> DisposableAgentWorkspaceLease:
         self.events.append("workspace.acquire")
         self.counter += 1
+        workspace_number = 1 if self.reuse_workspace else self.counter
+        proof_number = 100 if self.reuse_fresh_proof else 100 + self.counter
         return DisposableAgentWorkspaceLease(
             host_path=f"C:/synthetic/workspace-{self.counter}",
-            workspace_id_sha256=_h("2"),
-            fresh_state_proof_sha256=_h("3" if self.counter == 1 else "4"),
+            workspace_id_sha256=_counter_hash(workspace_number),
+            fresh_state_proof_sha256=_counter_hash(proof_number),
         )
 
     def release(
@@ -184,8 +198,6 @@ class _AgentSupervisor:
 
 
 class _TargetFactory:
-    provider_fingerprint = _h("0")
-
     def __init__(
         self,
         events: list[str],
@@ -193,24 +205,28 @@ class _TargetFactory:
         runtime_profile_sha256: str,
         identity_override: TargetIdentity | None = None,
         healthy: bool = True,
+        application_version: str = "1.2.3",
         container_id_sha256: str | None = None,
         sandbox_attestation_sha256: str | None = None,
         fail_release: bool = False,
+        fingerprint_char: str = "0",
     ) -> None:
         self.events = events
         self.runtime_profile_sha256 = runtime_profile_sha256
         self.identity_override = identity_override
         self.healthy = healthy
+        self.application_version = application_version
         self.container_id_sha256 = container_id_sha256
         self.sandbox_attestation_sha256 = sandbox_attestation_sha256
         self.fail_release = fail_release
+        self.provider_fingerprint = _h(fingerprint_char)
 
     def build(self, *, agent_lease: object, expected_identity: TargetIdentity):
         self.events.append("target.build")
         identity = self.identity_override or expected_identity
         health = OpenCodeHealthObservation(
             healthy=self.healthy,
-            application_version="1.2.3",
+            application_version=self.application_version,
             runtime_profile_sha256=self.runtime_profile_sha256,
             sandbox_attestation_sha256=(
                 self.sandbox_attestation_sha256
@@ -283,7 +299,7 @@ def _provider(
         ollama_profile=ollama_profile,
         model_peer_profile=model_peer_profile,
         bundle_contract=bundle_contract,
-        bundle_host_path=__import__("pathlib").Path("C:/synthetic/ollama-bundle"),
+        bundle_host_path=Path("C:/synthetic/ollama-bundle"),
         agent_supervisor=agent,
         agent_profile=agent_profile,
         runtime_profile=runtime_profile,
@@ -292,6 +308,26 @@ def _provider(
         target_factory=target_factory,
     )
     return provider, workspace, network, model, agent, target_factory
+
+
+def _all_acquire_events() -> list[str]:
+    return [
+        "workspace.acquire",
+        "network.create",
+        "model.launch",
+        "agent.launch",
+        "target.build",
+    ]
+
+
+def _all_release_events() -> list[str]:
+    return [
+        "target.release",
+        "agent.release",
+        "model.release",
+        "network.release",
+        "workspace.release",
+    ]
 
 
 def test_provider_attests_disposable_sandbox_and_exact_acquisition_order() -> None:
@@ -311,13 +347,27 @@ def test_provider_attests_disposable_sandbox_and_exact_acquisition_order() -> No
         expected_identity=identity,
         session_mode=SessionMode.REPLAY,
     )
-    assert events == [
-        "workspace.acquire",
-        "network.create",
-        "model.launch",
-        "agent.launch",
-        "target.build",
-    ]
+    assert events == _all_acquire_events()
+
+
+def test_provider_fingerprint_is_stable_and_changes_with_trusted_factory_policy() -> None:
+    first_events: list[str] = []
+    second_events: list[str] = []
+    changed_events: list[str] = []
+    first, _, _, _, _, _ = _provider(first_events)
+    second, _, _, _, _, _ = _provider(second_events)
+    changed_factory = _TargetFactory(
+        changed_events,
+        runtime_profile_sha256=_h("6"),
+        fingerprint_char="9",
+    )
+    changed, _, _, _, _, _ = _provider(
+        changed_events,
+        target_factory=changed_factory,
+    )
+
+    assert first.provider_fingerprint == second.provider_fingerprint
+    assert first.provider_fingerprint != changed.provider_fingerprint
 
 
 def test_resource_names_are_hash_only_and_fresh_proof_changes_between_trials() -> None:
@@ -354,29 +404,77 @@ def test_second_concurrent_lease_is_blocked_before_allocating_resources() -> Non
     assert len(events) == count
 
 
-def test_target_identity_mismatch_rolls_back_every_acquired_layer_in_reverse_order() -> None:
+def test_same_trial_lease_identity_cannot_be_reused_after_release() -> None:
     events: list[str] = []
-    mismatched = _identity(config="different-blue-config")
-    runtime_hash = _h("6")
+    provider, _, _, _, _, _ = _provider(events)
+    identity = _identity()
+    first = provider.acquire(expected_identity=identity, trial_id="trial-reuse")
+    provider.release(first)
+    events.clear()
+
+    with pytest.raises(ValueError, match="lease identity was already used"):
+        provider.acquire(expected_identity=identity, trial_id="trial-reuse")
+
+    assert events == []
+
+
+def test_workspace_identity_reuse_is_rejected_and_only_workspace_is_rolled_back() -> None:
+    events: list[str] = []
+    workspace = _WorkspaceProvider(events, reuse_workspace=True)
+    provider, _, _, _, _, _ = _provider(events, workspace=workspace)
+    identity = _identity()
+    first = provider.acquire(expected_identity=identity, trial_id="trial-workspace-1")
+    provider.release(first)
+    events.clear()
+
+    with pytest.raises(RuntimeError, match="workspace identity was reused"):
+        provider.acquire(expected_identity=identity, trial_id="trial-workspace-2")
+
+    assert events == ["workspace.acquire", "workspace.release"]
+
+
+def test_workspace_fresh_proof_reuse_is_rejected() -> None:
+    events: list[str] = []
+    workspace = _WorkspaceProvider(events, reuse_fresh_proof=True)
+    provider, _, _, _, _, _ = _provider(events, workspace=workspace)
+    identity = _identity()
+    first = provider.acquire(expected_identity=identity, trial_id="trial-proof-1")
+    provider.release(first)
+    events.clear()
+
+    with pytest.raises(RuntimeError, match="fresh-state proof was reused"):
+        provider.acquire(expected_identity=identity, trial_id="trial-proof-2")
+
+    assert events == ["workspace.acquire", "workspace.release"]
+
+
+def test_target_identity_mismatch_rolls_back_every_layer_in_reverse_order() -> None:
+    events: list[str] = []
     target_factory = _TargetFactory(
         events,
-        runtime_profile_sha256=runtime_hash,
-        identity_override=mismatched,
+        runtime_profile_sha256=_h("6"),
+        identity_override=_identity(config="different-blue-config"),
     )
     provider, _, _, _, _, _ = _provider(events, target_factory=target_factory)
 
     with pytest.raises(ValueError, match="target identity"):
         provider.acquire(expected_identity=_identity(), trial_id="trial-mismatch")
 
+    assert events == _all_acquire_events() + _all_release_events()
+
+
+def test_model_launch_failure_rolls_back_workspace_and_network_only() -> None:
+    events: list[str] = []
+    model = _ModelPeerSupervisor(events, fail_launch=True)
+    provider, _, _, _, _, _ = _provider(events, model=model)
+
+    with pytest.raises(RuntimeError, match="synthetic model launch failure"):
+        provider.acquire(expected_identity=_identity(), trial_id="trial-model-fail")
+
     assert events == [
         "workspace.acquire",
         "network.create",
         "model.launch",
-        "agent.launch",
-        "target.build",
-        "target.release",
-        "agent.release",
-        "model.release",
         "network.release",
         "workspace.release",
     ]
@@ -401,25 +499,46 @@ def test_agent_launch_failure_rolls_back_only_previously_acquired_layers() -> No
     ]
 
 
-def test_unhealthy_health_gate_rolls_back_before_returning_public_lease() -> None:
+@pytest.mark.parametrize(
+    ("factory_kwargs", "message"),
+    [
+        ({"healthy": False}, "unhealthy"),
+        ({"container_id_sha256": _h("1")}, "launched AGENT container"),
+        ({"sandbox_attestation_sha256": _h("1")}, "sandbox attestation"),
+        ({"runtime_profile_sha256": _h("1")}, "runtime profile"),
+        ({"application_version": "9.9.9"}, "expected target version"),
+    ],
+)
+def test_health_binding_failures_roll_back_before_public_lease(
+    factory_kwargs: dict[str, object],
+    message: str,
+) -> None:
     events: list[str] = []
+    runtime_hash = str(factory_kwargs.pop("runtime_profile_sha256", _h("6")))
     target_factory = _TargetFactory(
         events,
-        runtime_profile_sha256=_h("6"),
-        healthy=False,
+        runtime_profile_sha256=runtime_hash,
+        **factory_kwargs,
     )
     provider, _, _, _, _, _ = _provider(events, target_factory=target_factory)
 
-    with pytest.raises(ValueError, match="unhealthy"):
-        provider.acquire(expected_identity=_identity(), trial_id="trial-unhealthy")
+    with pytest.raises(ValueError, match=message):
+        provider.acquire(expected_identity=_identity(), trial_id=f"trial-{message}")
 
-    assert events[-5:] == [
-        "target.release",
-        "agent.release",
-        "model.release",
-        "network.release",
-        "workspace.release",
-    ]
+    assert events == _all_acquire_events() + _all_release_events()
+
+
+def test_missing_expected_application_version_is_rejected_and_rolled_back() -> None:
+    events: list[str] = []
+    provider, _, _, _, _, _ = _provider(events)
+
+    with pytest.raises(ValueError, match="requires application_version"):
+        provider.acquire(
+            expected_identity=_identity(application_version=None),
+            trial_id="trial-no-version",
+        )
+
+    assert events == _all_acquire_events() + _all_release_events()
 
 
 def test_normal_release_is_reverse_order_and_cannot_be_repeated() -> None:
@@ -432,18 +551,27 @@ def test_normal_release_is_reverse_order_and_cannot_be_repeated() -> None:
 
     assert release.cleanup_complete is True
     assert release.lease_id_hash == lease.attestation.lease_id_hash
-    assert events == [
-        "target.release",
-        "agent.release",
-        "model.release",
-        "network.release",
-        "workspace.release",
-    ]
+    assert events == _all_release_events()
     with pytest.raises(ValueError, match="already released"):
         provider.release(lease)
 
 
-def test_release_attempts_all_layers_even_when_one_cleanup_fails_and_then_blocks_reuse() -> None:
+def test_target_identity_drift_at_release_still_cleans_every_layer_and_marks_dirty() -> None:
+    events: list[str] = []
+    provider, _, _, _, _, _ = _provider(events)
+    lease = provider.acquire(expected_identity=_identity(), trial_id="trial-target-drift")
+    setattr(lease.target, "_identity", _identity(config="drifted-after-admission"))
+    events.clear()
+
+    with pytest.raises(RuntimeError, match="target identity drift"):
+        provider.release(lease)
+
+    assert events == _all_release_events()
+    with pytest.raises(RuntimeError, match="dirty"):
+        provider.acquire(expected_identity=_identity(), trial_id="trial-after-target-drift")
+
+
+def test_release_attempts_all_layers_even_when_cleanup_fails_and_blocks_reuse() -> None:
     events: list[str] = []
     agent = _AgentSupervisor(events, fail_release=True)
     provider, _, _, _, _, _ = _provider(events, agent=agent)
@@ -453,15 +581,31 @@ def test_release_attempts_all_layers_even_when_one_cleanup_fails_and_then_blocks
     with pytest.raises(RuntimeError, match="release failed closed"):
         provider.release(lease)
 
+    assert events == _all_release_events()
+    with pytest.raises(RuntimeError, match="dirty"):
+        provider.acquire(expected_identity=_identity(), trial_id="trial-after-dirty")
+
+
+def test_acquisition_rollback_failure_marks_provider_dirty() -> None:
+    events: list[str] = []
+    workspace = _WorkspaceProvider(events, fail_release=True)
+    agent = _AgentSupervisor(events, fail_launch=True)
+    provider, _, _, _, _, _ = _provider(events, workspace=workspace, agent=agent)
+
+    with pytest.raises(RuntimeError, match="rollback was incomplete"):
+        provider.acquire(expected_identity=_identity(), trial_id="trial-rollback-fail")
+
     assert events == [
-        "target.release",
-        "agent.release",
+        "workspace.acquire",
+        "network.create",
+        "model.launch",
+        "agent.launch",
         "model.release",
         "network.release",
         "workspace.release",
     ]
     with pytest.raises(RuntimeError, match="dirty"):
-        provider.acquire(expected_identity=_identity(), trial_id="trial-after-dirty")
+        provider.acquire(expected_identity=_identity(), trial_id="trial-after-rollback-fail")
 
 
 def test_model_artifact_drift_after_cleanup_fails_closed() -> None:
@@ -474,10 +618,4 @@ def test_model_artifact_drift_after_cleanup_fails_closed() -> None:
     with pytest.raises(RuntimeError, match="artifact drift"):
         provider.release(lease)
 
-    assert events == [
-        "target.release",
-        "agent.release",
-        "model.release",
-        "network.release",
-        "workspace.release",
-    ]
+    assert events == _all_release_events()
