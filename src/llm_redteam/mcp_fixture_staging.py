@@ -1,12 +1,12 @@
 """Control-plane staging boundary for synthetic MCP fixture context.
 
-OpenCode's MCP configuration names paths in the target's filesystem namespace.  A Docker
+OpenCode's MCP configuration names paths in the target's filesystem namespace. A Docker
 control plane stages the corresponding files in a different host namespace and bind-mounts
-them read-only into the target.  Treating one raw path as both identities is therefore
+them read-only into the target. Treating one raw path as both identities is therefore
 incorrect and, on Windows hosts, frequently impossible.
 
-This module keeps those namespaces separate.  It performs no model or target call and does
-not define Docker mounts.  The stable target-visible paths remain in
+This module keeps those namespaces separate. It performs no model or target call and does
+not define Docker mounts. The stable target-visible paths remain in
 ``McpFixtureBridgeProfile`` while a staging backend owns ephemeral host paths and emits only
 hash-safe runtime binding/evidence.
 """
@@ -87,7 +87,7 @@ class McpFixtureStagingBackend(Protocol):
 class FilesystemMcpFixtureStagingBackend:
     """Stage one context/hash pair in an explicitly owned host-side namespace.
 
-    Host paths are runtime handles only.  The backend refuses pre-existing sidecars rather
+    Host paths are runtime handles only. The backend refuses pre-existing sidecars rather
     than overwriting them, uses exclusive file creation, verifies staged bytes before
     cleanup, and only removes files belonging to its active stage.
     """
@@ -105,13 +105,15 @@ class FilesystemMcpFixtureStagingBackend:
         hash_path = Path(hash_host_path).expanduser()
         if context_path == hash_path:
             raise ValueError("MCP host context and hash paths must be distinct")
-        if context_path.exists() and context_path.is_dir():
-            raise ValueError("MCP host context path cannot be a directory")
-        if hash_path.exists() and hash_path.is_dir():
-            raise ValueError("MCP host hash path cannot be a directory")
-        for parent in {context_path.parent, hash_path.parent}:
-            if not parent.exists() or not parent.is_dir() or parent.is_symlink():
-                raise ValueError("MCP host staging parent must be an existing real directory")
+        for path, label in (
+            (context_path, "context"),
+            (hash_path, "hash"),
+        ):
+            if path.is_symlink():
+                raise ValueError(f"MCP host {label} path cannot be a symlink")
+            if path.exists() and path.is_dir():
+                raise ValueError(f"MCP host {label} path cannot be a directory")
+            _require_real_directory(path.parent)
 
         self._context_path = context_path.absolute()
         self._hash_path = hash_path.absolute()
@@ -180,7 +182,12 @@ class FilesystemMcpFixtureStagingBackend:
         observed_content_sha256 = sha256(content.encode()).hexdigest()
         if observed_content_sha256 != content_sha256:
             raise ValueError("MCP fixture context hash mismatch before host staging")
-        if self._context_path.exists() or self._hash_path.exists():
+        if (
+            self._context_path.exists()
+            or self._hash_path.exists()
+            or self._context_path.is_symlink()
+            or self._hash_path.is_symlink()
+        ):
             raise RuntimeError("MCP host sidecar already exists; stale/reused trial refused")
 
         binding = self.runtime_binding(bridge)
@@ -195,11 +202,11 @@ class FilesystemMcpFixtureStagingBackend:
         context_created = False
         hash_created = False
         try:
-            with self._context_path.open("x", encoding="utf-8", newline="") as handle:
-                handle.write(content)
+            with self._context_path.open("x", encoding="utf-8", newline="") as file_handle:
+                file_handle.write(content)
             context_created = True
-            with self._hash_path.open("x", encoding="ascii", newline="") as handle:
-                handle.write(content_sha256 + "\n")
+            with self._hash_path.open("x", encoding="ascii", newline="") as file_handle:
+                file_handle.write(content_sha256 + "\n")
             hash_created = True
         except OSError:
             if hash_created:
@@ -260,6 +267,8 @@ class FilesystemMcpFixtureStagingBackend:
 
     def _staged_integrity_matches(self, handle: McpFixtureStageHandle) -> bool:
         try:
+            if self._context_path.is_symlink() or self._hash_path.is_symlink():
+                return False
             if not self._context_path.is_file() or not self._hash_path.is_file():
                 return False
             observed_context = sha256(self._context_path.read_bytes()).hexdigest()
@@ -270,6 +279,14 @@ class FilesystemMcpFixtureStagingBackend:
             observed_context == handle.content_sha256
             and observed_hash_text == handle.content_sha256
         )
+
+
+def _require_real_directory(path: Path) -> None:
+    if not path.exists() or not path.is_dir() or path.is_symlink():
+        raise ValueError("MCP host staging parent must be an existing real directory")
+    resolved = path.resolve(strict=True)
+    if _normalized_host_path(resolved) != _normalized_host_path(path.absolute()):
+        raise ValueError("MCP host staging parent cannot traverse a symlink")
 
 
 def _path_sha256(path: Path) -> str:
