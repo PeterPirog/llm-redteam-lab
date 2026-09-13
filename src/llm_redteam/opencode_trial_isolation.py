@@ -1,11 +1,11 @@
 """Disposable per-trial OpenCode AGENT isolation on an owned Docker model network.
 
 The provider in this module implements the generic ``TargetTrialLeaseProvider`` contract
-for real coding-agent trials.  Each acquired lease receives a fresh host workspace and a
-new hardened OpenCode container.  The campaign-scoped model network/model peer are reused,
+for real coding-agent trials. Each acquired lease receives a fresh host workspace and a
+new hardened OpenCode container. The campaign-scoped model network/model peer are reused,
 but the Blue application state that can be influenced by an attacker is not.
 
-No inference is performed by acquisition.  Before a target is returned, the trusted
+No inference is performed by acquisition. Before a target is returned, the trusted
 control plane verifies Docker ownership, sandbox/network attestation, exact OpenCode
 process configuration, server health/version and the stable Blue target identity.
 """
@@ -27,9 +27,7 @@ from pydantic import Field
 from .agent_actions import canonical_json_hash
 from .docker_exec_http import DockerExecContainerRef, DockerExecHttpProfile
 from .docker_exec_opencode import build_attested_docker_exec_opencode_target
-from .docker_model_network import (
-    DockerIsolatedModelNetworkProfile,
-)
+from .docker_model_network import DockerIsolatedModelNetworkProfile
 from .docker_model_network_supervisor import DockerModelNetworkLease
 from .docker_networked_supervisor import (
     DockerNetworkedAgentLease,
@@ -62,7 +60,7 @@ from .targets.opencode import OpenCodeConfig
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
 _HEALTH_SCRIPT = (
-    "import base64,json,os,sys,urllib.error,urllib.request;"
+    "import base64,json,os,sys,urllib.request;"
     "url=sys.argv[1];password_env=sys.argv[2];username=sys.argv[3];"
     "req=urllib.request.Request(url,method='GET');"
     "password=os.getenv(password_env) if password_env else None;"
@@ -111,10 +109,12 @@ class FilesystemDisposableWorkspaceProvider:
         if not provider_id:
             raise ValueError("workspace provider_id must be non-empty")
         root_path = Path(root).expanduser()
+        if root_path.exists() and root_path.is_symlink():
+            raise ValueError("workspace root cannot be a symlink")
         root_path.mkdir(parents=True, exist_ok=True)
         resolved = root_path.resolve(strict=True)
-        if not resolved.is_dir() or resolved.is_symlink():
-            raise ValueError("workspace root must be a real directory, not a symlink")
+        if not resolved.is_dir():
+            raise ValueError("workspace root must be a directory")
         self._root = resolved
         self._provider_id = provider_id
         self._provider_fingerprint = canonical_json_hash(
@@ -134,15 +134,18 @@ class FilesystemDisposableWorkspaceProvider:
         if not trial_id:
             raise ValueError("workspace trial_id must be non-empty")
         created = Path(tempfile.mkdtemp(prefix="llmrt-trial-", dir=self._root))
+        if created.is_symlink():
+            created.unlink(missing_ok=True)
+            raise RuntimeError("new disposable workspace unexpectedly became a symlink")
         resolved = created.resolve(strict=True)
         try:
             resolved.relative_to(self._root)
         except ValueError as exc:
             shutil.rmtree(resolved, ignore_errors=True)
             raise RuntimeError("workspace escaped the configured root") from exc
-        if resolved.is_symlink() or any(resolved.iterdir()):
+        if any(resolved.iterdir()):
             shutil.rmtree(resolved, ignore_errors=True)
-            raise RuntimeError("new disposable workspace is not an empty real directory")
+            raise RuntimeError("new disposable workspace is not empty")
 
         workspace_id_hash = sha256(_normalized_path(resolved).encode()).hexdigest()
         if workspace_id_hash in self._active:
@@ -174,14 +177,33 @@ class FilesystemDisposableWorkspaceProvider:
         except ValueError as exc:
             raise RuntimeError("workspace lease is outside configured root") from exc
         if path.is_symlink():
-            return self._release_result(lease, cleanup_complete=False, state="root-became-symlink")
+            return self._release_result(
+                lease,
+                cleanup_complete=False,
+                state="root-became-symlink",
+            )
+        if not path.exists():
+            del self._active[lease.workspace_id_hash]
+            return self._release_result(
+                lease,
+                cleanup_complete=True,
+                state="already-absent",
+            )
 
         try:
             shutil.rmtree(path)
         except OSError:
-            return self._release_result(lease, cleanup_complete=False, state="remove-failed")
+            return self._release_result(
+                lease,
+                cleanup_complete=False,
+                state="remove-failed",
+            )
         if path.exists():
-            return self._release_result(lease, cleanup_complete=False, state="still-exists")
+            return self._release_result(
+                lease,
+                cleanup_complete=False,
+                state="still-exists",
+            )
         del self._active[lease.workspace_id_hash]
         return self._release_result(lease, cleanup_complete=True, state="removed")
 
@@ -272,7 +294,10 @@ class DockerOpenCodeTrialLeaseProvider:
             raise ValueError("sandbox policy does not bind the Docker OpenCode profile")
         if not sandbox_policy.disposable_workspace:
             raise ValueError("OpenCode trial provider requires disposable_workspace")
-        if not sandbox_policy.external_network_denied or sandbox_policy.allowed_network_endpoints:
+        if (
+            not sandbox_policy.external_network_denied
+            or sandbox_policy.allowed_network_endpoints
+        ):
             raise ValueError("OpenCode trial provider requires model-only isolated networking")
         if not sandbox_policy.git_publication_denied:
             raise ValueError("OpenCode trial provider requires git publication denial")
@@ -280,7 +305,10 @@ class DockerOpenCodeTrialLeaseProvider:
             raise ValueError("OpenCode target workspace does not match runtime profile")
         if opencode_config.application_version is None:
             raise ValueError("OpenCode disposable target requires pinned application_version")
-        if len(model_peer_container_id_sha256) != 64:
+        if len(model_peer_container_id_sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in model_peer_container_id_sha256
+        ):
             raise ValueError("model peer container identity must be a sha256 hex digest")
 
         self._workspace_provider = workspace_provider
@@ -407,8 +435,12 @@ class DockerOpenCodeTrialLeaseProvider:
                     "agent_container_id_sha256": agent.container_id_sha256,
                     "agent_launch_command_sha256": agent.launch_command_sha256,
                     "network_id_sha256": agent.network_id_sha256,
-                    "sandbox_attestation_sha256": agent.sandbox_attestation.attestation_sha256,
-                    "network_attestation_sha256": agent.network_attestation.attestation_sha256,
+                    "sandbox_attestation_sha256": (
+                        agent.sandbox_attestation.attestation_sha256
+                    ),
+                    "network_attestation_sha256": (
+                        agent.network_attestation.attestation_sha256
+                    ),
                     "process_observation_sha256": process.proof_sha256,
                     "launch_binding_sha256": launch_binding.proof_sha256,
                     "health_proof_sha256": health.proof_sha256,
@@ -441,7 +473,10 @@ class DockerOpenCodeTrialLeaseProvider:
                 ),
             )
         except Exception as exc:
-            cleanup_ok = self._cleanup_failed_acquisition(workspace=workspace, agent=agent)
+            cleanup_ok = self._cleanup_failed_acquisition(
+                workspace=workspace,
+                agent=agent,
+            )
             if not cleanup_ok:
                 raise RuntimeError(
                     "OpenCode trial acquisition failed and cleanup was incomplete"
@@ -465,9 +500,19 @@ class DockerOpenCodeTrialLeaseProvider:
                 active.agent_released = True
 
         if active.agent_released and not active.workspace_released:
-            workspace_release = self._workspace_provider.release(active.workspace)
-            active.workspace_release_proof = workspace_release.teardown_proof_hash
-            active.workspace_released = workspace_release.cleanup_complete
+            try:
+                workspace_release = self._workspace_provider.release(active.workspace)
+            except Exception as exc:
+                active.workspace_release_proof = canonical_json_hash(
+                    {
+                        "workspace_id_hash": active.workspace.workspace_id_hash,
+                        "cleanup_error_type": type(exc).__name__,
+                        "cleanup_complete": False,
+                    }
+                )
+            else:
+                active.workspace_release_proof = workspace_release.teardown_proof_hash
+                active.workspace_released = workspace_release.cleanup_complete
 
         cleanup_complete = active.agent_released and active.workspace_released
         teardown_proof_hash = canonical_json_hash(
@@ -581,9 +626,13 @@ class DockerOpenCodeTrialLeaseProvider:
                 healthy = body.get("healthy")
                 version = body.get("version")
                 if healthy is not True or not isinstance(version, str) or not version:
-                    raise ValueError("OpenCode health response is unhealthy or lacks version")
+                    raise ValueError(
+                        "OpenCode health response is unhealthy or lacks version"
+                    )
                 if version != self.opencode_config.application_version:
-                    raise ValueError("OpenCode health version does not match pinned target version")
+                    raise ValueError(
+                        "OpenCode health version does not match pinned target version"
+                    )
                 self._inspect_owned_container(agent)
                 return OpenCodeHealthObservation(
                     healthy=True,
@@ -661,11 +710,13 @@ def _declared_target_identity(
             "mcp_fixture_bridge_sha256": None,
         }
     )
-    attested = docker_exec_identity.model_copy(
+    return docker_exec_identity.model_copy(
         update={
             "configuration_hash": canonical_json_hash(
                 {
-                    "base_target_configuration_hash": docker_exec_identity.configuration_hash,
+                    "base_target_configuration_hash": (
+                        docker_exec_identity.configuration_hash
+                    ),
                     "opencode_target_policy_sha256": target_policy_sha256,
                 }
             ),
@@ -673,7 +724,6 @@ def _declared_target_identity(
             | frozenset({"runtime_attested", "runtime_health_verified"}),
         }
     )
-    return attested
 
 
 def _normalized_path(path: Path) -> str:
