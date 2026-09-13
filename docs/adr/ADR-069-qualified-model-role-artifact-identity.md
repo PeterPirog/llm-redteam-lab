@@ -46,9 +46,14 @@ Duplicate role routes fail closed.
 
 `bind_policy_descriptor_to_model_roles()` composes a qualified role set into an immutable policy descriptor only when the set of role routes exactly matches the caller's predeclared requirement.
 
-This gives later campaign preflight a deterministic way to include exact Red/Judge artifact provenance in attack-policy and Judge-policy fingerprints without changing historical descriptors by default.
+Two small provider-neutral adapters apply that primitive to the measurement apparatus:
 
-A mutable tag resolving to new weights therefore changes the bound policy identity even if the role configuration itself did not change.
+- `red.provenance.build_artifact_qualified_red_policy_descriptor()` binds the exact planner/mutator artifacts to the existing model-backed Red descriptor before `fingerprint_attack_policy()` is calculated;
+- `judges.provenance.build_artifact_qualified_judge_policy_descriptor()` binds the exact semantic and/or multimodal Judge artifacts to an existing Judge policy descriptor before `fingerprint_judge_policy()` is calculated.
+
+Deterministic Judges do not use this helper because they have no model artifact.
+
+A mutable tag resolving to new weights therefore changes the bound policy identity even if the role configuration itself did not change. Historical unqualified policy descriptors remain unchanged unless a caller explicitly opts into artifact-qualified provenance.
 
 ## Locality
 
@@ -72,7 +77,7 @@ resolved ModelRoleConfig
         ↓
 QualifiedModelRoleIdentity
         ↓
-artifact-bound policy fingerprint
+artifact-bound Red/Judge policy fingerprint
 ```
 
 ## Security and measurement semantics
@@ -97,7 +102,8 @@ One bounded conversation remains one security trial.
 ### Positive
 
 - mutable local model tags cannot silently preserve measurement identity after weight changes;
-- Red/Judge/forensic provenance becomes comparable to Blue artifact provenance;
+- Red and model-backed Judge fingerprints can include exact artifact identity;
+- forensic roles can use the same primitive when their provenance is persisted;
 - provider-specific artifact verification remains isolated from policy business logic;
 - explicit attacker variants remain distinct;
 - the mechanism can be exercised using deterministic tests before any real inference.
@@ -110,8 +116,8 @@ One bounded conversation remains one security trial.
 
 ## Follow-up
 
-1. Bind qualified Red roles into the persisted attack-policy fingerprint at campaign preflight.
-2. Bind semantic/multimodal Judge roles into Judge-policy provenance only when those Judges are enabled/eligible for the campaign.
-3. Persist the exact qualification-set hash with measurement provenance.
-4. Use the local-only artifact manifest from the smoke profile to construct qualifications after actual Ollama inventory verification.
-5. Keep the final Blue target/runtime lease separate and continue composing its own application/runtime/system-control identity.
+1. Wire artifact-qualified Red/Judge descriptors into `CampaignLifecycleExecutor` behind an explicit fail-closed qualification contract rather than silently changing historical campaign behavior.
+2. Use the local-only artifact manifest from the smoke profile to construct qualifications after actual Ollama inventory verification.
+3. Persist forensic role qualification with forensic analysis provenance when model-backed forensics is invoked.
+4. Keep the final Blue target/runtime lease separate and continue composing its own application/runtime/system-control identity.
+5. Only after the deterministic qualification path is integrated should local model calls be used for smoke and reference campaigns.
