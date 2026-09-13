@@ -64,7 +64,10 @@ def _artifact(model: str, char: str) -> ModelArtifactIdentity:
     )
 
 
-def _artifacts(*, planner_char: str = "a") -> dict[tuple[str, str], ModelArtifactIdentity]:
+def _artifacts(
+    *,
+    planner_char: str = "a",
+) -> dict[tuple[str, str], ModelArtifactIdentity]:
     return {
         ("ollama", "planner-local"): _artifact("planner-local", planner_char),
         ("ollama", "mutator-local"): _artifact("mutator-local", "b"),
@@ -139,16 +142,36 @@ def test_reference_arms_hold_exact_red_artifacts_and_judge_constant() -> None:
         judge_policy_descriptor=_judge_descriptor(),
     )
 
-    assert qualified.baseline.red_model_role_set_sha256 == qualified.treatment.red_model_role_set_sha256
-    assert qualified.baseline.judge_policy_fingerprint == qualified.treatment.judge_policy_fingerprint
-    assert qualified.baseline.attack_policy_fingerprint != qualified.treatment.attack_policy_fingerprint
+    assert (
+        qualified.baseline.red_model_role_set_sha256
+        == qualified.treatment.red_model_role_set_sha256
+    )
+    assert (
+        qualified.baseline.judge_policy_fingerprint
+        == qualified.treatment.judge_policy_fingerprint
+    )
+    assert (
+        qualified.baseline.attack_policy_fingerprint
+        != qualified.treatment.attack_policy_fingerprint
+    )
     assert qualified.baseline.qualified_policies.red_model_roles is not None
     assert qualified.treatment.qualified_policies.red_model_roles is not None
-    inputs = qualified.paired_contract_inputs()
-    assert inputs["baseline_policy_fingerprint"] == qualified.baseline.attack_policy_fingerprint
-    assert inputs["treatment_policy_fingerprint"] == qualified.treatment.attack_policy_fingerprint
-    assert inputs["judge_fingerprint"] == qualified.judge_policy_fingerprint
-    assert inputs["red_model_role_set_sha256"] == qualified.red_model_role_set_sha256
+
+    contract = qualified.ablation_contract_fingerprints()
+    assert (
+        contract["baseline_policy_fingerprint"]
+        == qualified.baseline.attack_policy_fingerprint
+    )
+    assert (
+        contract["treatment_policy_fingerprint"]
+        == qualified.treatment.attack_policy_fingerprint
+    )
+    assert contract["judge_fingerprint"] == qualified.judge_policy_fingerprint
+    assert contract["budget_fingerprint"] == qualified.budget_fingerprint
+
+    provenance = qualified.provenance_identity()
+    assert provenance["red_model_role_set_sha256"] == qualified.red_model_role_set_sha256
+    assert provenance["reference_qualification_sha256"] == qualified.qualification_sha256
 
 
 def test_mutable_planner_tag_with_new_weights_changes_both_reference_arm_identities() -> None:
@@ -170,8 +193,14 @@ def test_mutable_planner_tag_with_new_weights_changes_both_reference_arm_identit
     )
 
     assert first.red_model_role_set_sha256 != second.red_model_role_set_sha256
-    assert first.baseline.attack_policy_fingerprint != second.baseline.attack_policy_fingerprint
-    assert first.treatment.attack_policy_fingerprint != second.treatment.attack_policy_fingerprint
+    assert (
+        first.baseline.attack_policy_fingerprint
+        != second.baseline.attack_policy_fingerprint
+    )
+    assert (
+        first.treatment.attack_policy_fingerprint
+        != second.treatment.attack_policy_fingerprint
+    )
     assert first.qualification_sha256 != second.qualification_sha256
 
 
@@ -251,7 +280,10 @@ def test_reference_stage_budget_is_part_of_qualified_identity() -> None:
     assert smoke.budget_profile == "smoke"
     assert qualification.budget_profile == "qualification"
     assert smoke.budget_fingerprint != qualification.budget_fingerprint
-    assert smoke.baseline.attack_policy_fingerprint != qualification.baseline.attack_policy_fingerprint
+    assert (
+        smoke.baseline.attack_policy_fingerprint
+        != qualification.baseline.attack_policy_fingerprint
+    )
     assert smoke.qualification_sha256 != qualification.qualification_sha256
 
 
