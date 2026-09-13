@@ -11,27 +11,54 @@ AGENT is therefore intentionally three different targets.
 
 The converse problem also matters: the *same configured target* can silently change when a
 mutable model tag such as `latest` resolves to different weights. `TargetIdentity` already has
-an optional `model_digest`, but the historical `OpenAICompatibleTarget.configuration_hash`
-is based on application/runtime configuration and the human-readable model ID. The repository
-snapshot ID is derived from `target.id + configuration_hash`.
+an optional `model_digest`, but historical target configuration hashes are primarily based on
+application/runtime configuration and human-readable model IDs. Recording a digest as metadata
+without composing it into `configuration_hash` is insufficient.
 
-Therefore recording a digest as metadata without composing it into `configuration_hash` is
-insufficient: two different model artifacts could otherwise map to the same target snapshot.
+There is an additional identity distinction for application-backed targets. A direct MODEL can
+have:
+
+```text
+TargetIdentity.provider = ollama
+model artifact provider = ollama
+```
+
+while an OpenCode AGENT correctly has:
+
+```text
+TargetIdentity.provider = opencode
+underlying model provider = ollama
+```
+
+Treating the application provider as though it were the artifact provider would make exact
+model binding work for MODEL targets but fail for PIPELINE/AGENT targets.
 
 ## Decision
 
-Add a provider-neutral `TargetModelArtifactBinding` and `ArtifactQualifiedTarget` wrapper.
+Add three provider-neutral primitives:
+
+- `TargetModelReference` — the trusted reference from the evaluated application to the
+  underlying model provider/model ID;
+- `TargetModelArtifactBinding` — the immutable composition of target configuration, model
+  reference and independently verified model artifact;
+- `ArtifactQualifiedTarget` — a protocol-preserving runtime wrapper with TOCTOU checks.
+
+For direct `MODEL` targets, the model reference may be derived from `TargetIdentity.provider`
+and `TargetIdentity.model`. For `PIPELINE` and `AGENT`, an explicit model reference is required
+from trusted application configuration. No heuristic parsing of a display string is accepted.
 
 The binding requires exact agreement between:
 
-- Blue target provider;
-- Blue target model ID;
-- independently verified `ModelArtifactIdentity.provider_id`;
-- independently verified `ModelArtifactIdentity.model_id`;
-- any pre-existing target `model_digest`.
+- declared underlying model provider/model ID;
+- independently verified `ModelArtifactIdentity.provider_id/model_id`;
+- any pre-existing target `model_digest`;
+- local/remote policy.
+
+Application provider remains independently bound through the base target configuration. Thus
+`provider=opencode` and `model provider=ollama` are valid and intentionally distinct facts.
 
 For local qualification, `require_local=True` is the default. A remote artifact is rejected
-unless a caller explicitly opts into a non-local experiment.
+unless the caller explicitly opts into a non-local experiment.
 
 The qualified target identity sets:
 
@@ -39,13 +66,15 @@ The qualified target identity sets:
 model_digest = exact artifact SHA-256 digest
 configuration_hash = H(
     base target configuration hash,
-    model artifact identity SHA,
-    target/artifact binding SHA
+    application provider,
+    model reference hash,
+    model artifact identity hash,
+    target/artifact binding hash
 )
 ```
 
-As a result, changing weights under the same model tag changes both the target configuration
-hash and `ExperimentRepository.target_snapshot_id()`.
+Changing weights under the same model tag changes both target configuration hash and target
+snapshot identity.
 
 ## Separation from application identity
 
@@ -65,22 +94,26 @@ Both are required for meaningful security regression measurement.
 ## Provider independence
 
 The wrapper consumes a verified `ModelArtifactIdentity`; it does not query Ollama, Docker or a
-provider API. Provider-specific inventory verification remains at the edge. For the planned
-local Ollama path:
+provider API. Provider-specific inventory verification remains at the edge. For the local
+Ollama path:
 
 ```text
 predeclared manifest digest
         ↓
-OllamaArtifactContract / artifact registry
+Ollama artifact verification
         ↓
 ModelArtifactIdentity
+        ↓
+TargetModelReference
         ↓
 ArtifactQualifiedTarget
         ↓
 exact TargetIdentity / target snapshot
 ```
 
-A future provider can supply the same provider-neutral artifact object without changing target
+For OpenCode the `TargetModelReference` comes from `OpenCodeConfig.model_provider_id/model_id`,
+not from `TargetIdentity.provider`, because the latter identifies the application adapter.
+Future providers can supply the same provider-neutral artifact object without changing target
 business logic.
 
 ## Runtime drift / TOCTOU
@@ -116,23 +149,21 @@ part of the evaluated security target.
 
 ## Reference Evaluation consequence
 
-Reference Evaluation v1 must eventually require both:
-
-1. artifact-qualified RED measurement roles (ADR-069/071); and
-2. an artifact-qualified Blue target snapshot.
-
-Otherwise a paired Red policy comparison could be reproducible on the attacker side while the
-Blue weights changed under a mutable target tag.
+Reference Evaluation v1 must require both artifact-qualified RED measurement roles and an
+artifact-qualified Blue target snapshot. Application-backed targets additionally require an
+explicit underlying model reference.
 
 ## Tests
 
 Deterministic tests require:
 
-- different digests under the same target/model name produce different configuration hashes
-  and target snapshot IDs;
+- different digests under the same target/model name produce different target snapshots;
 - the same base target + same artifact is stable;
+- direct MODEL targets derive their model reference safely;
+- application-backed targets fail closed without an explicit underlying model reference;
+- `provider=opencode` can bind an `ollama` artifact only through that explicit reference;
 - provider/model/digest/locality mismatch fails closed;
-- the wrapper delegates requests unchanged when identity is stable;
-- post-admission base-target identity drift is rejected before execution.
+- requests are delegated unchanged when identity is stable;
+- post-admission base-target drift is rejected before execution.
 
 No model inference, provider network access, Docker daemon or GPU is required.
