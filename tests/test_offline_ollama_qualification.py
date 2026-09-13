@@ -90,12 +90,42 @@ def test_offline_report_verifies_declared_models_and_ignores_extra_inventory() -
     assert "unrelated:latest" not in {item.model_id for item in report.artifacts}
 
 
+def test_contract_semantic_hash_ignores_mapping_and_role_order() -> None:
+    first_raw = _document().model_dump(mode="json")
+    first_raw["artifacts"]["planner:latest"]["roles"] = ["red_planner", "forensic"]
+    second_raw = _document().model_dump(mode="json")
+    second_raw["artifacts"] = {
+        "blue:latest": second_raw["artifacts"]["blue:latest"],
+        "planner:latest": {
+            **second_raw["artifacts"]["planner:latest"],
+            "roles": ["forensic", "red_planner"],
+        },
+    }
+
+    first = OllamaArtifactContractDocument.model_validate(first_raw)
+    second = OllamaArtifactContractDocument.model_validate(second_raw)
+    first_report = qualify_saved_ollama_inventory(
+        document=first,
+        tags_payload=_payload(),
+    )
+    second_report = qualify_saved_ollama_inventory(
+        document=second,
+        tags_payload=_payload(),
+    )
+
+    assert first.contracts_sha256 == second.contracts_sha256
+    assert first_report.artifact_set_sha256 == second_report.artifact_set_sha256
+    assert first_report.report_sha256 == second_report.report_sha256
+
+
 def test_report_identity_is_stable_across_inventory_record_order() -> None:
     first = qualify_saved_ollama_inventory(
         document=_document(),
         tags_payload=_payload(),
     )
-    reversed_payload = {"models": list(reversed(_payload()["models"]))}
+    models = _payload()["models"]
+    assert isinstance(models, list)
+    reversed_payload = {"models": list(reversed(models))}
     second = qualify_saved_ollama_inventory(
         document=_document(),
         tags_payload=reversed_payload,
