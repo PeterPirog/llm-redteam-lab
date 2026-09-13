@@ -170,8 +170,6 @@ class DisposableAgentTrialLeaseProvider:
         self._seen_fresh_state_proofs: set[str] = set()
         self._dirty = False
 
-        # Fail fast on stable policy contradictions; detailed runtime ownership remains in
-        # the component supervisors.
         if network_profile.profile_sha256 != agent_profile.model_network_profile_sha256:
             raise ValueError("AGENT profile does not bind the supplied model-network profile")
         if model_peer_profile.profile_sha256 != ollama_profile.peer_profile_sha256:
@@ -367,7 +365,7 @@ class DisposableAgentTrialLeaseProvider:
             target_release = self._target_factory.release(active.target_handle)
             if not target_release.cleanup_complete:
                 cleanup_errors.append("target cleanup incomplete")
-        except Exception as exc:  # cleanup must continue through independent layers
+        except Exception as exc:
             cleanup_errors.append(f"target cleanup failed: {type(exc).__name__}")
 
         try:
@@ -430,12 +428,16 @@ class DisposableAgentTrialLeaseProvider:
         )
 
     def _admit_fresh_workspace(self, workspace: DisposableAgentWorkspaceLease) -> None:
-        if workspace.workspace_id_sha256 in self._seen_workspace_ids:
-            raise RuntimeError("disposable workspace identity was reused across trials")
-        if workspace.fresh_state_proof_sha256 in self._seen_fresh_state_proofs:
-            raise RuntimeError("disposable workspace fresh-state proof was reused across trials")
+        workspace_reused = workspace.workspace_id_sha256 in self._seen_workspace_ids
+        proof_reused = (
+            workspace.fresh_state_proof_sha256 in self._seen_fresh_state_proofs
+        )
         self._seen_workspace_ids.add(workspace.workspace_id_sha256)
         self._seen_fresh_state_proofs.add(workspace.fresh_state_proof_sha256)
+        if workspace_reused:
+            raise RuntimeError("disposable workspace identity was reused across trials")
+        if proof_reused:
+            raise RuntimeError("disposable workspace fresh-state proof was reused across trials")
 
     def _validate_target_handle(
         self,
