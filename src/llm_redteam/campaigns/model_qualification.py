@@ -162,6 +162,28 @@ def qualify_campaign_policy_descriptors(
     )
 
 
+def validate_qualified_runtime_policy_descriptors(
+    *,
+    qualified: ArtifactQualifiedCampaignPolicies,
+    attack_policy_descriptor: Mapping[str, object],
+    judge_policy_descriptor: Mapping[str, object],
+) -> None:
+    """Require the actual runtime policies to match the policies prepared for qualification.
+
+    Artifact bindings are stripped from the prepared descriptors before comparison because
+    the runtime's ordinary descriptors intentionally remain provider/artifact agnostic.
+    Any drift in planner/mutator configuration, runtime version, stopping policy, Judge
+    implementation or other policy metadata fails before campaign execution.
+    """
+
+    expected_attack = _without_artifact_binding(qualified.attack_policy_descriptor)
+    expected_judge = _without_artifact_binding(qualified.judge_policy_descriptor)
+    if canonical_json_hash(dict(attack_policy_descriptor)) != canonical_json_hash(expected_attack):
+        raise ValueError("actual Red runtime descriptor does not match qualified policy")
+    if canonical_json_hash(dict(judge_policy_descriptor)) != canonical_json_hash(expected_judge):
+        raise ValueError("actual Judge runtime descriptor does not match qualified policy")
+
+
 def validate_artifact_qualified_campaign_policies(
     *,
     plan: CampaignPlan,
@@ -246,6 +268,12 @@ def build_artifact_qualified_campaign_policies(
         qualified=qualified,
     )
     return qualified
+
+
+def _without_artifact_binding(descriptor: Mapping[str, object]) -> dict[str, object]:
+    base = dict(descriptor)
+    base.pop("model_role_artifacts", None)
+    return base
 
 
 def _require_declared_fingerprint_match(
