@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 
 from sqlalchemy import Engine, create_engine, select
@@ -304,11 +305,35 @@ class ExperimentRepository(AnalysisPersistenceMixin, BlueKnowledgePersistenceMix
             )
 
     @staticmethod
+    def target_snapshot_fingerprint(target: TargetIdentity) -> str:
+        """Hash the complete normalized security-target identity deterministically."""
+
+        payload = {
+            "id": target.id,
+            "target_class": target.target_class.value,
+            "target_mode": target.target_mode.value,
+            "model": target.model,
+            "provider": target.provider,
+            "runtime": target.runtime,
+            "model_digest": target.model_digest,
+            "application": target.application,
+            "application_version": target.application_version,
+            "system_prompt_hash": target.system_prompt_hash,
+            "configuration_hash": target.configuration_hash,
+            "capabilities": sorted(target.capabilities),
+        }
+        raw = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return sha256(raw.encode()).hexdigest()
+
+    @staticmethod
     def target_snapshot_id(target: TargetIdentity) -> str:
-        digest = sha256(
-            f"{target.id}:{target.configuration_hash}".encode()
-        ).hexdigest()[:24]
-        return f"target-{digest}"
+        digest = ExperimentRepository.target_snapshot_fingerprint(target)
+        return f"target-{digest[:24]}"
 
     @staticmethod
     def forensic_report_id(execution_id: str, analysis_version: str) -> str:
