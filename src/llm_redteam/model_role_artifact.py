@@ -104,7 +104,9 @@ class QualifiedModelRoleSet(StrictModel):
     identities: tuple[QualifiedModelRoleIdentity, ...] = ()
 
     @model_validator(mode="after")
-    def routes_are_unique(self) -> QualifiedModelRoleSet:
+    def routes_are_nonempty_and_unique(self) -> QualifiedModelRoleSet:
+        if not self.identities:
+            raise ValueError("qualified model-role set cannot be empty")
         route_ids = [identity.route_id for identity in self.identities]
         if len(route_ids) != len(set(route_ids)):
             raise ValueError("qualified model-role routes must be unique")
@@ -239,7 +241,12 @@ def bind_policy_descriptor_to_model_roles(
     silently attached to a measurement policy.
     """
 
-    required = tuple(sorted(set(required_route_ids)))
+    required_input = tuple(required_route_ids)
+    if not required_input:
+        raise ValueError("policy artifact binding requires at least one model-role route")
+    if len(required_input) != len(set(required_input)):
+        raise ValueError("required model-role routes must be unique")
+    required = tuple(sorted(required_input))
     actual = qualified_roles.route_ids
     if actual != required:
         raise ValueError(
