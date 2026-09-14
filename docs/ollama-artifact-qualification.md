@@ -18,8 +18,9 @@ Qualification consumes two independent inputs before any Red or Blue client is c
 2. a saved local HAL Ollama `/api/tags` JSON snapshot.
 
 The OpenWebUI/Ollama inventory already required by `reference-run` remains the third source.
-The qualifier requires all three views to agree for every model actually admitted to the
-run.
+The qualifier requires all three views to agree for every model admitted to the run, and it
+also requires the inventory hash to match the exact inventory snapshot recorded by the
+local-admission proof.
 
 For each admitted model it verifies:
 
@@ -28,15 +29,16 @@ For each admitted model it verifies:
 - the observed manifest digest equals the predeclared digest;
 - the observed model is local rather than a remote/proxy entry;
 - the `/api/tags` digest equals the digest seen during local model admission;
-- the observed artifact size equals the admitted inventory artifact size.
+- the observed artifact size equals the admitted inventory artifact size;
+- the inventory-record hash equals the record already bound by local admission.
 
 A mismatch blocks the run before inference.
 
 ## Contract file
 
 Start from `config/artifact-contracts.hal-quality.example.yaml` for the default stronger HAL
-profile. Its digest values are placeholders and must never be treated as qualification
-evidence.
+profile. Its digest values are non-production placeholders and must never be treated as
+qualification evidence.
 
 The reviewed file has this shape:
 
@@ -55,8 +57,8 @@ Freeze the file before the qualification run. Do not rewrite pins automatically 
 happens to be installed at execution time; that would turn an expectation into an
 observation and defeat the purpose of the contract.
 
-Only models actually admitted to the run must have contracts. Disabled semantic Judge,
-multimodal Judge and forensic roles do not need pins until they are enabled.
+Only models admitted to the run must have contracts. Disabled semantic Judge, multimodal
+Judge and forensic roles do not need pins until they are enabled.
 
 ## Capturing `/api/tags` on HAL
 
@@ -97,7 +99,13 @@ Successful verification produces the execution-provenance kind:
 
 `ollama_artifact_qualification_v1`
 
-For each used model the payload stores hash-safe identity information:
+The report first binds the qualification result to the exact upstream evidence with:
+
+- `admission_proof_sha256` — hash of the complete local-admission report;
+- `inventory_sha256` — hash of the normalized inventory snapshot used by admission;
+- `tags_snapshot_sha256` — canonical hash of the saved local `/api/tags` snapshot.
+
+For each admitted model the payload also stores hash-safe identity information:
 
 - model ID and role labels;
 - exact `sha256:` manifest digest;
@@ -107,12 +115,12 @@ For each used model the payload stores hash-safe identity information:
 - artifact-observation proof hash;
 - artifact-contract hash.
 
-The full `/api/tags` snapshot is represented by its canonical SHA-256 hash. Raw credentials,
-prompts and secrets are not part of this provenance.
+Raw endpoints, credentials, prompts and secret values are not part of this provenance.
 
 The execution-provenance layer then binds this descriptor into both baseline and treatment
-campaign configuration hashes. A changed artifact therefore produces a different campaign
-measurement identity even when the human-readable model alias is unchanged.
+campaign configuration hashes. A changed artifact, admission proof, inventory snapshot or
+`/api/tags` snapshot therefore produces a different campaign measurement identity even when
+the human-readable model alias is unchanged.
 
 ## Why smoke is different
 
@@ -126,7 +134,8 @@ sufficient. Exact artifacts are mandatory there.
 
 ## Remaining stronger guarantee
 
-Artifact pinning proves the exact local model weights/manifest. It does not prove that the
-process ran on a particular physical machine merely because the operator calls it HAL.
+Artifact pinning proves the exact local model manifest observed by Ollama and binds that
+observation to the admitted inventory. It does not prove that the process ran on a
+particular physical machine merely because the operator calls it HAL.
 Host/container/network/model-peer attestation remains a separate execution-provenance layer,
 especially for future AGENT and isolated OpenCode campaigns.
