@@ -6,6 +6,7 @@ import pytest
 from llm_redteam.model_inventory import (
     OpenWebUIOllamaInventory,
     load_openwebui_ollama_inventory,
+    require_local_model_endpoint,
     validate_local_only_model_selection,
 )
 from llm_redteam.model_roles import ModelsConfig
@@ -124,6 +125,7 @@ def test_local_only_selection_validates_enabled_red_roles_and_blue_target() -> N
         models=_models(),
         inventory=inventory,
         blue_model_id="blue-local",
+        blue_endpoint="http://127.0.0.1:11434",
     )
 
     assert report.admitted_model_ids == (
@@ -132,6 +134,12 @@ def test_local_only_selection_validates_enabled_red_roles_and_blue_target() -> N
         "planner-local",
     )
     assert report.blue_model_id == "blue-local"
+    assert {binding.label for binding in report.bindings} == {
+        "blue",
+        "red_mutator",
+        "red_planner",
+    }
+    assert all(len(binding.endpoint_sha256) == 64 for binding in report.bindings)
     assert len(report.inventory_sha256) == 64
     assert len(report.proof_sha256) == 64
 
@@ -144,7 +152,40 @@ def test_local_class_cannot_hide_remote_proxy() -> None:
             models=_models(planner_model="looks-local-but-cloud"),
             inventory=inventory,
             blue_model_id="blue-local",
+            blue_endpoint="http://127.0.0.1:11434",
         )
+
+
+def test_local_only_selection_rejects_remote_role_endpoint() -> None:
+    raw = _models().model_dump(mode="python", by_alias=True)
+    raw["roles"]["red_planner"]["endpoint"] = "https://api.example.com/v1/chat/completions"
+    models = ModelsConfig.model_validate(raw)
+    inventory = OpenWebUIOllamaInventory.from_openwebui_response(_payload())
+
+    with pytest.raises(ValueError, match="not loopback or explicitly allowed"):
+        validate_local_only_model_selection(models=models, inventory=inventory)
+
+
+def test_local_only_selection_rejects_remote_blue_endpoint() -> None:
+    inventory = OpenWebUIOllamaInventory.from_openwebui_response(_payload())
+
+    with pytest.raises(ValueError, match="not loopback or explicitly allowed"):
+        validate_local_only_model_selection(
+            models=_models(),
+            inventory=inventory,
+            blue_model_id="blue-local",
+            blue_endpoint="https://ollama.com",
+        )
+
+
+def test_explicit_trusted_host_can_be_admitted_for_future_lan_runtime() -> None:
+    endpoint_hash = require_local_model_endpoint(
+        "http://hal-model-host:11434/v1/chat/completions",
+        label="red_planner",
+        allowed_hosts={"hal-model-host"},
+    )
+
+    assert len(endpoint_hash) == 64
 
 
 def test_local_only_selection_rejects_cloud_fallback_policy() -> None:
