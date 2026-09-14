@@ -156,6 +156,32 @@ def test_reference_run_rejects_remote_red_proxy_even_if_config_says_local(
     assert "remote Ollama proxy" in result.output
 
 
+def test_reference_run_rejects_remote_blue_endpoint_before_client_construction(
+    tmp_path: Path, monkeypatch
+) -> None:
+    models = tmp_path / "models.yaml"
+    inventory = tmp_path / "models.json"
+    _write_models(models)
+    _write_inventory(inventory)
+
+    def forbidden_client(*args, **kwargs):
+        raise AssertionError("model client must not be constructed before local admission")
+
+    monkeypatch.setattr(cli_module, "OpenAICompatibleRoleModelClient", forbidden_client)
+
+    result = runner.invoke(
+        cli_module.app,
+        [
+            *_reference_args(models, inventory),
+            "--target-base-url",
+            "https://ollama.com",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "not loopback or explicitly allowed" in result.output
+
+
 def test_reference_run_defaults_to_instrumentation_smoke_without_network(
     tmp_path: Path, monkeypatch
 ) -> None:
