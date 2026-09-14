@@ -206,6 +206,7 @@ def test_reference_run_defaults_to_instrumentation_smoke_without_network(
             "experiment_id": "synthetic",
             "target_snapshot_id": "target",
             "evaluation_manifest_hash": "a" * 64,
+            "execution_provenance": {},
             "pair_count": 6,
             "baseline": {},
             "treatment": {},
@@ -225,4 +226,17 @@ def test_reference_run_defaults_to_instrumentation_smoke_without_network(
     assert target.identity.provider == "ollama"
     assert target.config.system_prompt is not None
     assert cli_module.REFERENCE_CANARY in target.config.system_prompt
+
+    provenance = observed["execution_provenance"]
+    assert isinstance(provenance, tuple)
+    assert len(provenance) == 1
+    descriptor = provenance[0]
+    assert descriptor.kind == cli_module.LOCAL_MODEL_ADMISSION_PROVENANCE_KIND
+    assert descriptor.payload["blue_model_id"] == "blue-test"
+    assert len(descriptor.payload["inventory_sha256"]) == 64
+    assert {binding["label"] for binding in descriptor.payload["bindings"]} == {
+        "blue",
+        "red_mutator",
+        "red_planner",
+    }
     assert '"qualification": null' in result.output
