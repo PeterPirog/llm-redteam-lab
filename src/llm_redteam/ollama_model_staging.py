@@ -9,7 +9,6 @@ SHA-256 and declared size before the stage is admitted for a read-only Docker mo
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from dataclasses import dataclass
 from hashlib import sha256
