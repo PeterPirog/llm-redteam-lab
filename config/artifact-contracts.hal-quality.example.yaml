@@ -2,10 +2,10 @@ version: 1
 
 # Qualification-grade template for the default HAL local quality profile.
 #
-# IMPORTANT: the digests below are deliberately impossible placeholders for a real
-# qualification run. Replace each value with the reviewed local Ollama manifest digest
-# observed on HAL, then freeze that file BEFORE starting POLICY_QUALIFICATION.
-# Do not auto-update pins during the qualification run.
+# IMPORTANT: the digests below are deliberately non-production placeholders. They must
+# not be used as qualification evidence. Replace each value with the reviewed local Ollama
+# manifest digest observed on HAL, then freeze that file BEFORE starting
+# POLICY_QUALIFICATION. Do not auto-update pins during the qualification run.
 models:
   - model_id: nemotron-3.5-lightning:latest
     manifest_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
