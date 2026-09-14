@@ -1,6 +1,6 @@
 """Logical and runtime identity for an isolated local-model OpenCode AGENT target.
 
-The predeclared identity is pure configuration used by campaign planning.  The runtime
+The predeclared identity is pure configuration used by campaign planning. The runtime
 builder independently constructs the Docker-exec/health-gated target and only exposes it
 when the verified Ollama artifact, model-network evidence and application policy agree
 with that predeclared identity.
@@ -16,7 +16,7 @@ from .docker_exec_opencode import build_attested_docker_exec_opencode_target
 from .docker_networked_opencode_supervisor import DockerNetworkedOpenCodeLease
 from .docker_ollama_artifact import DockerOllamaArtifactVerification
 from .docker_supervisor import DockerCommandRunner
-from .domain import EvidenceKind, EvidenceRecord, TargetIdentity
+from .domain import EvidenceKind, EvidenceRecord, TargetClass, TargetIdentity, TargetMode
 from .ollama_artifact import OllamaArtifactContract
 from .opencode_health import HealthGatedOpenCodeTarget
 from .opencode_networked_launch import OpenCodeNetworkedLaunchPolicy
@@ -61,15 +61,11 @@ class VerifiedModelArtifactOpenCodeTarget:
                 "model_artifact_identity_sha256": (
                     self.verification.artifact.identity.identity_sha256
                 ),
-                "model_artifact_digest": (
-                    self.verification.artifact.identity.artifact_digest
-                ),
+                "model_artifact_digest": self.verification.artifact.identity.artifact_digest,
                 "model_peer_artifact_binding_sha256": (
                     self.verification.binding.binding_sha256
                 ),
-                "artifact_probe_profile_sha256": (
-                    self.verification.probe_profile_sha256
-                ),
+                "artifact_probe_profile_sha256": self.verification.probe_profile_sha256,
             },
             redacted=True,
         )
@@ -153,6 +149,12 @@ def build_verified_networked_opencode_target(
     """Build a usable target only when runtime evidence matches predeclared identity."""
 
     launch_policy.model_binding.validate_target_config(config)
+    expected = predeclared_networked_opencode_identity(
+        config=config,
+        launch_policy=launch_policy,
+        sandbox_policy=sandbox_policy,
+        artifact_contract=artifact_contract,
+    )
     artifact = artifact_verification.artifact.identity
     if artifact.provider_id != launch_policy.model_binding.provider_id:
         raise ValueError("verified artifact provider does not match OpenCode model binding")
@@ -160,6 +162,12 @@ def build_verified_networked_opencode_target(
         raise ValueError("verified artifact model does not match OpenCode model binding")
     if artifact.artifact_digest != artifact_contract.manifest_digest:
         raise ValueError("verified artifact digest does not match predeclared artifact contract")
+    if runtime_lease.launch_plan.sandbox_policy_sha256 != sandbox_policy.policy_sha256:
+        raise ValueError("runtime launch plan does not bind the predeclared sandbox policy")
+    if runtime_lease.health.application_version != config.application_version:
+        raise ValueError("runtime OpenCode version does not match predeclared application version")
+    if runtime_lease.health.runtime_profile_sha256 != launch_policy.runtime.profile_sha256:
+        raise ValueError("runtime health does not bind the predeclared runtime profile")
     if (
         runtime_lease.agent.network_attestation.model_peer_container_id_sha256
         != artifact_verification.container_id_sha256
@@ -177,23 +185,11 @@ def build_verified_networked_opencode_target(
         container=container,
         runner=runner,
     )
-    try:
-        gated = HealthGatedOpenCodeTarget(attested, runtime_lease.health)
-        verified = VerifiedModelArtifactOpenCodeTarget(gated, artifact_verification)
-        expected = predeclared_networked_opencode_identity(
-            config=config,
-            launch_policy=launch_policy,
-            sandbox_policy=sandbox_policy,
-            artifact_contract=artifact_contract,
-        )
-        if verified.identity != expected:
-            raise ValueError("runtime OpenCode target identity differs from predeclared Blue identity")
-        return verified
-    except Exception:
-        # Construction has not escaped to campaign code yet.  The async client owns no
-        # host socket (Docker-exec transport only), but the caller still closes it through
-        # the surrounding trial lifecycle after a successful return.
-        raise
+    gated = HealthGatedOpenCodeTarget(attested, runtime_lease.health)
+    verified = VerifiedModelArtifactOpenCodeTarget(gated, artifact_verification)
+    if verified.identity != expected:
+        raise RuntimeError("runtime OpenCode target identity differs from predeclared Blue identity")
+    return verified
 
 
 def _base_opencode_identity(config: OpenCodeConfig) -> TargetIdentity:
@@ -213,8 +209,8 @@ def _base_opencode_identity(config: OpenCodeConfig) -> TargetIdentity:
     )
     return TargetIdentity(
         id=config.id,
-        target_class="coding",
-        target_mode="AGENT",
+        target_class=TargetClass.CODING,
+        target_mode=TargetMode.AGENT,
         model=f"{config.model_provider_id}/{config.model_id}",
         provider="opencode",
         runtime=config.base_url,
