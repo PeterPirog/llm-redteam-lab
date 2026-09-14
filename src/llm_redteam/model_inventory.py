@@ -5,20 +5,25 @@ client connection is local even though inference is remote. Cost/security policy
 therefore use provider metadata, not UI connection labels: a model is admitted as local
 only when both ``remote_model`` and ``remote_host`` are absent.
 
-The parser intentionally retains only measurement-safe model metadata. User IDs, access
-grants and other control-plane fields from an OpenWebUI inventory response are ignored.
+A local artifact identity is not enough by itself. The configured inference endpoint must
+also be local (loopback by default), otherwise a locally named model could still route
+traffic to a remote service. The parser intentionally retains only measurement-safe model
+metadata; user IDs, access grants and other OpenWebUI control-plane fields are ignored.
 """
 
 from __future__ import annotations
 
 import json
+from hashlib import sha256
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
 from .domain import StrictModel
-from .model_roles import ModelLocation, ModelsConfig
+from .model_roles import ModelLocation, ModelRoleConfig, ModelsConfig
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -197,13 +202,31 @@ class OpenWebUIOllamaInventory(StrictModel):
         return record
 
 
+class LocalModelAdmissionBinding(StrictModel):
+    """Hash-safe binding of one execution role to a local artifact and endpoint."""
+
+    label: str = Field(min_length=1)
+    model_id: str = Field(min_length=1)
+    inventory_record_sha256: str = Field(pattern=_HASH_PATTERN)
+    endpoint_sha256: str = Field(pattern=_HASH_PATTERN)
+
+
 class LocalOnlyAdmissionReport(StrictModel):
-    """Hash-safe proof that all selected Red/Blue role models are local artifacts."""
+    """Proof that selected execution roles bind local artifacts to local endpoints."""
 
     inventory_sha256: str = Field(pattern=_HASH_PATTERN)
-    admitted_model_ids: tuple[str, ...]
-    admitted_record_sha256s: tuple[str, ...]
+    bindings: tuple[LocalModelAdmissionBinding, ...]
     blue_model_id: str | None = None
+
+    @property
+    def admitted_model_ids(self) -> tuple[str, ...]:
+        return tuple(sorted({binding.model_id for binding in self.bindings}))
+
+    @property
+    def admitted_record_sha256s(self) -> tuple[str, ...]:
+        return tuple(
+            sorted({binding.inventory_record_sha256 for binding in self.bindings})
+        )
 
     @property
     def proof_sha256(self) -> str:
@@ -215,25 +238,43 @@ def validate_local_only_model_selection(
     models: ModelsConfig,
     inventory: OpenWebUIOllamaInventory,
     blue_model_id: str | None = None,
+    blue_endpoint: str | None = None,
     blue_required_capabilities: set[str] | frozenset[str] = frozenset({"text"}),
+    allowed_endpoint_hosts: set[str] | frozenset[str] = frozenset(),
 ) -> LocalOnlyAdmissionReport:
-    """Fail closed unless every enabled role and optional Blue model is truly local."""
+    """Fail closed unless every enabled role and optional Blue route is truly local."""
 
     if not models.policy.local_first:
         raise ValueError("local-only admission requires models.policy.local_first=true")
     if models.policy.allow_cloud_fallback:
         raise ValueError("local-only admission forbids cloud fallback")
 
-    admitted: dict[str, OllamaInventoryRecord] = {}
+    normalized_allowed_hosts = frozenset(host.strip().casefold() for host in allowed_endpoint_hosts)
+    bindings: list[LocalModelAdmissionBinding] = []
 
-    def admit(config, *, label: str) -> None:
+    def admit(config: ModelRoleConfig, *, label: str) -> None:
         if not config.enabled:
             return
         if config.location != ModelLocation.LOCAL:
             raise ValueError(f"model role is not declared local: {label}")
-        admitted[config.model] = inventory.require_local(
+        if config.endpoint is None:
+            raise ValueError(f"local-only model role requires explicit endpoint: {label}")
+        endpoint_sha256 = require_local_model_endpoint(
+            config.endpoint,
+            label=label,
+            allowed_hosts=normalized_allowed_hosts,
+        )
+        record = inventory.require_local(
             config.model,
             required_capabilities=set(config.capabilities),
+        )
+        bindings.append(
+            LocalModelAdmissionBinding(
+                label=label,
+                model_id=record.model_id,
+                inventory_record_sha256=record.record_sha256,
+                endpoint_sha256=endpoint_sha256,
+            )
         )
 
     for role, config in models.roles.items():
@@ -243,18 +284,62 @@ def validate_local_only_model_selection(
         admit(variant.mutator, label=f"{variant.id}:red_mutator")
 
     if blue_model_id is not None:
-        admitted[blue_model_id] = inventory.require_local(
+        if blue_endpoint is None:
+            raise ValueError("local-only Blue model requires explicit endpoint")
+        endpoint_sha256 = require_local_model_endpoint(
+            blue_endpoint,
+            label="blue",
+            allowed_hosts=normalized_allowed_hosts,
+        )
+        record = inventory.require_local(
             blue_model_id,
             required_capabilities=blue_required_capabilities,
         )
+        bindings.append(
+            LocalModelAdmissionBinding(
+                label="blue",
+                model_id=record.model_id,
+                inventory_record_sha256=record.record_sha256,
+                endpoint_sha256=endpoint_sha256,
+            )
+        )
 
-    ordered = tuple(sorted(admitted.values(), key=lambda record: record.model_id))
+    ordered = tuple(sorted(bindings, key=lambda item: (item.label, item.model_id)))
     return LocalOnlyAdmissionReport(
         inventory_sha256=inventory.inventory_sha256,
-        admitted_model_ids=tuple(record.model_id for record in ordered),
-        admitted_record_sha256s=tuple(record.record_sha256 for record in ordered),
+        bindings=ordered,
         blue_model_id=blue_model_id,
     )
+
+
+def require_local_model_endpoint(
+    endpoint: str,
+    *,
+    label: str,
+    allowed_hosts: set[str] | frozenset[str] = frozenset(),
+) -> str:
+    """Validate one inference endpoint and return its stable SHA-256 fingerprint."""
+
+    normalized = endpoint.strip()
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+        raise ValueError(f"local-only model endpoint is not HTTP(S): {label}")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"local-only model endpoint cannot contain credentials: {label}")
+    host = parsed.hostname.strip().casefold()
+    allowed = {value.strip().casefold() for value in allowed_hosts}
+    if host != "localhost" and host not in allowed:
+        try:
+            address = ip_address(host)
+        except ValueError as exc:
+            raise ValueError(
+                f"model endpoint host is not loopback or explicitly allowed: {label}"
+            ) from exc
+        if not address.is_loopback:
+            raise ValueError(
+                f"model endpoint host is not loopback or explicitly allowed: {label}"
+            )
+    return sha256(normalized.encode()).hexdigest()
 
 
 def load_openwebui_ollama_inventory(path: str | Path) -> OpenWebUIOllamaInventory:
