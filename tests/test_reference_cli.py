@@ -73,6 +73,46 @@ def _write_inventory(path: Path, *, remote_model_id: str | None = None) -> None:
     )
 
 
+def _write_artifact_evidence(contracts: Path, tags: Path) -> None:
+    contracts.write_text(
+        "version: 1\nmodels:\n"
+        f"  - model_id: planner-test\n    manifest_digest: {'a' * 64}\n"
+        f"  - model_id: mutator-test\n    manifest_digest: {'b' * 64}\n"
+        f"  - model_id: blue-test\n    manifest_digest: {'c' * 64}\n",
+        encoding="utf-8",
+    )
+    tags.write_text(
+        json.dumps(
+            {
+                "models": [
+                    {
+                        "name": "planner-test",
+                        "model": "planner-test",
+                        "digest": "a" * 64,
+                        "size": 1024,
+                        "details": {"family": "family-planner-test"},
+                    },
+                    {
+                        "name": "mutator-test",
+                        "model": "mutator-test",
+                        "digest": "b" * 64,
+                        "size": 1024,
+                        "details": {"family": "family-mutator-test"},
+                    },
+                    {
+                        "name": "blue-test",
+                        "model": "blue-test",
+                        "digest": "c" * 64,
+                        "size": 1024,
+                        "details": {"family": "family-blue-test"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _reference_args(models: Path, inventory: Path) -> list[str]:
     return [
         "reference-run",
@@ -182,6 +222,54 @@ def test_reference_run_rejects_remote_blue_endpoint_before_client_construction(
     assert "not loopback or explicitly allowed" in result.output
 
 
+def test_policy_qualification_requires_artifact_evidence_before_client_construction(
+    tmp_path: Path, monkeypatch
+) -> None:
+    models = tmp_path / "models.yaml"
+    inventory = tmp_path / "models.json"
+    _write_models(models)
+    _write_inventory(inventory)
+
+    def forbidden_client(*args, **kwargs):
+        raise AssertionError("model client must not be constructed before artifact qualification")
+
+    monkeypatch.setattr(cli_module, "OpenAICompatibleRoleModelClient", forbidden_client)
+
+    result = runner.invoke(
+        cli_module.app,
+        [
+            *_reference_args(models, inventory),
+            "--stage",
+            "POLICY_QUALIFICATION",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "POLICY_QUALIFICATION requires --artifact-contracts and --ollama-tags" in result.output
+
+
+def test_partial_artifact_evidence_is_rejected_for_smoke(tmp_path: Path) -> None:
+    models = tmp_path / "models.yaml"
+    inventory = tmp_path / "models.json"
+    contracts = tmp_path / "contracts.yaml"
+    tags = tmp_path / "tags.json"
+    _write_models(models)
+    _write_inventory(inventory)
+    _write_artifact_evidence(contracts, tags)
+
+    result = runner.invoke(
+        cli_module.app,
+        [
+            *_reference_args(models, inventory),
+            "--artifact-contracts",
+            str(contracts),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "requires both --artifact-contracts and --ollama-tags" in result.output
+
+
 def test_reference_run_defaults_to_instrumentation_smoke_without_network(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -240,3 +328,73 @@ def test_reference_run_defaults_to_instrumentation_smoke_without_network(
         "red_planner",
     }
     assert '"qualification": null' in result.output
+
+
+def test_policy_qualification_hands_off_local_and_artifact_provenance(
+    tmp_path: Path, monkeypatch
+) -> None:
+    models = tmp_path / "models.yaml"
+    inventory = tmp_path / "models.json"
+    contracts = tmp_path / "contracts.yaml"
+    tags = tmp_path / "tags.json"
+    _write_models(models)
+    _write_inventory(inventory)
+    _write_artifact_evidence(contracts, tags)
+    observed: dict[str, object] = {}
+
+    async def fake_execute_reference_run(**kwargs):
+        observed.update(kwargs)
+        await kwargs["red_client"].aclose()
+        await kwargs["target"].aclose()
+        return object()
+
+    monkeypatch.setattr(cli_module, "_execute_reference_run", fake_execute_reference_run)
+    monkeypatch.setattr(
+        cli_module,
+        "_reference_result_payload",
+        lambda _: {
+            "stage": "POLICY_QUALIFICATION",
+            "experiment_id": "synthetic",
+            "target_snapshot_id": "target",
+            "evaluation_manifest_hash": "a" * 64,
+            "execution_provenance": {},
+            "pair_count": 6,
+            "baseline": {},
+            "treatment": {},
+            "paired": {},
+            "qualification": None,
+        },
+    )
+
+    result = runner.invoke(
+        cli_module.app,
+        [
+            *_reference_args(models, inventory),
+            "--stage",
+            "POLICY_QUALIFICATION",
+            "--artifact-contracts",
+            str(contracts),
+            "--ollama-tags",
+            str(tags),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert observed["stage"] == ReferenceEvaluationStage.POLICY_QUALIFICATION
+    provenance = observed["execution_provenance"]
+    assert isinstance(provenance, tuple)
+    assert {descriptor.kind for descriptor in provenance} == {
+        cli_module.LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
+        cli_module.OLLAMA_ARTIFACT_QUALIFICATION_PROVENANCE_KIND,
+    }
+    artifact_descriptor = next(
+        descriptor
+        for descriptor in provenance
+        if descriptor.kind == cli_module.OLLAMA_ARTIFACT_QUALIFICATION_PROVENANCE_KIND
+    )
+    assert {binding["model_id"] for binding in artifact_descriptor.payload["bindings"]} == {
+        "blue-test",
+        "mutator-test",
+        "planner-test",
+    }

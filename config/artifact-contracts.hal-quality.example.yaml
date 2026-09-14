@@ -1,0 +1,20 @@
+version: 1
+
+# Qualification-grade template for the default HAL local quality profile.
+#
+# IMPORTANT: the digests below are deliberately impossible placeholders for a real
+# qualification run. Replace each value with the reviewed local Ollama manifest digest
+# observed on HAL, then freeze that file BEFORE starting POLICY_QUALIFICATION.
+# Do not auto-update pins during the qualification run.
+models:
+  - model_id: nemotron-3.5-lightning:latest
+    manifest_digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+  - model_id: gpt-oss:latest
+    manifest_digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+  - model_id: qwen3.8:latest
+    manifest_digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+
+# Add judge/forensic pins only when those roles are enabled for the campaign. Disabled
+# roles are intentionally not part of the default qualification artifact set.

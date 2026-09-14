@@ -11,6 +11,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .artifact_qualification import (
+    load_ollama_artifact_contracts,
+    load_ollama_tags_snapshot,
+    qualify_admitted_ollama_artifacts,
+)
 from .campaign_plan import (
     CampaignPlan,
     CampaignPreflight,
@@ -52,6 +57,7 @@ DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
 LOCAL_MODEL_ADMISSION_PROVENANCE_KIND = "local_model_admission_v1"
+OLLAMA_ARTIFACT_QUALIFICATION_PROVENANCE_KIND = "ollama_artifact_qualification_v1"
 
 app = typer.Typer(
     name="llm-redteam",
@@ -189,6 +195,20 @@ def reference_run(
         ReferenceEvaluationStage,
         typer.Option("--stage"),
     ] = ReferenceEvaluationStage.INSTRUMENTATION_SMOKE,
+    artifact_contracts: Annotated[
+        Path | None,
+        typer.Option(
+            "--artifact-contracts",
+            help="YAML with predeclared Ollama manifest digests for qualification.",
+        ),
+    ] = None,
+    ollama_tags: Annotated[
+        Path | None,
+        typer.Option(
+            "--ollama-tags",
+            help="Saved local HAL Ollama /api/tags response used for artifact verification.",
+        ),
+    ] = None,
     target_base_url: Annotated[
         str,
         typer.Option("--target-base-url"),
@@ -224,12 +244,11 @@ def reference_run(
 ) -> None:
     """Run the fixed-corpus local multi-turn reference experiment.
 
-    The default stage is the bounded instrumentation smoke. Policy qualification
-    requires explicitly selecting ``POLICY_QUALIFICATION``. A fresh saved model inventory
-    is mandatory and must prove Red and Blue are not remote Ollama proxies before any
-    model client is constructed. The resulting local-admission proof is hash-bound into
-    both paired campaigns before inference. This command never enables agent network
-    access, git push, real secrets, production targets, or cloud fallback.
+    The default stage is the bounded instrumentation smoke. Policy qualification requires
+    exact, predeclared Ollama artifact identities in addition to local-only admission. All
+    checks complete before Red or Blue model clients are constructed. This command never
+    enables agent network access, git push, real secrets, production targets, or cloud
+    fallback.
     """
 
     try:
@@ -256,12 +275,43 @@ def reference_run(
             blue_endpoint=target_base_url,
             blue_required_capabilities={"text"},
         )
-        execution_provenance = (
+        provenance = [
             build_execution_provenance_descriptor(
                 kind=LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
                 payload=admission_report.model_dump(mode="json"),
-            ),
-        )
+            )
+        ]
+        artifact_inputs_complete = artifact_contracts is not None and ollama_tags is not None
+        artifact_inputs_partial = (artifact_contracts is None) != (ollama_tags is None)
+        if artifact_inputs_partial:
+            raise ValueError(
+                "artifact qualification requires both --artifact-contracts and --ollama-tags"
+            )
+        if (
+            stage == ReferenceEvaluationStage.POLICY_QUALIFICATION
+            and not artifact_inputs_complete
+        ):
+            raise ValueError(
+                "POLICY_QUALIFICATION requires --artifact-contracts and --ollama-tags"
+            )
+        if artifact_inputs_complete:
+            assert artifact_contracts is not None
+            assert ollama_tags is not None
+            contracts = load_ollama_artifact_contracts(artifact_contracts)
+            tags_snapshot = load_ollama_tags_snapshot(ollama_tags)
+            artifact_report = qualify_admitted_ollama_artifacts(
+                admission=admission_report,
+                inventory=inventory,
+                contracts=contracts,
+                tags_snapshot=tags_snapshot,
+            )
+            provenance.append(
+                build_execution_provenance_descriptor(
+                    kind=OLLAMA_ARTIFACT_QUALIFICATION_PROVENANCE_KIND,
+                    payload=artifact_report.model_dump(mode="json"),
+                )
+            )
+        execution_provenance = tuple(provenance)
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
