@@ -40,7 +40,11 @@ def _digest(value: str) -> str:
     return sha256(value.encode()).hexdigest()
 
 
-def _peer_profile(*, provider_id: str = "ollama", model_id: str = "qwen-local") -> DockerModelPeerProfile:
+def _peer_profile(
+    *,
+    provider_id: str = "ollama",
+    model_id: str = "qwen-local",
+) -> DockerModelPeerProfile:
     return DockerModelPeerProfile(
         provider_id=provider_id,
         model_id=model_id,
