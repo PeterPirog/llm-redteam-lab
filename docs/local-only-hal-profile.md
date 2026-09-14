@@ -3,7 +3,8 @@
 HAL has two zero-cloud profiles with different purposes. Both use the same fail-closed
 admission rule: an Ollama/OpenWebUI record is considered local only when both
 `remote_model` and `remote_host` are absent. `connection_type: local` is not sufficient,
-because OpenWebUI can expose a local connection to an Ollama cloud proxy.
+because OpenWebUI can expose a local connection to an Ollama cloud proxy. The configured
+inference endpoint is checked independently and must be loopback by default.
 
 ## Instrumentation smoke profile
 
@@ -72,6 +73,22 @@ Any model carrying `remote_model` or `remote_host` is rejected even if OpenWebUI
 The rule is metadata-based rather than name-based, so renamed cloud proxies are blocked as
 well.
 
+## Endpoint locality is checked independently
+
+A true local inventory record does not prove that the configured client route is local.
+For this reason each enabled role must also declare an explicit HTTP(S) endpoint. By
+default, only `localhost`, IPv4 loopback and IPv6 loopback are admitted. The Blue
+`--target-base-url` is subject to the same check before either model client is built.
+
+A future harness running on another trusted LAN host may explicitly supply a HAL hostname
+to the admission API's `allowed_endpoint_hosts`; this is opt-in and is intentionally not a
+CLI default. A public hostname is never inferred as trusted merely because its model ID
+matches a local inventory record.
+
+The admission proof stores endpoint SHA-256 fingerprints together with the inventory
+record hashes and role labels, so artifact admission and routing admission are one
+hash-bound decision.
+
 ## Mandatory inventory preflight
 
 `reference-run` requires `--model-inventory`. The file is a saved OpenWebUI `/api/models`
@@ -85,7 +102,8 @@ blocked when any selected model:
 - is declared cloud in model configuration;
 - carries `remote_model` or `remote_host` in the inventory;
 - is absent or ambiguous in the inventory;
-- lacks the capabilities claimed by the role configuration; or
+- lacks the capabilities claimed by the role configuration;
+- has a missing or non-local inference endpoint; or
 - would require `allow_cloud_fallback=true`.
 
 This is an execution gate, not merely a documented convention.
