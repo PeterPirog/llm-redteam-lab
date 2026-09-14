@@ -1,9 +1,9 @@
 """Trusted Ollama artifact verification inside an owned Docker model peer.
 
-The model name is not treated as artifact identity.  A predeclared, provider-specific
+The model name is not treated as artifact identity. A predeclared, provider-specific
 inventory command runs through `docker exec` against the exact owned model-peer
 container, returns an Ollama `/api/tags`-compatible JSON object, and is evaluated by the
-existing `OllamaArtifactContract`.  No inference request is performed.
+existing `OllamaArtifactContract`. No inference request is performed.
 """
 
 from __future__ import annotations
@@ -17,7 +17,11 @@ from .agent_actions import canonical_json_hash
 from .docker_model_peer import DockerModelPeerLease, DockerModelPeerProfile
 from .docker_supervisor import DockerCommandRunner, SubprocessDockerCommandRunner
 from .domain import StrictModel
-from .model_artifact import ModelArtifactObservation, ModelPeerArtifactBinding, bind_model_peer_artifact
+from .model_artifact import (
+    ModelArtifactObservation,
+    ModelPeerArtifactBinding,
+    bind_model_peer_artifact,
+)
 from .ollama_artifact import OllamaArtifactContract
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
