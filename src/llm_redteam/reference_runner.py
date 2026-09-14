@@ -58,6 +58,10 @@ from .storage.ablation_repository import (
 )
 from .storage.campaign_status import CampaignTerminalStatus, finish_campaign
 from .storage.evaluation_set_repository import save_evaluation_set_manifest
+from .storage.execution_provenance_repository import (
+    ExecutionProvenanceDescriptor,
+    save_campaign_execution_provenance,
+)
 from .storage.measurement_repository import (
     build_evaluation_campaign_measurement_snapshot,
     fingerprint_attack_policy,
@@ -89,6 +93,7 @@ class ReferenceEvaluationRunResult:
     treatment: ReferenceArmResult
     report: PairedRedAblationReport
     qualification: RedPolicyQualificationDecision | None
+    execution_provenance_hashes: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(slots=True)
@@ -128,15 +133,18 @@ async def run_reference_evaluation_stage(
     red_model_client: RoleModelClient,
     repository: ExperimentRepository,
     run_id: str | None = None,
+    execution_provenance: tuple[ExecutionProvenanceDescriptor, ...] = (),
 ) -> ReferenceEvaluationRunResult:
     """Execute one frozen reference stage and persist its paired evidence.
 
     The two Red arms are separate persisted campaigns, but their trials are executed in the
     deterministic counterbalanced pair order declared by ``PairedRedAblationContract``. This
     avoids turning wall-clock order into an uncontrolled treatment while preserving separate
-    arm-wide budgets.
+    arm-wide budgets. Execution-provenance descriptors are validated before any Red/Blue
+    inference, bound into each arm configuration hash and persisted immutably for both arms.
     """
 
+    ordered_execution_provenance = _validate_execution_provenance(execution_provenance)
     preflight = preflight_reference_evaluation(
         spec=spec,
         cases=cases,
@@ -226,6 +234,7 @@ async def run_reference_evaluation_stage(
         manifest=manifest,
         spec=spec,
         stage=stage,
+        execution_provenance=ordered_execution_provenance,
     )
     treatment = _start_arm(
         arm=AblationArm.TREATMENT,
@@ -243,6 +252,7 @@ async def run_reference_evaluation_stage(
         manifest=manifest,
         spec=spec,
         stage=stage,
+        execution_provenance=ordered_execution_provenance,
     )
     arms = {AblationArm.BASELINE: baseline, AblationArm.TREATMENT: treatment}
 
@@ -329,6 +339,10 @@ async def run_reference_evaluation_stage(
         treatment=_freeze_arm(treatment),
         report=report,
         qualification=qualification,
+        execution_provenance_hashes=tuple(
+            (descriptor.kind, descriptor.content_hash)
+            for descriptor in ordered_execution_provenance
+        ),
     )
 
 
@@ -349,6 +363,7 @@ def _start_arm(
     manifest: HeldOutEvaluationManifest,
     spec: ReferenceEvaluationSpec,
     stage: ReferenceEvaluationStage,
+    execution_provenance: tuple[ExecutionProvenanceDescriptor, ...],
 ) -> _ArmRuntime:
     ledger = BudgetLedger(effective_budget)
     red_runtime = RedStrategyRuntime(
@@ -362,6 +377,9 @@ def _start_arm(
         model_client=red_model_client,
         budget=ledger,
     )
+    provenance_hashes = {
+        descriptor.kind: descriptor.content_hash for descriptor in execution_provenance
+    }
     configuration_hash = _canonical_hash(
         {
             "reference_experiment": spec.experiment_id,
@@ -373,6 +391,7 @@ def _start_arm(
             "attack_policy_fingerprint": policy_fingerprint,
             "judge_policy_fingerprint": judge_fingerprint,
             "evaluation_manifest_hash": manifest.content_hash,
+            "execution_provenance": provenance_hashes,
             "metric_definition_version": METRIC_DEFINITION_VERSION,
         }
     )
@@ -383,6 +402,12 @@ def _start_arm(
         configuration_hash=configuration_hash,
         metric_definition_version=METRIC_DEFINITION_VERSION,
     )
+    for descriptor in execution_provenance:
+        save_campaign_execution_provenance(
+            repository.engine,
+            campaign_id=campaign_id,
+            descriptor=descriptor,
+        )
     measurement = build_evaluation_campaign_measurement_snapshot(
         campaign_id=campaign_id,
         target_snapshot_id=target_snapshot_id,
@@ -469,6 +494,17 @@ def _freeze_arm(context: _ArmRuntime) -> ReferenceArmResult:
         measurement_hash=context.measurement_hash,
         observations=tuple(context.observations),
     )
+
+
+def _validate_execution_provenance(
+    descriptors: tuple[ExecutionProvenanceDescriptor, ...],
+) -> tuple[ExecutionProvenanceDescriptor, ...]:
+    """Return descriptors in canonical order and reject ambiguous duplicate kinds."""
+
+    by_kind = {descriptor.kind: descriptor for descriptor in descriptors}
+    if len(by_kind) != len(descriptors):
+        raise ValueError("reference execution provenance kinds must be unique")
+    return tuple(by_kind[kind] for kind in sorted(by_kind))
 
 
 def _canonical_hash(value: object) -> str:

@@ -36,6 +36,10 @@ from .reference_evaluation import (
 )
 from .reference_runner import ReferenceEvaluationRunResult, run_reference_evaluation_stage
 from .runtime_config import load_budget_config
+from .storage.execution_provenance_repository import (
+    ExecutionProvenanceDescriptor,
+    build_execution_provenance_descriptor,
+)
 from .storage.repository import ExperimentRepository
 from .targets.base import SessionMode
 from .targets.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleTarget
@@ -47,6 +51,7 @@ DEFAULT_REFERENCE_EVALUATION_CORPUS = Path("corpus/native/multiturn/synthetic-se
 DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
+LOCAL_MODEL_ADMISSION_PROVENANCE_KIND = "local_model_admission_v1"
 
 app = typer.Typer(
     name="llm-redteam",
@@ -222,8 +227,9 @@ def reference_run(
     The default stage is the bounded instrumentation smoke. Policy qualification
     requires explicitly selecting ``POLICY_QUALIFICATION``. A fresh saved model inventory
     is mandatory and must prove Red and Blue are not remote Ollama proxies before any
-    model client is constructed. This command never enables agent network access, git
-    push, real secrets, production targets, or cloud fallback.
+    model client is constructed. The resulting local-admission proof is hash-bound into
+    both paired campaigns before inference. This command never enables agent network
+    access, git push, real secrets, production targets, or cloud fallback.
     """
 
     try:
@@ -243,12 +249,18 @@ def reference_run(
                 "reference Blue system policy must explicitly bind RT_SYNTHETIC_CANARY"
             )
         inventory = load_openwebui_ollama_inventory(model_inventory)
-        validate_local_only_model_selection(
+        admission_report = validate_local_only_model_selection(
             models=models,
             inventory=inventory,
             blue_model_id=target_model,
             blue_endpoint=target_base_url,
             blue_required_capabilities={"text"},
+        )
+        execution_provenance = (
+            build_execution_provenance_descriptor(
+                kind=LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
+                payload=admission_report.model_dump(mode="json"),
+            ),
         )
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -283,6 +295,7 @@ def reference_run(
                 judge=judge,
                 red_client=red_client,
                 repository=repository,
+                execution_provenance=execution_provenance,
             )
         )
     except ValueError as exc:
@@ -306,6 +319,7 @@ async def _execute_reference_run(
     judge: DeterministicJudge,
     red_client: OpenAICompatibleRoleModelClient,
     repository: ExperimentRepository,
+    execution_provenance: tuple[ExecutionProvenanceDescriptor, ...],
 ) -> ReferenceEvaluationRunResult:
     try:
         return await run_reference_evaluation_stage(
@@ -321,6 +335,7 @@ async def _execute_reference_run(
             ),
             red_model_client=red_client,
             repository=repository,
+            execution_provenance=execution_provenance,
         )
     finally:
         await red_client.aclose()
@@ -336,6 +351,7 @@ def _reference_result_payload(result: ReferenceEvaluationRunResult) -> dict[str,
         "experiment_id": result.report.contract.experiment_id,
         "target_snapshot_id": result.report.contract.target_snapshot_id,
         "evaluation_manifest_hash": result.manifest.content_hash,
+        "execution_provenance": dict(result.execution_provenance_hashes),
         "pair_count": result.report.pair_count,
         "baseline": {
             "attack_success_rate": baseline.attack_success_rate.value,
@@ -367,6 +383,12 @@ def _print_reference_result(payload: dict[str, object]) -> None:
     table.add_row("Stage", str(payload["stage"]))
     table.add_row("Experiment", str(payload["experiment_id"]))
     table.add_row("Pairs", str(payload["pair_count"]))
+    provenance = payload["execution_provenance"]
+    assert isinstance(provenance, dict)
+    table.add_row(
+        "Execution provenance",
+        ", ".join(f"{kind}={digest}" for kind, digest in provenance.items()) or "none",
+    )
     paired = payload["paired"]
     assert isinstance(paired, dict)
     table.add_row("Violation-rate delta", str(paired["objective_violation_rate_delta"]))

@@ -28,10 +28,15 @@ from llm_redteam.reference_evaluation import ReferenceEvaluationSpec, ReferenceE
 from llm_redteam.reference_runner import run_reference_evaluation_stage
 from llm_redteam.runtime_config import BudgetConfigDocument, RuntimePolicy
 from llm_redteam.storage.ablation_repository import load_red_ablation_experiment
+from llm_redteam.storage.execution_provenance_repository import (
+    build_execution_provenance_descriptor,
+    load_campaign_execution_provenance,
+)
 from llm_redteam.storage.repository import ExperimentRepository
 from llm_redteam.targets.base import SessionMode, TargetRequest, TargetResponse
 
 CANARY = "RT_SYNTHETIC_CANARY"
+PROVENANCE_KIND = "local_model_admission_v1"
 
 
 def _case(case_id: str) -> AttackCase:
@@ -150,6 +155,24 @@ def _decision() -> str:
     )
 
 
+def _provenance(endpoint_hash: str = "e" * 64):
+    return build_execution_provenance_descriptor(
+        kind=PROVENANCE_KIND,
+        payload={
+            "inventory_sha256": "d" * 64,
+            "bindings": [
+                {
+                    "label": "blue",
+                    "model_id": "synthetic-blue",
+                    "inventory_record_sha256": "c" * 64,
+                    "endpoint_sha256": endpoint_hash,
+                }
+            ],
+            "blue_model_id": "synthetic-blue",
+        },
+    )
+
+
 class _SyntheticReferenceTarget:
     def __init__(self, *, provider: str = "ollama") -> None:
         self.provider = provider
@@ -177,10 +200,20 @@ def _client() -> ScriptedRoleModelClient:
     return ScriptedRoleModelClient({ModelRole.RED_PLANNER: [_decision(), _decision()]})
 
 
-def _run(stage: ReferenceEvaluationStage, *, provider: str = "ollama"):
+def _run(
+    stage: ReferenceEvaluationStage,
+    *,
+    provider: str = "ollama",
+    execution_provenance=None,
+):
     target = _SyntheticReferenceTarget(provider=provider)
     client = _client()
     repository = ExperimentRepository.from_url("sqlite+pysqlite:///:memory:")
+    provenance = (
+        (_provenance(),)
+        if execution_provenance is None
+        else tuple(execution_provenance)
+    )
     result = asyncio.run(
         run_reference_evaluation_stage(
             stage=stage,
@@ -194,6 +227,7 @@ def _run(stage: ReferenceEvaluationStage, *, provider: str = "ollama"):
             red_model_client=client,
             repository=repository,
             run_id="fixed-run",
+            execution_provenance=provenance,
         )
     )
     return result, target, client, repository
@@ -214,6 +248,19 @@ def test_reference_smoke_persists_counterbalanced_pair_without_promotion() -> No
     assert result.treatment.observations[0].planner_calls == 1
     assert len(target.requests) == 2
     assert client.calls[ModelRole.RED_PLANNER] == 2
+
+    descriptor = _provenance()
+    assert result.execution_provenance_hashes == (
+        (PROVENANCE_KIND, descriptor.content_hash),
+    )
+    for campaign_id in (result.baseline.campaign_id, result.treatment.campaign_id):
+        persisted_provenance = load_campaign_execution_provenance(
+            repository.engine,
+            campaign_id=campaign_id,
+            kind=PROVENANCE_KIND,
+        )
+        assert persisted_provenance is not None
+        assert persisted_provenance.descriptor == descriptor
 
     experiment_id = result.report.contract.experiment_id
     persisted = load_red_ablation_experiment(repository.engine, experiment_id)
@@ -248,8 +295,50 @@ def test_reference_runner_blocks_wrong_provider_before_red_inference() -> None:
                 red_model_client=client,
                 repository=ExperimentRepository.from_url("sqlite+pysqlite:///:memory:"),
                 run_id="blocked-run",
+                execution_provenance=(_provenance(),),
             )
         )
 
     assert target.requests == []
     assert client.calls[ModelRole.RED_PLANNER] == 0
+
+
+def test_duplicate_execution_provenance_kind_blocks_before_red_or_blue_inference() -> None:
+    target = _SyntheticReferenceTarget()
+    client = _client()
+    descriptor = _provenance()
+
+    with pytest.raises(ValueError, match="provenance kinds must be unique"):
+        asyncio.run(
+            run_reference_evaluation_stage(
+                stage=ReferenceEvaluationStage.INSTRUMENTATION_SMOKE,
+                spec=_spec(),
+                cases=(_case("DISC-1"), _case("EVAL-1")),
+                budgets=_budgets(),
+                models=_models(),
+                target=target,
+                judge=DeterministicJudge(canary=CANARY),
+                judge_policy_descriptor=deterministic_judge_policy_descriptor(canary=CANARY),
+                red_model_client=client,
+                repository=ExperimentRepository.from_url("sqlite+pysqlite:///:memory:"),
+                run_id="duplicate-provenance",
+                execution_provenance=(descriptor, descriptor),
+            )
+        )
+
+    assert target.requests == []
+    assert client.calls[ModelRole.RED_PLANNER] == 0
+
+
+def test_execution_provenance_changes_measurement_identity() -> None:
+    first, _, _, _ = _run(
+        ReferenceEvaluationStage.INSTRUMENTATION_SMOKE,
+        execution_provenance=(_provenance("e" * 64),),
+    )
+    second, _, _, _ = _run(
+        ReferenceEvaluationStage.INSTRUMENTATION_SMOKE,
+        execution_provenance=(_provenance("f" * 64),),
+    )
+
+    assert first.baseline.measurement_hash != second.baseline.measurement_hash
+    assert first.treatment.measurement_hash != second.treatment.measurement_hash
