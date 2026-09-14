@@ -247,6 +247,7 @@ def reference_run(
             models=models,
             inventory=inventory,
             blue_model_id=target_model,
+            blue_endpoint=target_base_url,
             blue_required_capabilities={"text"},
         )
     except (OSError, ValueError) as exc:
