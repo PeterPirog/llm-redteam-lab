@@ -16,7 +16,7 @@ def _repository() -> ExperimentRepository:
     repository.create_schema()
     target = TargetIdentity(
         id="synthetic-local-target",
-        target_class=TargetClass.GENERAL,
+        target_class=TargetClass.REASONING,
         target_mode=TargetMode.MODEL,
         model="local-model",
         provider="ollama",
