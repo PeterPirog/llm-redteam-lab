@@ -1,7 +1,7 @@
 """Fail-closed admission for local-only model execution.
 
 OpenWebUI may expose Ollama cloud proxies with ``connection_type=local`` because the
-client connection is local even though inference is remote.  Cost/security policy must
+client connection is local even though inference is remote. Cost/security policy must
 therefore use provider metadata, not UI connection labels: a model is admitted as local
 only when both ``remote_model`` and ``remote_host`` are absent.
 
@@ -62,8 +62,25 @@ class OllamaInventoryRecord(StrictModel):
         return f"sha256:{self.digest}"
 
     @property
+    def stable_payload(self) -> dict[str, object]:
+        """Return order-stable measurement fields for hashing and provenance."""
+
+        return {
+            "model_id": self.model_id,
+            "digest": self.digest,
+            "artifact_size_bytes": self.artifact_size_bytes,
+            "family": self.family,
+            "parameter_size": self.parameter_size,
+            "quantization_level": self.quantization_level,
+            "context_length": self.context_length,
+            "provider_capabilities": sorted(self.provider_capabilities),
+            "remote_model": self.remote_model,
+            "remote_host": self.remote_host,
+        }
+
+    @property
     def record_sha256(self) -> str:
-        return canonical_json_hash(self.model_dump(mode="json"))
+        return canonical_json_hash(self.stable_payload)
 
 
 class OpenWebUIOllamaInventory(StrictModel):
@@ -150,9 +167,7 @@ class OpenWebUIOllamaInventory(StrictModel):
         return canonical_json_hash(
             {
                 "version": self.version,
-                "records": [
-                    record.model_dump(mode="json") for record in self.records
-                ],
+                "records": [record.stable_payload for record in self.records],
             }
         )
 
