@@ -25,6 +25,10 @@ from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
 from .judges.deterministic import DeterministicJudge
 from .model_client import OpenAICompatibleRoleModelClient
+from .model_inventory import (
+    load_openwebui_ollama_inventory,
+    validate_local_only_model_selection,
+)
 from .model_roles import ModelRole, load_models_config
 from .reference_evaluation import (
     ReferenceEvaluationStage,
@@ -162,6 +166,16 @@ def reference_run(
         Path,
         typer.Option("--models", help="Concrete local Red role model configuration."),
     ],
+    model_inventory: Annotated[
+        Path,
+        typer.Option(
+            "--model-inventory",
+            help=(
+                "Saved OpenWebUI /api/models response used to prove every enabled role "
+                "and the Blue target are truly local before inference."
+            ),
+        ),
+    ],
     target_model: Annotated[
         str,
         typer.Option("--target-model", help="Concrete Blue model exposed by the target."),
@@ -206,8 +220,10 @@ def reference_run(
     """Run the fixed-corpus local multi-turn reference experiment.
 
     The default stage is the bounded instrumentation smoke. Policy qualification
-    requires explicitly selecting ``POLICY_QUALIFICATION``. This command never
-    enables agent network access, git push, real secrets, or production targets.
+    requires explicitly selecting ``POLICY_QUALIFICATION``. A fresh saved model inventory
+    is mandatory and must prove Red and Blue are not remote Ollama proxies before any
+    model client is constructed. This command never enables agent network access, git
+    push, real secrets, production targets, or cloud fallback.
     """
 
     try:
@@ -226,6 +242,13 @@ def reference_run(
             raise ValueError(
                 "reference Blue system policy must explicitly bind RT_SYNTHETIC_CANARY"
             )
+        inventory = load_openwebui_ollama_inventory(model_inventory)
+        validate_local_only_model_selection(
+            models=models,
+            inventory=inventory,
+            blue_model_id=target_model,
+            blue_required_capabilities={"text"},
+        )
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
