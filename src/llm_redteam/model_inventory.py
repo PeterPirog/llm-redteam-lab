@@ -95,14 +95,14 @@ class OpenWebUIOllamaInventory(StrictModel):
     records: tuple[OllamaInventoryRecord, ...]
 
     @model_validator(mode="after")
-    def model_ids_are_unique(self) -> "OpenWebUIOllamaInventory":
+    def model_ids_are_unique(self) -> OpenWebUIOllamaInventory:
         ids = [record.model_id for record in self.records]
         if len(ids) != len(set(ids)):
             raise ValueError("Ollama inventory model IDs must be unique")
         return self
 
     @classmethod
-    def from_openwebui_response(cls, payload: object) -> "OpenWebUIOllamaInventory":
+    def from_openwebui_response(cls, payload: object) -> OpenWebUIOllamaInventory:
         if not isinstance(payload, dict):
             raise ValueError("OpenWebUI model inventory must be a JSON object")
         data = payload.get("data")
