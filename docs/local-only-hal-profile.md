@@ -72,22 +72,41 @@ Any model carrying `remote_model` or `remote_host` is rejected even if OpenWebUI
 The rule is metadata-based rather than name-based, so renamed cloud proxies are blocked as
 well.
 
+## Mandatory inventory preflight
+
+`reference-run` requires `--model-inventory`. The file is a saved OpenWebUI `/api/models`
+response and may be raw JSON or a Markdown fenced JSON block. The command parses it and
+calls `validate_local_only_model_selection(...)` before constructing either the Red model
+client or the Blue target client.
+
+Admission checks every enabled configured role and the selected Blue model. A run is
+blocked when any selected model:
+
+- is declared cloud in model configuration;
+- carries `remote_model` or `remote_host` in the inventory;
+- is absent or ambiguous in the inventory;
+- lacks the capabilities claimed by the role configuration; or
+- would require `allow_cloud_fallback=true`.
+
+This is an execution gate, not merely a documented convention.
+
 ## Recommended first run
 
 When the harness is executed directly on HAL and Ollama listens on the normal loopback
-port, the first real run should use:
+port, first save a fresh OpenWebUI model inventory as, for example,
+`hal-model-inventory.json`, then run:
 
-```text
-models: config/models.hal-smoke.example.yaml
-Blue target model: ornith-1.5:9b
-Blue target base URL: http://127.0.0.1:11434
-stage: INSTRUMENTATION_SMOKE
+```powershell
+llm-redteam reference-run `
+  --models config/models.hal-smoke.example.yaml `
+  --model-inventory hal-model-inventory.json `
+  --target-model ornith-1.5:9b `
+  --target-base-url http://127.0.0.1:11434 `
+  --stage INSTRUMENTATION_SMOKE
 ```
 
-Before any inference, load a fresh OpenWebUI `/api/models` inventory and run
-`validate_local_only_model_selection(...)` over every enabled role and the Blue target.
-This produces a hash-safe `LocalOnlyAdmissionReport` and blocks cloud proxies before model
-clients are constructed.
+Only after that instrumentation run is sound should the stronger local profile be used,
+with `config/models.hal-local.example.yaml` and `qwen3.8:latest` as the initial Blue.
 
 Artifact qualification remains a separate stronger guarantee. Inventory admission proves
 that a selected model is not a remote proxy; `ModelArtifactIdentity` and
