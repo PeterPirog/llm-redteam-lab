@@ -84,6 +84,8 @@ class OllamaArtifactQualificationReport(StrictModel):
     """Qualification proof for all model artifacts actually admitted to one run."""
 
     version: int = Field(ge=1, default=1)
+    admission_proof_sha256: str = Field(pattern=_HASH_PATTERN)
+    inventory_sha256: str = Field(pattern=_HASH_PATTERN)
     tags_snapshot_sha256: str = Field(pattern=_HASH_PATTERN)
     bindings: tuple[QualifiedOllamaArtifactBinding, ...]
 
@@ -104,6 +106,9 @@ def qualify_admitted_ollama_artifacts(
     tags_snapshot: dict[str, object],
 ) -> OllamaArtifactQualificationReport:
     """Require exact pinned local artifact identity for every admitted model ID."""
+
+    if admission.inventory_sha256 != inventory.inventory_sha256:
+        raise ValueError("artifact qualification inventory does not match admission proof")
 
     labels_by_model: dict[str, set[str]] = {}
     record_hashes_by_model: dict[str, set[str]] = {}
@@ -152,6 +157,8 @@ def qualify_admitted_ollama_artifacts(
         )
 
     return OllamaArtifactQualificationReport(
+        admission_proof_sha256=admission.proof_sha256,
+        inventory_sha256=inventory.inventory_sha256,
         tags_snapshot_sha256=canonical_json_hash(tags_snapshot),
         bindings=tuple(qualified),
     )
