@@ -147,6 +147,16 @@ class OpenWebUIOllamaInventory(StrictModel):
             ):
                 raise ValueError(f"Ollama model {model_id} has invalid context length")
 
+            remote_model = _optional_remote_string(
+                ollama.get("remote_model"),
+                field_name="remote_model",
+                model_id=model_id,
+            )
+            remote_host = _optional_remote_string(
+                ollama.get("remote_host"),
+                field_name="remote_host",
+                model_id=model_id,
+            )
             records.append(
                 OllamaInventoryRecord(
                     model_id=model_id,
@@ -159,8 +169,8 @@ class OpenWebUIOllamaInventory(StrictModel):
                     ),
                     context_length=context_length,
                     provider_capabilities=frozenset(raw_capabilities),
-                    remote_model=_optional_nonempty_string(ollama.get("remote_model")),
-                    remote_host=_optional_nonempty_string(ollama.get("remote_host")),
+                    remote_model=remote_model,
+                    remote_host=remote_host,
                 )
             )
         if not records:
@@ -249,7 +259,9 @@ def validate_local_only_model_selection(
     if models.policy.allow_cloud_fallback:
         raise ValueError("local-only admission forbids cloud fallback")
 
-    normalized_allowed_hosts = frozenset(host.strip().casefold() for host in allowed_endpoint_hosts)
+    normalized_allowed_hosts = frozenset(
+        host.strip().casefold() for host in allowed_endpoint_hosts
+    )
     bindings: list[LocalModelAdmissionBinding] = []
 
     def admit(config: ModelRoleConfig, *, label: str) -> None:
@@ -326,6 +338,8 @@ def require_local_model_endpoint(
         raise ValueError(f"local-only model endpoint is not HTTP(S): {label}")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError(f"local-only model endpoint cannot contain credentials: {label}")
+    if parsed.query or parsed.fragment:
+        raise ValueError(f"local-only model endpoint cannot contain query or fragment: {label}")
     host = parsed.hostname.strip().casefold()
     allowed = {value.strip().casefold() for value in allowed_hosts}
     if host != "localhost" and host not in allowed:
@@ -363,3 +377,17 @@ def load_openwebui_ollama_inventory(path: str | Path) -> OpenWebUIOllamaInventor
 
 def _optional_nonempty_string(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _optional_remote_string(
+    value: object,
+    *,
+    field_name: str,
+    model_id: str,
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Ollama model {model_id} has invalid {field_name}")
+    normalized = value.strip()
+    return normalized or None
