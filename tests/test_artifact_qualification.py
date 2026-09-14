@@ -112,8 +112,9 @@ def _tags(**digest_updates: str) -> dict[str, object]:
 
 def test_qualification_binds_every_admitted_model_to_exact_artifact() -> None:
     inventory = _inventory()
+    admission = _admission(inventory)
     report = qualify_admitted_ollama_artifacts(
-        admission=_admission(inventory),
+        admission=admission,
         inventory=inventory,
         contracts=_contracts(),
         tags_snapshot=_tags(),
@@ -124,6 +125,8 @@ def test_qualification_binds_every_admitted_model_to_exact_artifact() -> None:
         "mutator-local",
         "planner-local",
     )
+    assert report.admission_proof_sha256 == admission.proof_sha256
+    assert report.inventory_sha256 == inventory.inventory_sha256
     assert len(report.tags_snapshot_sha256) == 64
     assert len(report.proof_sha256) == 64
     by_model = {binding.model_id: binding for binding in report.bindings}
@@ -131,6 +134,19 @@ def test_qualification_binds_every_admitted_model_to_exact_artifact() -> None:
     assert by_model["blue-local"].artifact_digest == "sha256:" + "c" * 64
     assert all(len(binding.artifact_identity_sha256) == 64 for binding in report.bindings)
     assert all(len(binding.artifact_contract_sha256) == 64 for binding in report.bindings)
+
+
+def test_qualification_rejects_different_inventory_than_admission_snapshot() -> None:
+    inventory = _inventory()
+    admission = _admission(inventory).model_copy(update={"inventory_sha256": "f" * 64})
+
+    with pytest.raises(ValueError, match="inventory does not match admission proof"):
+        qualify_admitted_ollama_artifacts(
+            admission=admission,
+            inventory=inventory,
+            contracts=_contracts(),
+            tags_snapshot=_tags(),
+        )
 
 
 def test_qualification_requires_contract_for_every_admitted_model() -> None:
