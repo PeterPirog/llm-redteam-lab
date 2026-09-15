@@ -27,7 +27,20 @@ def _runtime() -> OpenCodeRuntimeProfile:
     )
 
 
-def _launch_policy(network: DockerIsolatedModelNetworkProfile | None = None):
+def _sandbox() -> DockerSandboxProfile:
+    return DockerSandboxProfile(
+        image_ref=_IMAGE_REF,
+        image_id=_IMAGE_ID,
+        container_workspace="/workspace",
+        memory_limit_bytes=512 * 1024 * 1024,
+        pids_limit=128,
+        cpus=2.0,
+    )
+
+
+def _launch_policy(
+    network: DockerIsolatedModelNetworkProfile | None = None,
+) -> OpenCodeNetworkedLaunchPolicy:
     selected_network = network or _network()
     return OpenCodeNetworkedLaunchPolicy(
         runtime=_runtime(),
@@ -42,14 +55,7 @@ def _launch_policy(network: DockerIsolatedModelNetworkProfile | None = None):
 def _profile() -> DockerNetworkedOpenCodeAgentProfile:
     network = _network()
     return DockerNetworkedOpenCodeAgentProfile.compose(
-        sandbox=DockerSandboxProfile(
-            image_ref=_IMAGE_REF,
-            image_id=_IMAGE_ID,
-            container_workspace="/workspace",
-            memory_limit_bytes=512 * 1024 * 1024,
-            pids_limit=128,
-            cpus=2.0,
-        ),
+        sandbox=_sandbox(),
         model_network=network,
         launch_policy=_launch_policy(network),
     )
@@ -109,10 +115,7 @@ def test_profile_rejects_launch_binding_for_another_network() -> None:
 
     with pytest.raises(ValueError, match="requested model network"):
         DockerNetworkedOpenCodeAgentProfile.compose(
-            sandbox=DockerSandboxProfile(
-                image_ref=_IMAGE_REF,
-                image_id=_IMAGE_ID,
-            ),
+            sandbox=_sandbox(),
             model_network=requested_network,
             launch_policy=_launch_policy(_network()),
         )
@@ -120,10 +123,7 @@ def test_profile_rejects_launch_binding_for_another_network() -> None:
 
 def test_launch_policy_change_changes_docker_enforcement_fingerprint() -> None:
     network = _network()
-    sandbox = DockerSandboxProfile(
-        image_ref=_IMAGE_REF,
-        image_id=_IMAGE_ID,
-    )
+    sandbox = _sandbox()
     first = DockerNetworkedOpenCodeAgentProfile.compose(
         sandbox=sandbox,
         model_network=network,
