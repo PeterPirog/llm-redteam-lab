@@ -30,10 +30,7 @@ from .model_inventory import (
     validate_local_only_model_selection,
 )
 from .model_roles import ModelRole, load_models_config
-from .reference_artifact_provenance import (
-    LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
-    build_reference_execution_provenance,
-)
+from .reference_artifact_provenance import build_reference_execution_provenance
 from .reference_artifact_qualification import (
     load_ollama_artifact_contracts,
     load_ollama_tags_snapshot,
