@@ -30,9 +30,9 @@ type probe struct {
 	client  *http.Client
 }
 
-func newProductionProbe() *probe {
+func newProbe(baseURL string) *probe {
 	return &probe{
-		baseURL: defaultBaseURL,
+		baseURL: baseURL,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -40,6 +40,10 @@ func newProductionProbe() *probe {
 			},
 		},
 	}
+}
+
+func newProductionProbe() *probe {
+	return newProbe(defaultBaseURL)
 }
 
 func main() {
