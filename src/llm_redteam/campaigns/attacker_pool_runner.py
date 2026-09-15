@@ -41,6 +41,7 @@ from ..storage.target_trial_isolation import (
     record_target_trial_isolation_acquired,
     record_target_trial_isolation_released,
 )
+from ..target_trial_close import release_target_trial_lease
 from ..target_trial_isolation import (
     IsolationProvenanceTarget,
     TargetTrialLease,
@@ -192,7 +193,7 @@ class PersistedAttackerPoolRunner:
                 assignment=assignment,
             )
 
-            trial_target, lease = self._acquire_trial_target(
+            trial_target, lease = await self._acquire_trial_target(
                 red_runtime=red_runtime,
                 attack_instance_id=attack_instance_id,
             )
@@ -216,7 +217,10 @@ class PersistedAttackerPoolRunner:
                 if lease is not None:
                     if self.target_lease_provider is None:
                         raise RuntimeError("target lease provider disappeared during trial")
-                    release = self.target_lease_provider.release(lease)
+                    release = await release_target_trial_lease(
+                        self.target_lease_provider,
+                        lease,
+                    )
                     record_target_trial_isolation_released(
                         self.repository.engine,
                         attack_instance_id=attack_instance_id,
@@ -278,7 +282,7 @@ class PersistedAttackerPoolRunner:
             budget=self.runtime.budget.snapshot(),
         )
 
-    def _acquire_trial_target(
+    async def _acquire_trial_target(
         self,
         *,
         red_runtime,
@@ -311,7 +315,10 @@ class PersistedAttackerPoolRunner:
                 attestation=lease.attestation,
             )
         except Exception as exc:
-            release = self.target_lease_provider.release(lease)
+            release = await release_target_trial_lease(
+                self.target_lease_provider,
+                lease,
+            )
             if not release.cleanup_complete:
                 raise RuntimeError(
                     "target-isolation cleanup failed after rejected acquisition"
