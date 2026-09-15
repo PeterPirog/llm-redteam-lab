@@ -62,31 +62,28 @@ class AsyncProvider:
         return _release(lease)
 
 
-@pytest.mark.asyncio
-async def test_release_helper_preserves_sync_provider_contract() -> None:
+def test_release_helper_preserves_sync_provider_contract() -> None:
     lease = _lease()
     provider = SyncProvider()
 
-    result = await release_target_trial_lease(provider, lease)  # type: ignore[arg-type]
+    result = asyncio.run(release_target_trial_lease(provider, lease))  # type: ignore[arg-type]
 
     assert provider.calls == 1
     assert result.cleanup_complete is True
     assert result.lease_id_hash == lease.attestation.lease_id_hash
 
 
-@pytest.mark.asyncio
-async def test_release_helper_awaits_provider_native_async_teardown() -> None:
+def test_release_helper_awaits_provider_native_async_teardown() -> None:
     lease = _lease()
     provider = AsyncProvider()
 
-    result = await release_target_trial_lease(provider, lease)  # type: ignore[arg-type]
+    result = asyncio.run(release_target_trial_lease(provider, lease))  # type: ignore[arg-type]
 
     assert provider.events == ["entered", "completed"]
     assert result.cleanup_complete is True
 
 
-@pytest.mark.asyncio
-async def test_release_helper_rejects_non_awaitable_release_async() -> None:
+def test_release_helper_rejects_non_awaitable_release_async() -> None:
     lease = _lease()
 
     class BrokenProvider(SyncProvider):
@@ -94,11 +91,12 @@ async def test_release_helper_rejects_non_awaitable_release_async() -> None:
             return _release(lease)
 
     with pytest.raises(RuntimeError, match="must return awaitable"):
-        await release_target_trial_lease(BrokenProvider(), lease)  # type: ignore[arg-type]
+        asyncio.run(
+            release_target_trial_lease(BrokenProvider(), lease)  # type: ignore[arg-type]
+        )
 
 
-@pytest.mark.asyncio
-async def test_release_helper_rejects_release_for_another_lease() -> None:
+def test_release_helper_rejects_release_for_another_lease() -> None:
     lease = _lease()
 
     class WrongLeaseProvider(SyncProvider):
@@ -110,4 +108,6 @@ async def test_release_helper_rejects_release_for_another_lease() -> None:
             )
 
     with pytest.raises(RuntimeError, match="does not bind"):
-        await release_target_trial_lease(WrongLeaseProvider(), lease)  # type: ignore[arg-type]
+        asyncio.run(
+            release_target_trial_lease(WrongLeaseProvider(), lease)  # type: ignore[arg-type]
+        )
