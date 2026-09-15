@@ -1,7 +1,7 @@
 import json
+import re
 from pathlib import Path
 
-from click import unstyle
 from typer.testing import CliRunner
 
 import llm_redteam.cli as cli_module
@@ -12,10 +12,11 @@ from llm_redteam.reference_artifact_provenance import (
 from llm_redteam.reference_evaluation import ReferenceEvaluationStage
 
 runner = CliRunner()
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _plain_output(value: str) -> str:
-    return " ".join(unstyle(value).split())
+    return " ".join(_ANSI_ESCAPE.sub("", value).split())
 
 
 def _write_models(path: Path, *, location: str = "local") -> None:
