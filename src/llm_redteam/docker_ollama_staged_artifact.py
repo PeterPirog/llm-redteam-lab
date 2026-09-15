@@ -118,7 +118,7 @@ def _validate_staged_chain(
         raise ValueError("staged store model does not match peer profile")
     if contract.model_id != peer_profile.model_id:
         raise ValueError("artifact contract model does not match peer profile")
-    if contract.expected_manifest_digest != store_identity.manifest_digest:
+    if contract.manifest_digest != store_identity.manifest_digest:
         raise ValueError("artifact contract digest does not match staged store manifest")
     if probe_profile.peer_profile_sha256 != peer_profile.profile_sha256:
         raise ValueError("artifact probe profile does not bind the staged peer profile")
