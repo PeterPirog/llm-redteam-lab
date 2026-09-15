@@ -135,7 +135,15 @@ def _inspect(
     return CommandResult(
         returncode=0,
         stdout=json.dumps(
-            [{"Id": container_id, "Config": {"Cmd": list(command or selected.launch_command), "Env": env}}]
+            [
+                {
+                    "Id": container_id,
+                    "Config": {
+                        "Cmd": list(command or selected.launch_command),
+                        "Env": env,
+                    },
+                }
+            ]
         ),
     )
 
