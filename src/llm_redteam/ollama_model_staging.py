@@ -71,8 +71,8 @@ class OllamaModelStagingSupervisor:
             kind="source Ollama blobs directory",
         )
         self.source_models_root = self.source_models_root.resolve(strict=True)
-        self.staging_root = self.staging_root.resolve(strict=False)
         self._ensure_owned_root()
+        self.staging_root = self.staging_root.resolve(strict=True)
 
     def stage(
         self,
