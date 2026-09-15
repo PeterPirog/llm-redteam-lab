@@ -75,7 +75,8 @@ func TestProbeDoesNotFollowRedirects(t *testing.T) {
 	defer target.Close()
 
 	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Redirect(w, &http.Request{}, target.URL, http.StatusFound)
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusFound)
 	}))
 	defer redirector.Close()
 
