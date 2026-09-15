@@ -30,7 +30,7 @@ class OllamaArtifactContractSet(StrictModel):
     contracts: tuple[OllamaArtifactContract, ...]
 
     @model_validator(mode="after")
-    def model_ids_are_unique(self) -> "OllamaArtifactContractSet":
+    def model_ids_are_unique(self) -> OllamaArtifactContractSet:
         ids = [contract.model_id for contract in self.contracts]
         if len(ids) != len(set(ids)):
             raise ValueError("artifact contract model IDs must be unique")
