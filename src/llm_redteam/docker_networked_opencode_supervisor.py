@@ -161,14 +161,6 @@ def _validate_static_binding(
     if launch_policy.runtime.profile_sha256 != runtime_profile.profile_sha256:
         raise ValueError("OpenCode launch policy does not bind the requested runtime profile")
     launch_policy.model_binding.validate_network(model_network_profile)
-    if (
-        profile.model_endpoint_origin_sha256
-        != canonical_json_hash(model_network_profile.model_endpoint_origin)
-    ):
-        # The profile field is produced by the lower-level networked profile using SHA-256
-        # of the endpoint string, not canonical JSON. Leave the exact check to its own
-        # validated model/network binding below rather than accepting a mismatched profile.
-        pass
     if not _is_sha256(model_peer_container_id_sha256):
         raise ValueError("model-peer container identity must be a lowercase SHA-256")
 
