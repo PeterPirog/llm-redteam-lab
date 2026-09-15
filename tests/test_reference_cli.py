@@ -336,7 +336,9 @@ def test_policy_qualification_requires_exact_artifacts_before_client_constructio
     )
 
     assert result.exit_code == 2
-    assert "requires exact local model artifact qualification" in _plain_output(result.output)
+    plain = _plain_output(result.output)
+    assert "requires exact local model artifact" in plain
+    assert "qualification" in plain
 
 
 def test_reference_run_requires_artifact_inputs_as_pair_before_client_construction(
@@ -364,7 +366,9 @@ def test_reference_run_requires_artifact_inputs_as_pair_before_client_constructi
     )
 
     assert result.exit_code == 2
-    assert "must be provided together" in _plain_output(result.output)
+    plain = _plain_output(result.output)
+    assert "snapshot must be" in plain
+    assert "provided together" in plain
 
 
 def test_policy_qualification_builds_exact_artifact_provenance_before_execution(
