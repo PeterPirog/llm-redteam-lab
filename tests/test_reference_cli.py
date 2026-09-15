@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 import llm_redteam.cli as cli_module
 from llm_redteam.reference_artifact_provenance import (
+    LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
     MODEL_ARTIFACT_QUALIFICATION_PROVENANCE_KIND,
 )
 from llm_redteam.reference_evaluation import ReferenceEvaluationStage
@@ -295,7 +296,7 @@ def test_reference_run_defaults_to_instrumentation_smoke_without_network(
     assert isinstance(provenance, tuple)
     assert len(provenance) == 1
     descriptor = provenance[0]
-    assert descriptor.kind == cli_module.LOCAL_MODEL_ADMISSION_PROVENANCE_KIND
+    assert descriptor.kind == LOCAL_MODEL_ADMISSION_PROVENANCE_KIND
     assert descriptor.payload["blue_model_id"] == "blue-test"
     assert len(descriptor.payload["inventory_sha256"]) == 64
     assert {binding["label"] for binding in descriptor.payload["bindings"]} == {
@@ -416,7 +417,7 @@ def test_policy_qualification_builds_exact_artifact_provenance_before_execution(
     provenance = observed["execution_provenance"]
     assert isinstance(provenance, tuple)
     assert {descriptor.kind for descriptor in provenance} == {
-        cli_module.LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
+        LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
         MODEL_ARTIFACT_QUALIFICATION_PROVENANCE_KIND,
     }
     artifact_descriptor = next(
