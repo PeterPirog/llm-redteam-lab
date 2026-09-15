@@ -30,16 +30,22 @@ from .model_inventory import (
     validate_local_only_model_selection,
 )
 from .model_roles import ModelRole, load_models_config
+from .reference_artifact_provenance import (
+    LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
+    build_reference_execution_provenance,
+)
+from .reference_artifact_qualification import (
+    load_ollama_artifact_contracts,
+    load_ollama_tags_snapshot,
+    qualify_admitted_ollama_artifacts,
+)
 from .reference_evaluation import (
     ReferenceEvaluationStage,
     load_reference_evaluation_spec,
 )
 from .reference_runner import ReferenceEvaluationRunResult, run_reference_evaluation_stage
 from .runtime_config import load_budget_config
-from .storage.execution_provenance_repository import (
-    ExecutionProvenanceDescriptor,
-    build_execution_provenance_descriptor,
-)
+from .storage.execution_provenance_repository import ExecutionProvenanceDescriptor
 from .storage.repository import ExperimentRepository
 from .targets.base import SessionMode
 from .targets.openai_compatible import OpenAICompatibleConfig, OpenAICompatibleTarget
@@ -51,7 +57,6 @@ DEFAULT_REFERENCE_EVALUATION_CORPUS = Path("corpus/native/multiturn/synthetic-se
 DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
-LOCAL_MODEL_ADMISSION_PROVENANCE_KIND = "local_model_admission_v1"
 
 app = typer.Typer(
     name="llm-redteam",
@@ -189,6 +194,26 @@ def reference_run(
         ReferenceEvaluationStage,
         typer.Option("--stage"),
     ] = ReferenceEvaluationStage.INSTRUMENTATION_SMOKE,
+    artifact_contracts: Annotated[
+        Path | None,
+        typer.Option(
+            "--artifact-contracts",
+            help=(
+                "Frozen exact Ollama artifact contracts. Required with --ollama-tags-snapshot "
+                "for POLICY_QUALIFICATION."
+            ),
+        ),
+    ] = None,
+    ollama_tags_snapshot: Annotated[
+        Path | None,
+        typer.Option(
+            "--ollama-tags-snapshot",
+            help=(
+                "Saved local Ollama /api/tags response. Required with --artifact-contracts "
+                "for POLICY_QUALIFICATION."
+            ),
+        ),
+    ] = None,
     target_base_url: Annotated[
         str,
         typer.Option("--target-base-url"),
@@ -224,12 +249,14 @@ def reference_run(
 ) -> None:
     """Run the fixed-corpus local multi-turn reference experiment.
 
-    The default stage is the bounded instrumentation smoke. Policy qualification
-    requires explicitly selecting ``POLICY_QUALIFICATION``. A fresh saved model inventory
+    The default stage is the bounded instrumentation smoke. A fresh saved model inventory
     is mandatory and must prove Red and Blue are not remote Ollama proxies before any
-    model client is constructed. The resulting local-admission proof is hash-bound into
-    both paired campaigns before inference. This command never enables agent network
-    access, git push, real secrets, production targets, or cloud fallback.
+    model client is constructed. ``POLICY_QUALIFICATION`` additionally requires a frozen
+    artifact-contract document plus a saved local Ollama ``/api/tags`` snapshot; exact
+    artifact verification is completed before any target or Red client is constructed.
+    The resulting provenance is hash-bound into both paired campaigns before inference.
+    This command never enables agent network access, git push, real secrets, production
+    targets, or cloud fallback.
     """
 
     try:
@@ -256,11 +283,22 @@ def reference_run(
             blue_endpoint=target_base_url,
             blue_required_capabilities={"text"},
         )
-        execution_provenance = (
-            build_execution_provenance_descriptor(
-                kind=LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
-                payload=admission_report.model_dump(mode="json"),
-            ),
+        if (artifact_contracts is None) != (ollama_tags_snapshot is None):
+            raise ValueError(
+                "--artifact-contracts and --ollama-tags-snapshot must be provided together"
+            )
+        artifact_qualification = None
+        if artifact_contracts is not None and ollama_tags_snapshot is not None:
+            artifact_qualification = qualify_admitted_ollama_artifacts(
+                admission=admission_report,
+                inventory=inventory,
+                contracts=load_ollama_artifact_contracts(artifact_contracts),
+                tags_snapshot=load_ollama_tags_snapshot(ollama_tags_snapshot),
+            )
+        execution_provenance = build_reference_execution_provenance(
+            stage=stage,
+            admission=admission_report,
+            artifact_qualification=artifact_qualification,
         )
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
