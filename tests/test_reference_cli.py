@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from click import unstyle
 from typer.testing import CliRunner
 
 import llm_redteam.cli as cli_module
@@ -11,6 +12,10 @@ from llm_redteam.reference_artifact_provenance import (
 from llm_redteam.reference_evaluation import ReferenceEvaluationStage
 
 runner = CliRunner()
+
+
+def _plain_output(value: str) -> str:
+    return " ".join(unstyle(value).split())
 
 
 def _write_models(path: Path, *, location: str = "local") -> None:
@@ -330,7 +335,7 @@ def test_policy_qualification_requires_exact_artifacts_before_client_constructio
     )
 
     assert result.exit_code == 2
-    assert "requires exact local model artifact qualification" in result.output
+    assert "requires exact local model artifact qualification" in _plain_output(result.output)
 
 
 def test_reference_run_requires_artifact_inputs_as_pair_before_client_construction(
@@ -358,7 +363,7 @@ def test_reference_run_requires_artifact_inputs_as_pair_before_client_constructi
     )
 
     assert result.exit_code == 2
-    assert "must be provided together" in result.output
+    assert "must be provided together" in _plain_output(result.output)
 
 
 def test_policy_qualification_builds_exact_artifact_provenance_before_execution(
