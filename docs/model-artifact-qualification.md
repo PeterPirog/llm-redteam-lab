@@ -77,6 +77,31 @@ contracts:
 
 Do not copy placeholder digests into a qualification run. The contract must be produced from a fresh HAL observation and then treated as a frozen experimental input.
 
+## CLI gate
+
+`reference-run` keeps the bounded instrumentation smoke lightweight: `--model-inventory` is required, but exact artifact inputs are optional for `INSTRUMENTATION_SMOKE`.
+
+For `POLICY_QUALIFICATION`, both of the following must be supplied together:
+
+- `--artifact-contracts <frozen-contracts.yaml>`
+- `--ollama-tags-snapshot <saved-tags.json>`
+
+The command validates local admission, loads and verifies the exact artifact contract set, cross-checks the saved `/api/tags` snapshot, and constructs stage-appropriate execution provenance **before** constructing the target or Red model clients. Supplying only one of the two artifact inputs fails closed. Selecting `POLICY_QUALIFICATION` without exact artifact qualification also fails closed.
+
+Example shape for a real qualification command after fresh HAL evidence has been captured:
+
+```text
+llm-redteam reference-run \
+  --models config/models.hal-local.example.yaml \
+  --model-inventory <fresh-openwebui-api-models.json> \
+  --target-model <blue-model-id> \
+  --stage POLICY_QUALIFICATION \
+  --artifact-contracts <frozen-artifact-contracts.yaml> \
+  --ollama-tags-snapshot <fresh-ollama-api-tags.json>
+```
+
+The angle-bracket values are operator placeholders, not executable sample data. Exact model IDs and digests must come from the same frozen HAL model state used for the run.
+
 ## When HAL becomes necessary
 
 No HAL access, Ollama daemon, GPU, model inference or cloud API is required to develop and unit-test the qualification logic. Synthetic snapshots are sufficient for CI.
