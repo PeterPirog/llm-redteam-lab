@@ -15,6 +15,7 @@ from llm_redteam.docker_networked_opencode_profile import (
     DockerNetworkedOpenCodeAgentProfile,
 )
 from llm_redteam.docker_sandbox import DockerSandboxProfile
+from llm_redteam.domain import TargetMode
 from llm_redteam.opencode_model_peer import OpenCodeModelPeerBinding
 from llm_redteam.opencode_networked_launch import OpenCodeNetworkedLaunchPolicy
 from llm_redteam.opencode_runtime import (
@@ -216,7 +217,7 @@ def test_declared_target_is_agent_and_direct_execution_is_fail_closed(tmp_path: 
     provider, _, _ = _provider(tmp_path)
 
     assert provider.isolation_level == TargetIsolationLevel.DISPOSABLE_SANDBOX
-    assert provider.declared_target.identity.target_mode.value == "agent"
+    assert provider.declared_target.identity.target_mode == TargetMode.AGENT
     response = asyncio.run(provider.declared_target.execute(SimpleNamespace()))
     assert response.error_kind == "isolation:disposable_trial_lease_required"
 
