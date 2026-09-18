@@ -173,6 +173,7 @@ def test_hal_smoke_preflight_composes_saved_hal_evidence_without_runtime_calls(
     assert payload["phase"] == "offline_composed"
     assert payload["live_runtime_admitted"] is False
     assert payload["blue_artifact_digest"] == "sha256:" + _DIGESTS[_BLUE]
+    assert len(payload["red_measurement_binding_sha256"]) == 64
     assert len(payload["composition_sha256"]) == 64
     assert len(payload["model_network_profile_sha256"]) == 64
     assert len(payload["model_peer_profile_sha256"]) == 64
