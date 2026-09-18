@@ -474,17 +474,17 @@ class CampaignLifecycleExecutor:
         )
         if required is None:
             return None
+        if fixture_descriptors:
+            raise ValueError(
+                "fixture execution with isolated target trials requires compound "
+                "fixture/target isolation and remains deferred"
+            )
         if self.target_lease_provider is None:
             raise ValueError(
                 "campaign target/session mode requires a per-trial target isolation provider"
             )
         if self.target_lease_provider.isolation_level < required:
             raise ValueError("target isolation provider is weaker than required")
-        if fixture_descriptors:
-            raise ValueError(
-                "fixture execution with isolated target trials requires compound "
-                "fixture/target isolation and remains deferred"
-            )
         return required
 
     def _target_isolation_descriptor(self, required_isolation):
