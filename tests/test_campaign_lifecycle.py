@@ -32,6 +32,10 @@ from llm_redteam.judges.base import Judgment
 from llm_redteam.judges.deterministic import DeterministicJudge
 from llm_redteam.runtime_config import BudgetConfigDocument, RuntimePolicy
 from llm_redteam.storage.campaign_status import CampaignTerminalStatus
+from llm_redteam.storage.execution_provenance_repository import (
+    build_execution_provenance_descriptor,
+    load_campaign_execution_provenance,
+)
 from llm_redteam.storage.measurement_repository import (
     fingerprint_attack_policy,
     fingerprint_judge_policy,
@@ -491,3 +495,138 @@ def test_agent_lifecycle_uses_unique_disposable_lease_for_every_replicate() -> N
         for execution in result.executions
         for evidence in execution.evidence
     } >= {"target_trial_isolation"}
+
+
+def test_standard_campaign_persists_and_hash_binds_execution_provenance() -> None:
+    target = VulnerableVaultTarget(canary=CANARY)
+    repository = ExperimentRepository.from_url("sqlite+pysqlite:///:memory:")
+    provenance = build_execution_provenance_descriptor(
+        kind="model_artifact_qualification_v1",
+        payload={
+            "red_planner": {
+                "model": "planner-local",
+                "digest": "sha256:" + "a" * 64,
+            },
+            "red_mutator": {
+                "model": "mutator-local",
+                "digest": "sha256:" + "b" * 64,
+            },
+        },
+    )
+    executor = CampaignLifecycleExecutor(
+        target=target,
+        judge=DeterministicJudge(canary=CANARY),
+        repository=repository,
+        budgets=_budget_document(),
+        judge_policy_descriptor=deterministic_judge_policy_descriptor(canary=CANARY),
+        execution_provenance=(provenance,),
+    )
+    plan = CampaignPlan(
+        purpose=CampaignPurpose.DISCOVERY,
+        target_class=TargetClass.WRITING,
+        target_mode=TargetMode.MODEL,
+        red_policy=RedPolicyKind.STATIC,
+    )
+
+    result = asyncio.run(
+        executor.run(
+            plan=plan,
+            cases=(_case("provenance-bound"),),
+            campaign_id="campaign-provenance-bound",
+        )
+    )
+
+    assert result.execution_provenance_hashes == (
+        (provenance.kind, provenance.content_hash),
+    )
+    saved = load_campaign_execution_provenance(
+        repository.engine,
+        campaign_id=result.campaign_id,
+        kind=provenance.kind,
+    )
+    assert saved is not None
+    assert saved.descriptor == provenance
+
+    with Session(repository.engine) as session:
+        row = session.get(CampaignRow, result.campaign_id)
+        assert row is not None
+        configuration_hash = row.configuration_hash
+
+    second_repository = ExperimentRepository.from_url("sqlite+pysqlite:///:memory:")
+    changed = build_execution_provenance_descriptor(
+        kind="model_artifact_qualification_v1",
+        payload={
+            "red_planner": {
+                "model": "planner-local",
+                "digest": "sha256:" + "c" * 64,
+            },
+            "red_mutator": {
+                "model": "mutator-local",
+                "digest": "sha256:" + "b" * 64,
+            },
+        },
+    )
+    second_executor = CampaignLifecycleExecutor(
+        target=VulnerableVaultTarget(canary=CANARY),
+        judge=DeterministicJudge(canary=CANARY),
+        repository=second_repository,
+        budgets=_budget_document(),
+        judge_policy_descriptor=deterministic_judge_policy_descriptor(canary=CANARY),
+        execution_provenance=(changed,),
+    )
+    second = asyncio.run(
+        second_executor.run(
+            plan=plan,
+            cases=(_case("provenance-bound"),),
+            campaign_id="campaign-provenance-changed",
+        )
+    )
+    with Session(second_repository.engine) as session:
+        second_row = session.get(CampaignRow, second.campaign_id)
+        assert second_row is not None
+        assert second_row.configuration_hash != configuration_hash
+
+
+def test_standard_campaign_canonicalizes_execution_provenance_order() -> None:
+    first = build_execution_provenance_descriptor(
+        kind="local_model_admission_v1",
+        payload={"inventory": "a" * 64},
+    )
+    second = build_execution_provenance_descriptor(
+        kind="model_artifact_qualification_v1",
+        payload={"qualification": "b" * 64},
+    )
+    executor = CampaignLifecycleExecutor(
+        target=VulnerableVaultTarget(canary=CANARY),
+        judge=DeterministicJudge(canary=CANARY),
+        repository=ExperimentRepository.from_url("sqlite+pysqlite:///:memory:"),
+        budgets=_budget_document(),
+        judge_policy_descriptor=deterministic_judge_policy_descriptor(canary=CANARY),
+        execution_provenance=(second, first),
+    )
+
+    assert tuple(item.kind for item in executor.execution_provenance) == (
+        "local_model_admission_v1",
+        "model_artifact_qualification_v1",
+    )
+
+
+def test_standard_campaign_rejects_duplicate_execution_provenance_kinds() -> None:
+    first = build_execution_provenance_descriptor(
+        kind="local_model_admission_v1",
+        payload={"inventory": "a" * 64},
+    )
+    second = build_execution_provenance_descriptor(
+        kind="local_model_admission_v1",
+        payload={"inventory": "b" * 64},
+    )
+
+    with pytest.raises(ValueError, match="provenance kinds must be unique"):
+        CampaignLifecycleExecutor(
+            target=VulnerableVaultTarget(canary=CANARY),
+            judge=DeterministicJudge(canary=CANARY),
+            repository=ExperimentRepository.from_url("sqlite+pysqlite:///:memory:"),
+            budgets=_budget_document(),
+            judge_policy_descriptor=deterministic_judge_policy_descriptor(canary=CANARY),
+            execution_provenance=(first, second),
+        )
