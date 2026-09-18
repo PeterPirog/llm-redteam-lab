@@ -31,7 +31,10 @@ from .domain import TargetClass, TargetIdentity, TargetMode
 from .opencode_health import HealthGatedOpenCodeTarget
 from .opencode_networked_launch import OpenCodeNetworkedLaunchPolicy
 from .opencode_runtime import AgentSandboxPolicy, OpenCodeRuntimeProfile
-from .target_measurement_binding import MeasurementBoundTarget, bind_target_measurement_identity
+from .target_measurement_binding import (
+    MeasurementBoundTarget,
+    bind_target_measurement_identity,
+)
 from .target_trial_isolation import (
     TargetIsolationLevel,
     TargetTrialIsolationAttestation,
