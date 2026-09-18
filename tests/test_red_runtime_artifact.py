@@ -9,8 +9,8 @@ from llm_redteam.red_artifact_identity import red_artifact_measurement_binding_s
 from llm_redteam.red_runtime_artifact import (
     RED_RUNTIME_ARTIFACT_RECHECK_PROVENANCE_KIND,
     HttpxLocalOllamaTagsProbe,
-    red_runtime_artifact_recheck_provenance,
     recheck_red_runtime_artifacts,
+    red_runtime_artifact_recheck_provenance,
 )
 from llm_redteam.reference_artifact_qualification import (
     QualifiedArtifactBinding,
