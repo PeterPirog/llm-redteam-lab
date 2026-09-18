@@ -140,7 +140,7 @@ def test_hal_smoke_preflight_rejects_partial_runtime_evidence(tmp_path: Path) ->
     )
 
     assert result.exit_code == 2
-    assert "requires all of" in result.stdout
+    assert "requires all of" in result.stderr
 
 
 def test_hal_smoke_preflight_composes_saved_hal_evidence_without_runtime_calls(
