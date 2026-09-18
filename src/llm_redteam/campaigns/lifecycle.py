@@ -39,6 +39,10 @@ from ..red.scripted import ScriptedPayloadStrategy
 from ..runtime_config import BudgetConfigDocument
 from ..storage.campaign_status import CampaignTerminalStatus, finish_campaign
 from ..storage.evaluation_set_repository import save_evaluation_set_manifest
+from ..storage.execution_provenance_repository import (
+    ExecutionProvenanceDescriptor,
+    save_campaign_execution_provenance,
+)
 from ..storage.measurement_repository import (
     build_campaign_measurement_snapshot,
     build_evaluation_campaign_measurement_snapshot,
@@ -91,6 +95,7 @@ class CampaignLifecycleResult:
     red_diagnostics: RedRuntimeDiagnostics | None
     measurement_error: str | None
     budget: BudgetSnapshot
+    execution_provenance_hashes: tuple[tuple[str, str], ...] = ()
 
 
 def static_attack_policy_descriptor(plan: CampaignPlan) -> dict[str, object]:
@@ -137,6 +142,7 @@ class CampaignLifecycleExecutor:
         red_model_client: RoleModelClient | None = None,
         fixture_runtime: FixtureRuntime | None = None,
         target_lease_provider: TargetTrialLeaseProvider | None = None,
+        execution_provenance: tuple[ExecutionProvenanceDescriptor, ...] = (),
     ) -> None:
         self.target = target
         self.judge = judge
@@ -147,6 +153,7 @@ class CampaignLifecycleExecutor:
         self.red_model_client = red_model_client
         self.fixture_runtime = fixture_runtime
         self.target_lease_provider = target_lease_provider
+        self.execution_provenance = _validate_execution_provenance(execution_provenance)
 
     async def run(
         self,
@@ -209,6 +216,10 @@ class CampaignLifecycleExecutor:
         )
 
         resolved_campaign_id = campaign_id or f"campaign-{uuid4().hex}"
+        provenance_hashes = {
+            descriptor.kind: descriptor.content_hash
+            for descriptor in self.execution_provenance
+        }
         configuration_hash = _canonical_hash(
             {
                 "plan": plan.model_dump(mode="json"),
@@ -221,6 +232,7 @@ class CampaignLifecycleExecutor:
                 "budget_fingerprint": budget_fingerprint,
                 "target_snapshot_id": target_snapshot_id,
                 "target_isolation": self._target_isolation_descriptor(required_isolation),
+                "execution_provenance": provenance_hashes,
                 "metric_definition_version": METRIC_DEFINITION_VERSION,
             }
         )
@@ -240,6 +252,12 @@ class CampaignLifecycleExecutor:
             configuration_hash=configuration_hash,
             metric_definition_version=METRIC_DEFINITION_VERSION,
         )
+        for descriptor in self.execution_provenance:
+            save_campaign_execution_provenance(
+                self.repository.engine,
+                campaign_id=resolved_campaign_id,
+                descriptor=descriptor,
+            )
 
         measurement_hash = ""
         executions: list[ExecutionResult] = []
@@ -460,6 +478,10 @@ class CampaignLifecycleExecutor:
             red_diagnostics=red_runtime.diagnostics() if red_runtime is not None else None,
             measurement_error=measurement_error,
             budget=ledger.snapshot(),
+            execution_provenance_hashes=tuple(
+                (descriptor.kind, descriptor.content_hash)
+                for descriptor in self.execution_provenance
+            ),
         )
 
     def _validate_target_isolation_policy(
@@ -806,6 +828,17 @@ class CampaignLifecycleExecutor:
             raise ValueError("attack_policy_fingerprint does not match actual Red policy")
         if plan.judge_policy_fingerprint != judge_fingerprint:
             raise ValueError("judge_policy_fingerprint does not match actual Judge policy")
+
+
+def _validate_execution_provenance(
+    descriptors: tuple[ExecutionProvenanceDescriptor, ...],
+) -> tuple[ExecutionProvenanceDescriptor, ...]:
+    """Canonicalize campaign execution provenance and reject duplicate kinds."""
+
+    by_kind = {descriptor.kind: descriptor for descriptor in descriptors}
+    if len(by_kind) != len(descriptors):
+        raise ValueError("campaign execution provenance kinds must be unique")
+    return tuple(by_kind[kind] for kind in sorted(by_kind))
 
 
 def _attack_payload_hash(
