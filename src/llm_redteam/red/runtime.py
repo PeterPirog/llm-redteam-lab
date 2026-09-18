@@ -89,6 +89,7 @@ def build_model_backed_red_policy_descriptor(
     duplicate_similarity_threshold: float = 0.92,
     fixture_priming_enabled: bool = False,
     attacker_variant_id: str | None = None,
+    red_measurement_binding_sha256: str | None = None,
 ) -> dict[str, object]:
     """Build the exact campaign-start Red identity without making an inference call."""
 
@@ -98,6 +99,14 @@ def build_model_backed_red_policy_descriptor(
         raise ValueError("duplicate_similarity_threshold must be between 0 and 1")
     if fixture_priming_enabled and target_mode != TargetMode.AGENT:
         raise ValueError("fixture-primed adaptive Red currently requires target_mode=AGENT")
+    if red_measurement_binding_sha256 is not None and (
+        len(red_measurement_binding_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in red_measurement_binding_sha256
+        )
+    ):
+        raise ValueError("Red measurement binding must be a lowercase SHA-256")
 
     planner = models.resolve_role_config(
         ModelRole.RED_PLANNER,
@@ -147,6 +156,8 @@ def build_model_backed_red_policy_descriptor(
         "mechanism_policy": mechanism_policy,
         "initial_learning_memory": "empty-v1",
     }
+    if red_measurement_binding_sha256 is not None:
+        descriptor["red_measurement_binding_sha256"] = red_measurement_binding_sha256
     if target_mode == TargetMode.AGENT:
         descriptor["runtime_version"] = _AGENT_RED_RUNTIME_VERSION
         descriptor["threat_lens"] = "agent-system-v1"
@@ -185,6 +196,7 @@ class RedStrategyRuntime:
         duplicate_similarity_threshold: float = 0.92,
         fixture_priming_enabled: bool = False,
         attacker_variant_id: str | None = None,
+        red_measurement_binding_sha256: str | None = None,
     ) -> None:
         self._descriptor = build_model_backed_red_policy_descriptor(
             policy=policy,
@@ -197,6 +209,7 @@ class RedStrategyRuntime:
             duplicate_similarity_threshold=duplicate_similarity_threshold,
             fixture_priming_enabled=fixture_priming_enabled,
             attacker_variant_id=attacker_variant_id,
+            red_measurement_binding_sha256=red_measurement_binding_sha256,
         )
 
         self.policy = policy
@@ -222,6 +235,7 @@ class RedStrategyRuntime:
         )
         self.duplicate_similarity_threshold = duplicate_similarity_threshold
         self.fixture_priming_enabled = fixture_priming_enabled
+        self.red_measurement_binding_sha256 = red_measurement_binding_sha256
         self.tactic_memory = RedCampaignMemory()
         self.mechanism_memory = MechanismCampaignMemory()
         self._observed_families: set[str] = set()
