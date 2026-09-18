@@ -48,6 +48,21 @@ from ..storage.measurement_repository import (
     save_campaign_measurement_snapshot,
 )
 from ..storage.repository import ExperimentRepository
+from ..storage.target_trial_isolation import (
+    TargetTrialIsolationRecord,
+    ensure_target_trial_isolation_schema,
+    load_target_trial_isolation_records,
+    record_target_trial_isolation_acquired,
+    record_target_trial_isolation_released,
+)
+from ..target_trial_close import release_target_trial_lease
+from ..target_trial_isolation import (
+    IsolationProvenanceTarget,
+    TargetTrialLease,
+    TargetTrialLeaseProvider,
+    minimum_isolation_level,
+    validate_target_trial_lease,
+)
 from ..targets.base import TargetAdapter
 from .engine import CampaignEngine
 from .multiturn import (
@@ -71,6 +86,7 @@ class CampaignLifecycleResult:
     status: CampaignTerminalStatus
     executions: tuple[ExecutionResult, ...]
     conversations: tuple[ConversationRunResult, ...]
+    isolation_records: tuple[TargetTrialIsolationRecord, ...]
     metrics: DiscoveryMetrics | EvaluationMetrics | None
     red_diagnostics: RedRuntimeDiagnostics | None
     measurement_error: str | None
@@ -120,6 +136,7 @@ class CampaignLifecycleExecutor:
         models: ModelsConfig | None = None,
         red_model_client: RoleModelClient | None = None,
         fixture_runtime: FixtureRuntime | None = None,
+        target_lease_provider: TargetTrialLeaseProvider | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -129,6 +146,7 @@ class CampaignLifecycleExecutor:
         self.models = models
         self.red_model_client = red_model_client
         self.fixture_runtime = fixture_runtime
+        self.target_lease_provider = target_lease_provider
 
     async def run(
         self,
@@ -159,6 +177,10 @@ class CampaignLifecycleExecutor:
 
         selected = self._selected_cases(plan, cases, evaluation_manifest)
         fixture_descriptors = self._describe_fixtures(selected)
+        required_isolation = self._validate_target_isolation_policy(
+            plan=plan,
+            fixture_descriptors=fixture_descriptors,
+        )
         profile_name, effective_budget = self.budgets.profile(plan.budget_profile)
         ledger = BudgetLedger(effective_budget)
         red_runtime = self._build_red_runtime(
@@ -198,11 +220,13 @@ class CampaignLifecycleExecutor:
                 "budget_profile": profile_name,
                 "budget_fingerprint": budget_fingerprint,
                 "target_snapshot_id": target_snapshot_id,
+                "target_isolation": self._target_isolation_descriptor(required_isolation),
                 "metric_definition_version": METRIC_DEFINITION_VERSION,
             }
         )
 
         self.repository.create_schema()
+        ensure_target_trial_isolation_schema(self.repository.engine)
         persisted_snapshot_id = self.repository.save_target(self.target.identity)
         if persisted_snapshot_id != target_snapshot_id:
             raise RuntimeError("target snapshot identity changed during campaign setup")
