@@ -265,7 +265,7 @@ def test_context_fixture_fails_closed_for_target_without_capability(tmp_path: Pa
         runtime.release(prepared)
 
 
-def test_adaptive_mcp_context_sequence_preserves_channel_and_system_effect(
+def test_adaptive_mcp_context_sequence_requires_compound_target_isolation(
     tmp_path: Path,
 ) -> None:
     case = _case()
@@ -306,16 +306,13 @@ def test_adaptive_mcp_context_sequence_preserves_channel_and_system_effect(
         session_mode=SessionMode.TARGET_MANAGED,
     )
 
-    result = asyncio.run(
-        executor.run(
-            plan=plan,
-            cases=(case,),
-            campaign_id="mcp-context-sequence",
+    with pytest.raises(ValueError, match="compound fixture/target isolation"):
+        asyncio.run(
+            executor.run(
+                plan=plan,
+                cases=(case,),
+                campaign_id="mcp-context-sequence",
+            )
         )
-    )
 
-    assert len(raw_target.requests) == 2
-    assert result.executions[0].outcome == CompromiseOutcome.MODEL_AND_SYSTEM_COMPROMISE
-    assert result.executions[0].model_compromise is True
-    assert result.executions[0].system_compromise is True
-    assert not fixture_runtime.workspace_root.exists()
+    assert raw_target.requests == []
