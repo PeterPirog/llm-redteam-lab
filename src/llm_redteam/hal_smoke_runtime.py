@@ -13,7 +13,7 @@ artifact probes are explicitly non-inference probes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic import Field
 
@@ -76,6 +76,7 @@ class HalSmokeBlueInfrastructureRelease(StrictModel):
 class _ActiveInfrastructure:
     lease: HalSmokeBlueInfrastructureLease
     composition: HalSmokeOfflineComposition
+    trial_providers: list[DockerOpenCodeTrialLeaseProvider] = field(default_factory=list)
     peer_released: bool = False
     network_released: bool = False
 
@@ -209,7 +210,7 @@ class HalSmokeBlueInfrastructureSupervisor:
         if active.peer_released or active.network_released:
             raise RuntimeError("HAL Blue infrastructure is already partially released")
         composition = active.composition
-        return DockerOpenCodeTrialLeaseProvider(
+        provider = DockerOpenCodeTrialLeaseProvider(
             provider_id=provider_id,
             workspace_supervisor=workspace_supervisor,
             runtime_supervisor=runtime_supervisor,
@@ -228,6 +229,8 @@ class HalSmokeBlueInfrastructureSupervisor:
             model_peer_runtime_proof_sha256=lease.artifact.proof_sha256,
             health_python_executable=health_python_executable,
         )
+        active.trial_providers.append(provider)
+        return provider
 
     def release(
         self,
@@ -236,6 +239,10 @@ class HalSmokeBlueInfrastructureSupervisor:
         """Release the exact model peer first and only then its isolated network."""
 
         active = self._require_active(lease)
+        if any(provider.active_trial_count for provider in active.trial_providers):
+            raise RuntimeError(
+                "cannot release HAL Blue infrastructure while trial leases are active"
+            )
 
         if not active.peer_released:
             try:
