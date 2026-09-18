@@ -80,8 +80,9 @@ If peer teardown fails, the network is preserved. A subsequent release call can 
 failed admission follows the same peer-before-network cleanup rule.
 
 Per-trial OpenCode targets/workspaces must already have been released before campaign
-infrastructure teardown. Docker ownership checks remain the final enforcement mechanism if an
-operator violates that lifecycle.
+infrastructure teardown. The campaign supervisor tracks every trial provider it creates and
+refuses teardown while any provider reports an active trial lease. Docker ownership checks
+remain the final enforcement mechanism behind that explicit lifecycle guard.
 
 ## Consequences
 
