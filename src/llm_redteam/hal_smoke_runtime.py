@@ -39,8 +39,13 @@ from .hal_smoke_preflight import HalSmokeOfflineComposition
 from .ollama_artifact import OllamaArtifactContract
 from .ollama_model_staging import PreparedOllamaModelStore
 from .opencode_trial_isolation import DockerOpenCodeTrialLeaseProvider
+from .storage.execution_provenance_repository import (
+    ExecutionProvenanceDescriptor,
+    build_execution_provenance_descriptor,
+)
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
+HAL_BLUE_INFRASTRUCTURE_PROVENANCE_KIND = "hal_blue_infrastructure_v1"
 
 
 class HalSmokeBlueInfrastructureLease(StrictModel):
@@ -231,6 +236,33 @@ class HalSmokeBlueInfrastructureSupervisor:
         )
         active.trial_providers.append(provider)
         return provider
+
+    def execution_provenance(
+        self,
+        lease: HalSmokeBlueInfrastructureLease,
+    ) -> ExecutionProvenanceDescriptor:
+        """Return hash-safe proof for the still-active exact Blue infrastructure."""
+
+        active = self._require_active(lease)
+        if active.peer_released or active.network_released:
+            raise RuntimeError("HAL Blue infrastructure is already partially released")
+        return build_execution_provenance_descriptor(
+            kind=HAL_BLUE_INFRASTRUCTURE_PROVENANCE_KIND,
+            payload={
+                "lease_id_hash": lease.lease_id_hash,
+                "composition_sha256": lease.composition_sha256,
+                "target_measurement_binding_sha256": (
+                    lease.target_measurement_binding_sha256
+                ),
+                "network_profile_sha256": lease.network.network_profile_sha256,
+                "network_id_sha256": lease.network.network_id_sha256,
+                "peer_profile_sha256": lease.peer.peer.profile_sha256,
+                "peer_container_id_sha256": lease.peer.peer.container_id_sha256,
+                "staged_store_identity_sha256": lease.staged_store_identity_sha256,
+                "artifact_proof_sha256": lease.artifact.proof_sha256,
+                "infrastructure_proof_sha256": lease.proof_sha256,
+            },
+        )
 
     def release(
         self,
