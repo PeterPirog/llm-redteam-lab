@@ -23,6 +23,11 @@ from .campaigns.lifecycle import deterministic_judge_policy_descriptor
 from .corpus import load_corpus_files
 from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
+from .hal_smoke_preflight import (
+    build_hal_smoke_static_plan,
+    compose_hal_smoke_offline,
+    load_hal_smoke_runtime_pins,
+)
 from .judges.deterministic import DeterministicJudge
 from .model_client import OpenAICompatibleRoleModelClient
 from .model_inventory import (
@@ -53,6 +58,8 @@ DEFAULT_REFERENCE_DISCOVERY_CORPUS = Path("corpus/native/multiturn/reference-dis
 DEFAULT_REFERENCE_EVALUATION_CORPUS = Path("corpus/native/multiturn/synthetic-sequences-v1.yaml")
 DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
+DEFAULT_HAL_SMOKE_MODELS = Path("config/models.hal-smoke.example.yaml")
+DEFAULT_HAL_SMOKE_BLUE_MODEL = "ornith-1.5:9b"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
 
 app = typer.Typer(
@@ -165,6 +172,101 @@ def plan_campaign(
         _print_preflight(report)
     if not report.ready:
         raise typer.Exit(code=2)
+
+
+@app.command("hal-smoke-preflight")
+def hal_smoke_preflight_command(
+    models_config: Annotated[
+        Path,
+        typer.Option("--models", help="Bounded local HAL smoke model configuration."),
+    ] = DEFAULT_HAL_SMOKE_MODELS,
+    blue_model: Annotated[
+        str,
+        typer.Option("--blue-model", help="Blue Ollama model for the isolated AGENT peer."),
+    ] = DEFAULT_HAL_SMOKE_BLUE_MODEL,
+    model_inventory: Annotated[
+        Path | None,
+        typer.Option("--model-inventory", help="Saved fresh OpenWebUI /api/models response."),
+    ] = None,
+    artifact_contracts: Annotated[
+        Path | None,
+        typer.Option("--artifact-contracts", help="Exact Ollama artifact contracts."),
+    ] = None,
+    ollama_tags_snapshot: Annotated[
+        Path | None,
+        typer.Option("--ollama-tags-snapshot", help="Saved fresh local Ollama /api/tags."),
+    ] = None,
+    runtime_pins: Annotated[
+        Path | None,
+        typer.Option("--runtime-pins", help="Digest-pinned HAL/OpenCode runtime inputs."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Build a zero-inference HAL AGENT smoke plan or full offline composition.
+
+    With no HAL evidence arguments, this validates only the bounded static model policy.
+    Supplying any runtime evidence option requires all four evidence documents. Even a
+    successful full offline composition is not live runtime admission.
+    """
+
+    try:
+        models = load_models_config(models_config)
+        static_plan = build_hal_smoke_static_plan(
+            models=models,
+            blue_model_id=blue_model,
+        )
+        evidence_paths = (
+            model_inventory,
+            artifact_contracts,
+            ollama_tags_snapshot,
+            runtime_pins,
+        )
+        supplied = sum(path is not None for path in evidence_paths)
+        if supplied not in {0, len(evidence_paths)}:
+            raise ValueError(
+                "HAL offline composition requires all of --model-inventory, "
+                "--artifact-contracts, --ollama-tags-snapshot and --runtime-pins"
+            )
+
+        composition = None
+        if supplied:
+            assert model_inventory is not None
+            assert artifact_contracts is not None
+            assert ollama_tags_snapshot is not None
+            assert runtime_pins is not None
+            pins = load_hal_smoke_runtime_pins(runtime_pins)
+            inventory = load_openwebui_ollama_inventory(model_inventory)
+            blue_peer_endpoint = (
+                f"http://{pins.model_endpoint_host}:{pins.model_endpoint_port}"
+            )
+            admission = validate_local_only_model_selection(
+                models=models,
+                inventory=inventory,
+                blue_model_id=static_plan.blue_model_id,
+                blue_endpoint=blue_peer_endpoint,
+                blue_required_capabilities={"text"},
+                allowed_endpoint_hosts={pins.model_endpoint_host},
+            )
+            qualification = qualify_admitted_ollama_artifacts(
+                admission=admission,
+                inventory=inventory,
+                contracts=load_ollama_artifact_contracts(artifact_contracts),
+                tags_snapshot=load_ollama_tags_snapshot(ollama_tags_snapshot),
+            )
+            composition = compose_hal_smoke_offline(
+                static_plan=static_plan,
+                admission=admission,
+                qualification=qualification,
+                pins=pins,
+            )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload = _hal_smoke_preflight_payload(static_plan, composition)
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _print_hal_smoke_preflight(payload)
 
 
 @app.command("reference-run")
@@ -375,6 +477,60 @@ async def _execute_reference_run(
     finally:
         await red_client.aclose()
         await target.aclose()
+
+
+def _hal_smoke_preflight_payload(static_plan, composition) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "phase": "static" if composition is None else "offline_composed",
+        "static_plan_sha256": static_plan.plan_sha256,
+        "static_plan": static_plan.model_dump(mode="json"),
+        "live_runtime_admitted": False,
+    }
+    if composition is None:
+        payload["required_offline_inputs"] = [
+            "fresh OpenWebUI /api/models",
+            "exact Ollama artifact contracts",
+            "fresh local Ollama /api/tags",
+            "digest-pinned HAL runtime pins",
+        ]
+        return payload
+    payload.update(
+        {
+            "composition_sha256": composition.composition_sha256,
+            "blue_artifact_digest": composition.blue_artifact_digest,
+            "model_network_profile_sha256": composition.model_network.profile_sha256,
+            "model_peer_profile_sha256": composition.model_peer.profile_sha256,
+            "opencode_launch_policy_sha256": (
+                composition.opencode_launch_policy.policy_sha256
+            ),
+            "opencode_agent_profile_sha256": composition.opencode_agent.profile_sha256,
+            "sandbox_policy_sha256": composition.sandbox_policy.policy_sha256,
+            "live_evidence_requirements": list(composition.live_evidence_requirements),
+        }
+    )
+    return payload
+
+
+def _print_hal_smoke_preflight(payload: dict[str, object]) -> None:
+    table = Table(title="HAL smoke preflight")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Phase", str(payload["phase"]))
+    table.add_row("Static plan", str(payload["static_plan_sha256"]))
+    table.add_row("Live runtime admitted", str(payload["live_runtime_admitted"]))
+    if payload["phase"] == "offline_composed":
+        table.add_row("Composition", str(payload["composition_sha256"]))
+        table.add_row("Blue artifact", str(payload["blue_artifact_digest"]))
+        table.add_row(
+            "Outstanding live evidence",
+            str(len(payload["live_evidence_requirements"])),
+        )
+    else:
+        table.add_row(
+            "Required offline inputs",
+            str(len(payload["required_offline_inputs"])),
+        )
+    console.print(table)
 
 
 def _reference_result_payload(result: ReferenceEvaluationRunResult) -> dict[str, object]:
