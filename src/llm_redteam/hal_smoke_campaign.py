@@ -174,6 +174,10 @@ class HalSmokeCampaignOrchestrator:
                 runner=runner,
                 health_python_executable=health_python_executable,
             )
+            self._validate_trial_provider(
+                composition=composition,
+                target_provider=target_provider,
+            )
             execution_provenance = self._execution_provenance(
                 admission=admission,
                 qualification=qualification,
@@ -269,6 +273,25 @@ class HalSmokeCampaignOrchestrator:
             )
         if not cases:
             raise ValueError("first HAL smoke requires at least one attack case")
+
+    @staticmethod
+    def _validate_trial_provider(
+        *,
+        composition: HalSmokeOfflineComposition,
+        target_provider: DockerOpenCodeTrialLeaseProvider,
+    ) -> None:
+        if (
+            target_provider.target_measurement_binding_sha256
+            != composition.target_measurement_binding_sha256
+        ):
+            raise RuntimeError(
+                "HAL Blue trial provider binds a different target measurement identity"
+            )
+        identity = target_provider.declared_target.identity
+        if identity.target_class != TargetClass.CODING or identity.target_mode != TargetMode.AGENT:
+            raise RuntimeError("HAL Blue trial provider does not declare a CODING AGENT target")
+        if "measurement_identity_bound" not in identity.capabilities:
+            raise RuntimeError("HAL Blue target identity lacks measurement binding capability")
 
     @staticmethod
     def _execution_provenance(
