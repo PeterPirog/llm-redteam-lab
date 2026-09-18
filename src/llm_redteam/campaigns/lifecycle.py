@@ -406,15 +406,23 @@ class CampaignLifecycleExecutor:
             )
             raise
 
-        isolation_records = load_target_trial_isolation_records(
-            self.repository.engine,
-            attack_instance_ids=tuple(attack_instance_ids),
-        )
-        self._validate_completed_target_isolation(
-            required_isolation=required_isolation,
-            attack_instance_ids=tuple(attack_instance_ids),
-            records=isolation_records,
-        )
+        try:
+            isolation_records = load_target_trial_isolation_records(
+                self.repository.engine,
+                attack_instance_ids=tuple(attack_instance_ids),
+            )
+            self._validate_completed_target_isolation(
+                required_isolation=required_isolation,
+                attack_instance_ids=tuple(attack_instance_ids),
+                records=isolation_records,
+            )
+        except Exception:
+            finish_campaign(
+                self.repository.engine,
+                campaign_id=resolved_campaign_id,
+                status=CampaignTerminalStatus.FAILED,
+            )
+            raise
 
         metrics: DiscoveryMetrics | EvaluationMetrics | None
         measurement_error: str | None = None
