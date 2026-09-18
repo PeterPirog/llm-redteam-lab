@@ -109,7 +109,7 @@ def test_static_plan_uses_bounded_local_only_smoke_profile() -> None:
 
 
 def test_static_plan_rejects_cloud_fallback_and_extra_enabled_roles() -> None:
-    raw = _models().model_dump(mode="python", by_alias=True)
+    raw = _models().model_dump(mode="json", by_alias=True)
     cloud = deepcopy(raw)
     cloud["policy"]["allow_cloud_fallback"] = True
     with pytest.raises(ValueError, match="forbids cloud fallback"):
