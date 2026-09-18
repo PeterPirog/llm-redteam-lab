@@ -11,6 +11,9 @@ that enumerates the live HAL evidence still required before a trial may execute.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
 from pydantic import Field, model_validator
 
 from .agent_actions import canonical_json_hash
@@ -381,3 +384,21 @@ def _normalize_sha256_digest(value: str) -> str:
     if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
         raise ValueError("artifact digest must be a SHA-256")
     return digest
+
+
+def load_hal_smoke_runtime_pins(path: str | Path) -> HalSmokeRuntimePins:
+    """Load immutable HAL runtime pins from YAML/JSON without contacting HAL."""
+
+    source = Path(path)
+    if not source.is_file():
+        raise ValueError(f"HAL smoke runtime pins do not exist: {source}")
+    try:
+        payload = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"HAL smoke runtime pins are not valid YAML/JSON: {source}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("HAL smoke runtime pins document must be an object")
+    try:
+        return HalSmokeRuntimePins.model_validate(payload)
+    except ValueError as exc:
+        raise ValueError(f"invalid HAL smoke runtime pins {source}: {exc}") from exc
