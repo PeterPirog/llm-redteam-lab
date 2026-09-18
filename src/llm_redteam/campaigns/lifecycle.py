@@ -244,6 +244,7 @@ class CampaignLifecycleExecutor:
         measurement_hash = ""
         executions: list[ExecutionResult] = []
         conversations: list[ConversationRunResult] = []
+        attack_instance_ids: list[str] = []
         seen_fixture_isolation_ids: set[str] = set()
         try:
             measurement_hash = self._persist_measurement_snapshot(
@@ -263,6 +264,7 @@ class CampaignLifecycleExecutor:
                         case.id,
                         replicate,
                     )
+                    attack_instance_ids.append(attack_instance_id)
                     descriptor = fixture_descriptors.get(case.id)
                     self.repository.record_attack(
                         attack_instance_id=attack_instance_id,
@@ -272,39 +274,93 @@ class CampaignLifecycleExecutor:
                         interaction_mode=case.interaction_mode,
                         payload_hash=_attack_payload_hash(case, descriptor),
                     )
-                    if case.interaction_mode == "multi_turn":
-                        strategy: MultiTurnStrategy | None = None
-                        if red_runtime is None:
-                            conversation = await self._run_static_conversation(
-                                case=case,
-                                ledger=ledger,
-                                plan=plan,
-                                campaign_id=resolved_campaign_id,
-                                replicate=replicate,
-                            )
-                        elif descriptor is None:
-                            strategy = red_runtime.strategy_for(case)
-                            conversation = await self._run_model_conversation(
-                                case=case,
-                                ledger=ledger,
-                                plan=plan,
-                                campaign_id=resolved_campaign_id,
-                                replicate=replicate,
-                                red_runtime=red_runtime,
-                                strategy=strategy,
-                                target=self.target,
-                            )
+                    trial_target, lease = await self._acquire_trial_target(
+                        plan=plan,
+                        attack_instance_id=attack_instance_id,
+                    )
+                    release = None
+                    conversation: ConversationRunResult | None = None
+                    execution: ExecutionResult | None = None
+                    strategy: MultiTurnStrategy | None = None
+                    try:
+                        if case.interaction_mode == "multi_turn":
+                            if red_runtime is None:
+                                conversation = await self._run_static_conversation(
+                                    case=case,
+                                    ledger=ledger,
+                                    plan=plan,
+                                    campaign_id=resolved_campaign_id,
+                                    replicate=replicate,
+                                    target=trial_target,
+                                )
+                            elif descriptor is None:
+                                strategy = red_runtime.strategy_for(case)
+                                conversation = await self._run_model_conversation(
+                                    case=case,
+                                    ledger=ledger,
+                                    plan=plan,
+                                    campaign_id=resolved_campaign_id,
+                                    replicate=replicate,
+                                    red_runtime=red_runtime,
+                                    strategy=strategy,
+                                    target=trial_target,
+                                )
+                            else:
+                                conversation, strategy = await self._run_fixture_conversation(
+                                    case=case,
+                                    descriptor=descriptor,
+                                    ledger=ledger,
+                                    plan=plan,
+                                    campaign_id=resolved_campaign_id,
+                                    replicate=replicate,
+                                    attack_instance_id=attack_instance_id,
+                                    red_runtime=red_runtime,
+                                    seen_isolation_ids=seen_fixture_isolation_ids,
+                                )
                         else:
-                            conversation, strategy = await self._run_fixture_conversation(
+                            if red_runtime is not None:
+                                raise RuntimeError(
+                                    "model-backed Red reached a non-multi-turn case after preflight"
+                                )
+                            execution = await self._run_static_single_turn(
                                 case=case,
-                                descriptor=descriptor,
                                 ledger=ledger,
-                                plan=plan,
                                 campaign_id=resolved_campaign_id,
                                 replicate=replicate,
+                                target=trial_target,
+                            )
+                    finally:
+                        if lease is not None:
+                            if self.target_lease_provider is None:
+                                raise RuntimeError(
+                                    "target lease provider disappeared during trial"
+                                )
+                            release = await release_target_trial_lease(
+                                self.target_lease_provider,
+                                lease,
+                            )
+                            record_target_trial_isolation_released(
+                                self.repository.engine,
                                 attack_instance_id=attack_instance_id,
-                                red_runtime=red_runtime,
-                                seen_isolation_ids=seen_fixture_isolation_ids,
+                                release=release,
+                            )
+                            if not release.cleanup_complete:
+                                raise RuntimeError(
+                                    "target-isolation teardown did not complete"
+                                )
+
+                    if conversation is not None:
+                        if release is not None:
+                            enriched = conversation.execution.model_copy(
+                                update={
+                                    "evidence": (
+                                        *conversation.execution.evidence,
+                                        release.evidence(),
+                                    )
+                                }
+                            )
+                            conversation = conversation.model_copy(
+                                update={"execution": enriched}
                             )
                         self.repository.save_conversation(
                             conversation,
@@ -323,23 +379,25 @@ class CampaignLifecycleExecutor:
                             )
                         conversations.append(conversation)
                         executions.append(conversation.execution)
-                    else:
-                        if red_runtime is not None:
-                            raise RuntimeError(
-                                "model-backed Red reached a non-multi-turn case after preflight"
-                            )
-                        execution = await self._run_static_single_turn(
-                            case=case,
-                            ledger=ledger,
-                            campaign_id=resolved_campaign_id,
-                            replicate=replicate,
+                        continue
+
+                    if execution is None:
+                        raise RuntimeError("campaign trial ended without an execution result")
+                    if release is not None:
+                        execution = execution.model_copy(
+                            update={
+                                "evidence": (
+                                    *execution.evidence,
+                                    release.evidence(),
+                                )
+                            }
                         )
-                        self.repository.save_execution(
-                            execution,
-                            attack_instance_id=attack_instance_id,
-                            target_snapshot_id=target_snapshot_id,
-                        )
-                        executions.append(execution)
+                    self.repository.save_execution(
+                        execution,
+                        attack_instance_id=attack_instance_id,
+                        target_snapshot_id=target_snapshot_id,
+                    )
+                    executions.append(execution)
         except Exception:
             finish_campaign(
                 self.repository.engine,
@@ -347,6 +405,16 @@ class CampaignLifecycleExecutor:
                 status=CampaignTerminalStatus.FAILED,
             )
             raise
+
+        isolation_records = load_target_trial_isolation_records(
+            self.repository.engine,
+            attack_instance_ids=tuple(attack_instance_ids),
+        )
+        self._validate_completed_target_isolation(
+            required_isolation=required_isolation,
+            attack_instance_ids=tuple(attack_instance_ids),
+            records=isolation_records,
+        )
 
         metrics: DiscoveryMetrics | EvaluationMetrics | None
         measurement_error: str | None = None
