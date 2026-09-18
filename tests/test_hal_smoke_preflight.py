@@ -159,6 +159,33 @@ def test_offline_composition_binds_exact_blue_artifact_and_runtime_policy() -> N
     assert "runtime_blue_artifact_probe_binding" in composition.live_evidence_requirements
     assert "per_trial_cleanup_proof" in composition.live_evidence_requirements
     assert len(composition.composition_sha256) == 64
+    assert len(composition.target_measurement_binding_sha256) == 64
+
+
+def test_target_measurement_binding_ignores_fresh_inventory_proof_noise() -> None:
+    static = build_hal_smoke_static_plan(models=_models(), blue_model_id=_BLUE)
+    first_admission = _admission(static)
+    first = compose_hal_smoke_offline(
+        static_plan=static,
+        admission=first_admission,
+        qualification=_qualification(static, first_admission),
+        pins=_pins(),
+    )
+
+    second_admission = first_admission.model_copy(update={"inventory_sha256": "0" * 64})
+    second = compose_hal_smoke_offline(
+        static_plan=static,
+        admission=second_admission,
+        qualification=_qualification(static, second_admission),
+        pins=_pins(),
+    )
+
+    assert first.composition_sha256 != second.composition_sha256
+    assert (
+        first.target_measurement_binding_sha256
+        == second.target_measurement_binding_sha256
+    )
+
 
 
 def test_offline_composition_rejects_admission_drift() -> None:
