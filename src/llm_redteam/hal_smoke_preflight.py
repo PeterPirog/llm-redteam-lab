@@ -35,6 +35,7 @@ from .opencode_runtime import (
     OpenCodeRuntimeProfile,
     SandboxEnforcementKind,
 )
+from .red_artifact_identity import red_artifact_measurement_binding_sha256
 from .reference_artifact_qualification import ReferenceArtifactQualificationReport
 from .target_trial_isolation import TargetIsolationLevel
 from .targets.opencode import OpenCodeConfig
@@ -269,8 +270,11 @@ def compose_hal_smoke_offline(
         for binding in qualification.bindings
         if binding.model_id == static_plan.blue_model_id
     )
-    red_measurement_binding_sha256 = _red_measurement_binding_sha256(
-        static_plan=static_plan,
+    red_measurement_binding_sha256 = red_artifact_measurement_binding_sha256(
+        planner_model_id=static_plan.red_planner_model_id,
+        planner_configuration_sha256=static_plan.red_planner_configuration_sha256,
+        mutator_model_id=static_plan.red_mutator_model_id,
+        mutator_configuration_sha256=static_plan.red_mutator_configuration_sha256,
         qualification=qualification,
     )
 
@@ -405,43 +409,6 @@ def _validate_model_evidence(
     staged_digest = _normalize_sha256_digest(store.manifest_digest)
     if qualified_digest != staged_digest:
         raise ValueError("staged Blue manifest disagrees with qualified Blue artifact")
-
-
-def _red_measurement_binding_sha256(
-    *,
-    static_plan: HalSmokeStaticPlan,
-    qualification: ReferenceArtifactQualificationReport,
-) -> str:
-    """Stable exact-artifact identity for the Red planner/mutator pair."""
-
-    by_model = {binding.model_id: binding for binding in qualification.bindings}
-    planner = by_model.get(static_plan.red_planner_model_id)
-    mutator = by_model.get(static_plan.red_mutator_model_id)
-    if planner is None or mutator is None:
-        raise ValueError("artifact qualification does not contain exact Red bindings")
-    return canonical_json_hash(
-        {
-            "version": 1,
-            "red_planner": {
-                "model_id": static_plan.red_planner_model_id,
-                "configuration_sha256": (
-                    static_plan.red_planner_configuration_sha256
-                ),
-                "artifact_digest": planner.artifact_digest,
-                "artifact_identity_sha256": planner.artifact_identity_sha256,
-                "contract_sha256": planner.contract_sha256,
-            },
-            "red_mutator": {
-                "model_id": static_plan.red_mutator_model_id,
-                "configuration_sha256": (
-                    static_plan.red_mutator_configuration_sha256
-                ),
-                "artifact_digest": mutator.artifact_digest,
-                "artifact_identity_sha256": mutator.artifact_identity_sha256,
-                "contract_sha256": mutator.contract_sha256,
-            },
-        }
-    )
 
 
 def _normalize_sha256_digest(value: str) -> str:
