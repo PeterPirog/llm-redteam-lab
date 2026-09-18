@@ -447,11 +447,118 @@ class CampaignLifecycleExecutor:
             status=status,
             executions=tuple(executions),
             conversations=tuple(conversations),
+            isolation_records=isolation_records,
             metrics=metrics,
             red_diagnostics=red_runtime.diagnostics() if red_runtime is not None else None,
             measurement_error=measurement_error,
             budget=ledger.snapshot(),
         )
+
+    def _validate_target_isolation_policy(
+        self,
+        *,
+        plan: CampaignPlan,
+        fixture_descriptors: dict[str, FixtureDescriptor],
+    ):
+        required = minimum_isolation_level(
+            target_mode=self.target.identity.target_mode,
+            session_mode=plan.session_mode,
+        )
+        if required is None:
+            return None
+        if self.target_lease_provider is None:
+            raise ValueError(
+                "campaign target/session mode requires a per-trial target isolation provider"
+            )
+        if self.target_lease_provider.isolation_level < required:
+            raise ValueError("target isolation provider is weaker than required")
+        if fixture_descriptors:
+            raise ValueError(
+                "fixture execution with isolated target trials requires compound "
+                "fixture/target isolation and remains deferred"
+            )
+        return required
+
+    def _target_isolation_descriptor(self, required_isolation):
+        if required_isolation is None:
+            return None
+        if self.target_lease_provider is None:  # pragma: no cover - validated earlier
+            raise RuntimeError("target isolation provider disappeared after validation")
+        return {
+            "required_isolation_level": required_isolation.name.lower(),
+            "provider_isolation_level": self.target_lease_provider.isolation_level.name.lower(),
+            "provider_fingerprint": self.target_lease_provider.provider_fingerprint,
+        }
+
+    async def _acquire_trial_target(
+        self,
+        *,
+        plan: CampaignPlan,
+        attack_instance_id: str,
+    ) -> tuple[TargetAdapter, TargetTrialLease | None]:
+        required = minimum_isolation_level(
+            target_mode=self.target.identity.target_mode,
+            session_mode=plan.session_mode,
+        )
+        if required is None:
+            return self.target, None
+        if self.target_lease_provider is None:
+            raise RuntimeError("target isolation provider disappeared before acquisition")
+
+        lease = self.target_lease_provider.acquire(
+            expected_identity=self.target.identity,
+            trial_id=attack_instance_id,
+        )
+        try:
+            validate_target_trial_lease(
+                lease,
+                expected_identity=self.target.identity,
+                session_mode=plan.session_mode,
+            )
+            record_target_trial_isolation_acquired(
+                self.repository.engine,
+                attack_instance_id=attack_instance_id,
+                attestation=lease.attestation,
+            )
+        except Exception as exc:
+            release = await release_target_trial_lease(
+                self.target_lease_provider,
+                lease,
+            )
+            if not release.cleanup_complete:
+                raise RuntimeError(
+                    "target-isolation cleanup failed after rejected acquisition"
+                ) from exc
+            raise
+        return IsolationProvenanceTarget(lease.target, lease.attestation), lease
+
+    def _validate_completed_target_isolation(
+        self,
+        *,
+        required_isolation,
+        attack_instance_ids: tuple[str, ...],
+        records: tuple[TargetTrialIsolationRecord, ...],
+    ) -> None:
+        if required_isolation is None:
+            if records:
+                raise RuntimeError("unexpected target-isolation evidence for campaign")
+            return
+        if len(records) != len(attack_instance_ids):
+            raise RuntimeError("target-isolation evidence is incomplete for campaign trials")
+        if len({record.lease_id_hash for record in records}) != len(records):
+            raise RuntimeError("target-isolation lease identity was reused across trials")
+        expected_attacks = set(attack_instance_ids)
+        if {record.attack_instance_id for record in records} != expected_attacks:
+            raise RuntimeError("target-isolation evidence does not cover exact campaign attacks")
+        for record in records:
+            if not record.control_plane_independent:
+                raise RuntimeError("target isolation was not control-plane independent")
+            if record.isolation_level < required_isolation:
+                raise RuntimeError("persisted target isolation is weaker than required")
+            if record.target_configuration_hash != self.target.identity.configuration_hash:
+                raise RuntimeError("target-isolation evidence binds a different Blue target")
+            if record.cleanup_complete is not True or record.teardown_proof_hash is None:
+                raise RuntimeError("target-isolation teardown evidence is incomplete")
 
     def _describe_fixtures(
         self,
@@ -506,8 +613,9 @@ class CampaignLifecycleExecutor:
         ledger: BudgetLedger,
         campaign_id: str,
         replicate: int,
+        target: TargetAdapter,
     ) -> ExecutionResult:
-        engine = CampaignEngine(target=self.target, judge=self.judge, budget=ledger)
+        engine = CampaignEngine(target=target, judge=self.judge, budget=ledger)
         return await engine.run_case(
             case,
             execution_id=_execution_id(campaign_id, case.id, replicate),
@@ -521,11 +629,12 @@ class CampaignLifecycleExecutor:
         plan: CampaignPlan,
         campaign_id: str,
         replicate: int,
+        target: TargetAdapter,
     ) -> ConversationRunResult:
         if case.payload.turns is None:
             raise ValueError(f"static multi-turn case {case.id} has no explicit turn sequence")
         engine = MultiTurnCampaignEngine(
-            target=self.target,
+            target=target,
             judge=self.judge,
             conversation_budget=ConversationBudget(
                 max_turns=len(case.payload.turns),
