@@ -48,6 +48,21 @@ from ..storage.measurement_repository import (
     save_campaign_measurement_snapshot,
 )
 from ..storage.repository import ExperimentRepository
+from ..storage.target_trial_isolation import (
+    TargetTrialIsolationRecord,
+    ensure_target_trial_isolation_schema,
+    load_target_trial_isolation_records,
+    record_target_trial_isolation_acquired,
+    record_target_trial_isolation_released,
+)
+from ..target_trial_close import release_target_trial_lease
+from ..target_trial_isolation import (
+    IsolationProvenanceTarget,
+    TargetTrialLease,
+    TargetTrialLeaseProvider,
+    minimum_isolation_level,
+    validate_target_trial_lease,
+)
 from ..targets.base import TargetAdapter
 from .engine import CampaignEngine
 from .multiturn import (
@@ -71,6 +86,7 @@ class CampaignLifecycleResult:
     status: CampaignTerminalStatus
     executions: tuple[ExecutionResult, ...]
     conversations: tuple[ConversationRunResult, ...]
+    isolation_records: tuple[TargetTrialIsolationRecord, ...]
     metrics: DiscoveryMetrics | EvaluationMetrics | None
     red_diagnostics: RedRuntimeDiagnostics | None
     measurement_error: str | None
@@ -120,6 +136,7 @@ class CampaignLifecycleExecutor:
         models: ModelsConfig | None = None,
         red_model_client: RoleModelClient | None = None,
         fixture_runtime: FixtureRuntime | None = None,
+        target_lease_provider: TargetTrialLeaseProvider | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -129,6 +146,7 @@ class CampaignLifecycleExecutor:
         self.models = models
         self.red_model_client = red_model_client
         self.fixture_runtime = fixture_runtime
+        self.target_lease_provider = target_lease_provider
 
     async def run(
         self,
@@ -159,6 +177,10 @@ class CampaignLifecycleExecutor:
 
         selected = self._selected_cases(plan, cases, evaluation_manifest)
         fixture_descriptors = self._describe_fixtures(selected)
+        required_isolation = self._validate_target_isolation_policy(
+            plan=plan,
+            fixture_descriptors=fixture_descriptors,
+        )
         profile_name, effective_budget = self.budgets.profile(plan.budget_profile)
         ledger = BudgetLedger(effective_budget)
         red_runtime = self._build_red_runtime(
@@ -198,11 +220,13 @@ class CampaignLifecycleExecutor:
                 "budget_profile": profile_name,
                 "budget_fingerprint": budget_fingerprint,
                 "target_snapshot_id": target_snapshot_id,
+                "target_isolation": self._target_isolation_descriptor(required_isolation),
                 "metric_definition_version": METRIC_DEFINITION_VERSION,
             }
         )
 
         self.repository.create_schema()
+        ensure_target_trial_isolation_schema(self.repository.engine)
         persisted_snapshot_id = self.repository.save_target(self.target.identity)
         if persisted_snapshot_id != target_snapshot_id:
             raise RuntimeError("target snapshot identity changed during campaign setup")
@@ -220,6 +244,7 @@ class CampaignLifecycleExecutor:
         measurement_hash = ""
         executions: list[ExecutionResult] = []
         conversations: list[ConversationRunResult] = []
+        attack_instance_ids: list[str] = []
         seen_fixture_isolation_ids: set[str] = set()
         try:
             measurement_hash = self._persist_measurement_snapshot(
@@ -239,6 +264,7 @@ class CampaignLifecycleExecutor:
                         case.id,
                         replicate,
                     )
+                    attack_instance_ids.append(attack_instance_id)
                     descriptor = fixture_descriptors.get(case.id)
                     self.repository.record_attack(
                         attack_instance_id=attack_instance_id,
@@ -248,39 +274,93 @@ class CampaignLifecycleExecutor:
                         interaction_mode=case.interaction_mode,
                         payload_hash=_attack_payload_hash(case, descriptor),
                     )
-                    if case.interaction_mode == "multi_turn":
-                        strategy: MultiTurnStrategy | None = None
-                        if red_runtime is None:
-                            conversation = await self._run_static_conversation(
-                                case=case,
-                                ledger=ledger,
-                                plan=plan,
-                                campaign_id=resolved_campaign_id,
-                                replicate=replicate,
-                            )
-                        elif descriptor is None:
-                            strategy = red_runtime.strategy_for(case)
-                            conversation = await self._run_model_conversation(
-                                case=case,
-                                ledger=ledger,
-                                plan=plan,
-                                campaign_id=resolved_campaign_id,
-                                replicate=replicate,
-                                red_runtime=red_runtime,
-                                strategy=strategy,
-                                target=self.target,
-                            )
+                    trial_target, lease = await self._acquire_trial_target(
+                        plan=plan,
+                        attack_instance_id=attack_instance_id,
+                    )
+                    release = None
+                    conversation: ConversationRunResult | None = None
+                    execution: ExecutionResult | None = None
+                    strategy: MultiTurnStrategy | None = None
+                    try:
+                        if case.interaction_mode == "multi_turn":
+                            if red_runtime is None:
+                                conversation = await self._run_static_conversation(
+                                    case=case,
+                                    ledger=ledger,
+                                    plan=plan,
+                                    campaign_id=resolved_campaign_id,
+                                    replicate=replicate,
+                                    target=trial_target,
+                                )
+                            elif descriptor is None:
+                                strategy = red_runtime.strategy_for(case)
+                                conversation = await self._run_model_conversation(
+                                    case=case,
+                                    ledger=ledger,
+                                    plan=plan,
+                                    campaign_id=resolved_campaign_id,
+                                    replicate=replicate,
+                                    red_runtime=red_runtime,
+                                    strategy=strategy,
+                                    target=trial_target,
+                                )
+                            else:
+                                conversation, strategy = await self._run_fixture_conversation(
+                                    case=case,
+                                    descriptor=descriptor,
+                                    ledger=ledger,
+                                    plan=plan,
+                                    campaign_id=resolved_campaign_id,
+                                    replicate=replicate,
+                                    attack_instance_id=attack_instance_id,
+                                    red_runtime=red_runtime,
+                                    seen_isolation_ids=seen_fixture_isolation_ids,
+                                )
                         else:
-                            conversation, strategy = await self._run_fixture_conversation(
+                            if red_runtime is not None:
+                                raise RuntimeError(
+                                    "model-backed Red reached a non-multi-turn case after preflight"
+                                )
+                            execution = await self._run_static_single_turn(
                                 case=case,
-                                descriptor=descriptor,
                                 ledger=ledger,
-                                plan=plan,
                                 campaign_id=resolved_campaign_id,
                                 replicate=replicate,
+                                target=trial_target,
+                            )
+                    finally:
+                        if lease is not None:
+                            if self.target_lease_provider is None:
+                                raise RuntimeError(
+                                    "target lease provider disappeared during trial"
+                                )
+                            release = await release_target_trial_lease(
+                                self.target_lease_provider,
+                                lease,
+                            )
+                            record_target_trial_isolation_released(
+                                self.repository.engine,
                                 attack_instance_id=attack_instance_id,
-                                red_runtime=red_runtime,
-                                seen_isolation_ids=seen_fixture_isolation_ids,
+                                release=release,
+                            )
+                            if not release.cleanup_complete:
+                                raise RuntimeError(
+                                    "target-isolation teardown did not complete"
+                                )
+
+                    if conversation is not None:
+                        if release is not None:
+                            enriched = conversation.execution.model_copy(
+                                update={
+                                    "evidence": (
+                                        *conversation.execution.evidence,
+                                        release.evidence(),
+                                    )
+                                }
+                            )
+                            conversation = conversation.model_copy(
+                                update={"execution": enriched}
                             )
                         self.repository.save_conversation(
                             conversation,
@@ -299,23 +379,43 @@ class CampaignLifecycleExecutor:
                             )
                         conversations.append(conversation)
                         executions.append(conversation.execution)
-                    else:
-                        if red_runtime is not None:
-                            raise RuntimeError(
-                                "model-backed Red reached a non-multi-turn case after preflight"
-                            )
-                        execution = await self._run_static_single_turn(
-                            case=case,
-                            ledger=ledger,
-                            campaign_id=resolved_campaign_id,
-                            replicate=replicate,
+                        continue
+
+                    if execution is None:
+                        raise RuntimeError("campaign trial ended without an execution result")
+                    if release is not None:
+                        execution = execution.model_copy(
+                            update={
+                                "evidence": (
+                                    *execution.evidence,
+                                    release.evidence(),
+                                )
+                            }
                         )
-                        self.repository.save_execution(
-                            execution,
-                            attack_instance_id=attack_instance_id,
-                            target_snapshot_id=target_snapshot_id,
-                        )
-                        executions.append(execution)
+                    self.repository.save_execution(
+                        execution,
+                        attack_instance_id=attack_instance_id,
+                        target_snapshot_id=target_snapshot_id,
+                    )
+                    executions.append(execution)
+        except Exception:
+            finish_campaign(
+                self.repository.engine,
+                campaign_id=resolved_campaign_id,
+                status=CampaignTerminalStatus.FAILED,
+            )
+            raise
+
+        try:
+            isolation_records = load_target_trial_isolation_records(
+                self.repository.engine,
+                attack_instance_ids=tuple(attack_instance_ids),
+            )
+            self._validate_completed_target_isolation(
+                required_isolation=required_isolation,
+                attack_instance_ids=tuple(attack_instance_ids),
+                records=isolation_records,
+            )
         except Exception:
             finish_campaign(
                 self.repository.engine,
@@ -355,11 +455,118 @@ class CampaignLifecycleExecutor:
             status=status,
             executions=tuple(executions),
             conversations=tuple(conversations),
+            isolation_records=isolation_records,
             metrics=metrics,
             red_diagnostics=red_runtime.diagnostics() if red_runtime is not None else None,
             measurement_error=measurement_error,
             budget=ledger.snapshot(),
         )
+
+    def _validate_target_isolation_policy(
+        self,
+        *,
+        plan: CampaignPlan,
+        fixture_descriptors: dict[str, FixtureDescriptor],
+    ):
+        required = minimum_isolation_level(
+            target_mode=self.target.identity.target_mode,
+            session_mode=plan.session_mode,
+        )
+        if required is None:
+            return None
+        if fixture_descriptors:
+            raise ValueError(
+                "fixture execution with isolated target trials requires compound "
+                "fixture/target isolation and remains deferred"
+            )
+        if self.target_lease_provider is None:
+            raise ValueError(
+                "campaign target/session mode requires a per-trial target isolation provider"
+            )
+        if self.target_lease_provider.isolation_level < required:
+            raise ValueError("target isolation provider is weaker than required")
+        return required
+
+    def _target_isolation_descriptor(self, required_isolation):
+        if required_isolation is None:
+            return None
+        if self.target_lease_provider is None:  # pragma: no cover - validated earlier
+            raise RuntimeError("target isolation provider disappeared after validation")
+        return {
+            "required_isolation_level": required_isolation.name.lower(),
+            "provider_isolation_level": self.target_lease_provider.isolation_level.name.lower(),
+            "provider_fingerprint": self.target_lease_provider.provider_fingerprint,
+        }
+
+    async def _acquire_trial_target(
+        self,
+        *,
+        plan: CampaignPlan,
+        attack_instance_id: str,
+    ) -> tuple[TargetAdapter, TargetTrialLease | None]:
+        required = minimum_isolation_level(
+            target_mode=self.target.identity.target_mode,
+            session_mode=plan.session_mode,
+        )
+        if required is None:
+            return self.target, None
+        if self.target_lease_provider is None:
+            raise RuntimeError("target isolation provider disappeared before acquisition")
+
+        lease = self.target_lease_provider.acquire(
+            expected_identity=self.target.identity,
+            trial_id=attack_instance_id,
+        )
+        try:
+            validate_target_trial_lease(
+                lease,
+                expected_identity=self.target.identity,
+                session_mode=plan.session_mode,
+            )
+            record_target_trial_isolation_acquired(
+                self.repository.engine,
+                attack_instance_id=attack_instance_id,
+                attestation=lease.attestation,
+            )
+        except Exception as exc:
+            release = await release_target_trial_lease(
+                self.target_lease_provider,
+                lease,
+            )
+            if not release.cleanup_complete:
+                raise RuntimeError(
+                    "target-isolation cleanup failed after rejected acquisition"
+                ) from exc
+            raise
+        return IsolationProvenanceTarget(lease.target, lease.attestation), lease
+
+    def _validate_completed_target_isolation(
+        self,
+        *,
+        required_isolation,
+        attack_instance_ids: tuple[str, ...],
+        records: tuple[TargetTrialIsolationRecord, ...],
+    ) -> None:
+        if required_isolation is None:
+            if records:
+                raise RuntimeError("unexpected target-isolation evidence for campaign")
+            return
+        if len(records) != len(attack_instance_ids):
+            raise RuntimeError("target-isolation evidence is incomplete for campaign trials")
+        if len({record.lease_id_hash for record in records}) != len(records):
+            raise RuntimeError("target-isolation lease identity was reused across trials")
+        expected_attacks = set(attack_instance_ids)
+        if {record.attack_instance_id for record in records} != expected_attacks:
+            raise RuntimeError("target-isolation evidence does not cover exact campaign attacks")
+        for record in records:
+            if not record.control_plane_independent:
+                raise RuntimeError("target isolation was not control-plane independent")
+            if record.isolation_level < required_isolation:
+                raise RuntimeError("persisted target isolation is weaker than required")
+            if record.target_configuration_hash != self.target.identity.configuration_hash:
+                raise RuntimeError("target-isolation evidence binds a different Blue target")
+            if record.cleanup_complete is not True or record.teardown_proof_hash is None:
+                raise RuntimeError("target-isolation teardown evidence is incomplete")
 
     def _describe_fixtures(
         self,
@@ -414,8 +621,9 @@ class CampaignLifecycleExecutor:
         ledger: BudgetLedger,
         campaign_id: str,
         replicate: int,
+        target: TargetAdapter,
     ) -> ExecutionResult:
-        engine = CampaignEngine(target=self.target, judge=self.judge, budget=ledger)
+        engine = CampaignEngine(target=target, judge=self.judge, budget=ledger)
         return await engine.run_case(
             case,
             execution_id=_execution_id(campaign_id, case.id, replicate),
@@ -429,11 +637,12 @@ class CampaignLifecycleExecutor:
         plan: CampaignPlan,
         campaign_id: str,
         replicate: int,
+        target: TargetAdapter,
     ) -> ConversationRunResult:
         if case.payload.turns is None:
             raise ValueError(f"static multi-turn case {case.id} has no explicit turn sequence")
         engine = MultiTurnCampaignEngine(
-            target=self.target,
+            target=target,
             judge=self.judge,
             conversation_budget=ConversationBudget(
                 max_turns=len(case.payload.turns),

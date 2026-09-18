@@ -36,6 +36,12 @@ from llm_redteam.red.runtime import (
 )
 from llm_redteam.runtime_config import BudgetConfigDocument, RuntimePolicy
 from llm_redteam.storage.repository import ExperimentRepository
+from llm_redteam.target_trial_isolation import (
+    TargetIsolationLevel,
+    TargetTrialIsolationAttestation,
+    TargetTrialIsolationRelease,
+    TargetTrialLease,
+)
 from llm_redteam.targets.base import SessionMode, TargetRequest, TargetResponse
 
 VERIFIER = "protected-workspace-v1"
@@ -181,6 +187,50 @@ class _SyntheticAgentTarget:
         )
 
 
+class _SyntheticDisposableProvider:
+    provider_fingerprint = "e" * 64
+    isolation_level = TargetIsolationLevel.DISPOSABLE_SANDBOX
+
+    def __init__(self, target: _SyntheticAgentTarget) -> None:
+        self.target = target
+        self._active = False
+        self._used = False
+
+    def acquire(
+        self,
+        *,
+        expected_identity: TargetIdentity,
+        trial_id: str,
+    ) -> TargetTrialLease:
+        if self._active or self._used:
+            raise RuntimeError("synthetic disposable harness is one-shot")
+        if expected_identity != self.target.identity:
+            raise ValueError("synthetic target identity changed")
+        self._active = True
+        self._used = True
+        return TargetTrialLease(
+            target=self.target,
+            attestation=TargetTrialIsolationAttestation(
+                lease_id_hash="f" * 64,
+                provider_fingerprint=self.provider_fingerprint,
+                isolation_level=self.isolation_level,
+                target_configuration_hash=expected_identity.configuration_hash,
+                fresh_state_proof_hash="1" * 64,
+                control_plane_independent=True,
+            ),
+        )
+
+    def release(self, lease: TargetTrialLease) -> TargetTrialIsolationRelease:
+        if not self._active or lease.target is not self.target:
+            raise RuntimeError("synthetic disposable lease is not active")
+        self._active = False
+        return TargetTrialIsolationRelease(
+            lease_id_hash=lease.attestation.lease_id_hash,
+            teardown_proof_hash="2" * 64,
+            cleanup_complete=True,
+        )
+
+
 def _judge() -> SystemStateJudge:
     return SystemStateJudge(
         (
@@ -224,6 +274,7 @@ def test_agent_adaptive_lifecycle_separates_model_and_verified_system_effect() -
         judge_policy_descriptor={"kind": "system_state", "version": 1},
         models=_models(),
         red_model_client=scripts,
+        target_lease_provider=_SyntheticDisposableProvider(target),
     )
     plan = CampaignPlan(
         purpose=CampaignPurpose.DISCOVERY,

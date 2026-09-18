@@ -19,8 +19,7 @@ from ..target_trial_isolation import (
     TargetTrialIsolationAttestation,
     TargetTrialIsolationRelease,
 )
-from .attacker_pool_execution import AttackerPoolTrialRow
-from .models import Base
+from .models import AttackRow, Base
 
 
 def _utcnow() -> datetime:
@@ -31,7 +30,7 @@ class TargetTrialIsolationRow(Base):
     __tablename__ = "target_trial_isolation"
 
     attack_instance_id: Mapped[str] = mapped_column(
-        ForeignKey("attacker_pool_trials.attack_instance_id"), primary_key=True
+        ForeignKey("attacks.attack_instance_id"), primary_key=True
     )
     lease_id_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     provider_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -72,11 +71,11 @@ def record_target_trial_isolation_acquired(
     """Persist trusted fresh-state proof before Blue target execution starts."""
 
     with Session(engine) as session, session.begin():
-        assignment = session.get(AttackerPoolTrialRow, attack_instance_id)
-        if assignment is None:
-            raise ValueError(f"unknown attacker-pool assignment: {attack_instance_id}")
+        attack = session.get(AttackRow, attack_instance_id)
+        if attack is None:
+            raise ValueError(f"unknown attack instance: {attack_instance_id}")
         if session.get(TargetTrialIsolationRow, attack_instance_id) is not None:
-            raise ValueError("target-isolation attestation already exists for assignment")
+            raise ValueError("target-isolation attestation already exists for attack")
         session.add(
             TargetTrialIsolationRow(
                 attack_instance_id=attack_instance_id,
