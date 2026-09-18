@@ -31,22 +31,57 @@ def red_artifact_measurement_binding_sha256(
     _require_sha256(mutator_configuration_sha256, label="mutator configuration")
     planner = _qualified_binding(qualification, planner_model_id)
     mutator = _qualified_binding(qualification, mutator_model_id)
+    return red_artifact_measurement_binding_from_exact_artifacts(
+        planner_model_id=planner_model_id,
+        planner_configuration_sha256=planner_configuration_sha256,
+        planner_artifact_digest=planner.artifact_digest,
+        planner_artifact_identity_sha256=planner.artifact_identity_sha256,
+        planner_contract_sha256=planner.contract_sha256,
+        mutator_model_id=mutator_model_id,
+        mutator_configuration_sha256=mutator_configuration_sha256,
+        mutator_artifact_digest=mutator.artifact_digest,
+        mutator_artifact_identity_sha256=mutator.artifact_identity_sha256,
+        mutator_contract_sha256=mutator.contract_sha256,
+    )
+
+
+def red_artifact_measurement_binding_from_exact_artifacts(
+    *,
+    planner_model_id: str,
+    planner_configuration_sha256: str,
+    planner_artifact_digest: str,
+    planner_artifact_identity_sha256: str,
+    planner_contract_sha256: str,
+    mutator_model_id: str,
+    mutator_configuration_sha256: str,
+    mutator_artifact_digest: str,
+    mutator_artifact_identity_sha256: str,
+    mutator_contract_sha256: str,
+) -> str:
+    """Hash exact role configuration and concrete planner/mutator artifact identities."""
+
+    _require_sha256(planner_configuration_sha256, label="planner configuration")
+    _require_sha256(mutator_configuration_sha256, label="mutator configuration")
+    _require_sha256(planner_artifact_identity_sha256, label="planner artifact identity")
+    _require_sha256(mutator_artifact_identity_sha256, label="mutator artifact identity")
+    _require_sha256(planner_contract_sha256, label="planner artifact contract")
+    _require_sha256(mutator_contract_sha256, label="mutator artifact contract")
     return canonical_json_hash(
         {
             "version": 1,
             "red_planner": {
                 "model_id": planner_model_id,
                 "configuration_sha256": planner_configuration_sha256,
-                "artifact_digest": planner.artifact_digest,
-                "artifact_identity_sha256": planner.artifact_identity_sha256,
-                "contract_sha256": planner.contract_sha256,
+                "artifact_digest": planner_artifact_digest,
+                "artifact_identity_sha256": planner_artifact_identity_sha256,
+                "contract_sha256": planner_contract_sha256,
             },
             "red_mutator": {
                 "model_id": mutator_model_id,
                 "configuration_sha256": mutator_configuration_sha256,
-                "artifact_digest": mutator.artifact_digest,
-                "artifact_identity_sha256": mutator.artifact_identity_sha256,
-                "contract_sha256": mutator.contract_sha256,
+                "artifact_digest": mutator_artifact_digest,
+                "artifact_identity_sha256": mutator_artifact_identity_sha256,
+                "contract_sha256": mutator_contract_sha256,
             },
         }
     )
