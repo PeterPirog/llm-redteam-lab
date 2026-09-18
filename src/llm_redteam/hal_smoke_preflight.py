@@ -142,6 +142,29 @@ class HalSmokeOfflineComposition(StrictModel):
         return canonical_json_hash(self.model_dump(mode="json"))
 
     @property
+    def target_measurement_binding_sha256(self) -> str:
+        """Stable Blue measurement identity; excludes per-run runtime observations."""
+
+        return canonical_json_hash(
+            {
+                "blue_model_id": self.static_plan.blue_model_id,
+                "blue_artifact_digest": self.blue_artifact_digest,
+                "staged_store_identity_sha256": (
+                    self.model_peer.staged_store_identity_sha256
+                ),
+                "model_network_profile_sha256": self.model_network.profile_sha256,
+                "model_peer_profile_sha256": self.model_peer.profile_sha256,
+                "opencode_runtime_profile_sha256": self.opencode_runtime.profile_sha256,
+                "opencode_launch_policy_sha256": self.opencode_launch_policy.policy_sha256,
+                "opencode_agent_profile_sha256": self.opencode_agent.profile_sha256,
+                "sandbox_policy_sha256": self.sandbox_policy.policy_sha256,
+                "target_config_sha256": canonical_json_hash(
+                    self.target_config.model_dump(mode="json")
+                ),
+            }
+        )
+
+    @property
     def live_runtime_admitted(self) -> bool:
         """Offline composition can never substitute for runtime attestation."""
 

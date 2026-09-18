@@ -31,6 +31,10 @@ from .domain import TargetClass, TargetIdentity, TargetMode
 from .opencode_health import HealthGatedOpenCodeTarget
 from .opencode_networked_launch import OpenCodeNetworkedLaunchPolicy
 from .opencode_runtime import AgentSandboxPolicy, OpenCodeRuntimeProfile
+from .target_measurement_binding import (
+    MeasurementBoundTarget,
+    bind_target_measurement_identity,
+)
 from .target_trial_isolation import (
     TargetIsolationLevel,
     TargetTrialIsolationAttestation,
@@ -85,6 +89,7 @@ class DockerOpenCodeTrialLeaseProvider:
         runtime_profile: OpenCodeRuntimeProfile,
         sandbox_policy: AgentSandboxPolicy,
         opencode_config: OpenCodeConfig,
+        target_measurement_binding_sha256: str | None = None,
         health_python_executable: str = "python",
     ) -> None:
         if not provider_id:
@@ -118,6 +123,10 @@ class DockerOpenCodeTrialLeaseProvider:
             raise ValueError("disposable OpenCode target requires pinned application_version")
         if not _is_sha256(model_peer_container_id_sha256):
             raise ValueError("model-peer container identity must be a lowercase SHA-256")
+        if target_measurement_binding_sha256 is not None and not _is_sha256(
+            target_measurement_binding_sha256
+        ):
+            raise ValueError("target measurement binding must be a lowercase SHA-256")
         if not health_python_executable or any(
             character.isspace() for character in health_python_executable
         ):
@@ -134,6 +143,7 @@ class DockerOpenCodeTrialLeaseProvider:
         self.runtime_profile = runtime_profile
         self.sandbox_policy = sandbox_policy
         self.opencode_config = opencode_config
+        self.target_measurement_binding_sha256 = target_measurement_binding_sha256
         self.health_python_executable = health_python_executable
         self._counter = 0
         self._active: dict[str, _ActiveTrial] = {}
@@ -143,6 +153,7 @@ class DockerOpenCodeTrialLeaseProvider:
             runtime_profile=runtime_profile,
             sandbox_policy=sandbox_policy,
             launch_policy=launch_policy,
+            measurement_binding_sha256=target_measurement_binding_sha256,
         )
         self._declared_target = DeclaredIsolatedOpenCodeTarget(self._declared_identity)
         self._provider_fingerprint = canonical_json_hash(
@@ -156,6 +167,7 @@ class DockerOpenCodeTrialLeaseProvider:
                 "runtime_profile_sha256": runtime_profile.profile_sha256,
                 "sandbox_policy_sha256": sandbox_policy.policy_sha256,
                 "declared_target_configuration_hash": self._declared_identity.configuration_hash,
+                "target_measurement_binding_sha256": target_measurement_binding_sha256,
                 "health_python_executable": health_python_executable,
             }
         )
@@ -219,6 +231,11 @@ class DockerOpenCodeTrialLeaseProvider:
                 runner=self._runner,
             )
             target = HealthGatedOpenCodeTarget(attested, runtime.health)
+            if self.target_measurement_binding_sha256 is not None:
+                target = MeasurementBoundTarget(
+                    target,
+                    measurement_binding_sha256=self.target_measurement_binding_sha256,
+                )
             if target.identity != expected_identity:
                 raise ValueError("constructed disposable OpenCode target differs from declaration")
 
@@ -229,6 +246,9 @@ class DockerOpenCodeTrialLeaseProvider:
                     "workspace_initial_tree_sha256": workspace.lease.initial_tree_sha256,
                     "runtime_proof_sha256": runtime.proof_sha256,
                     "model_peer_container_id_sha256": self.model_peer_container_id_sha256,
+                    "target_measurement_binding_sha256": (
+                        self.target_measurement_binding_sha256
+                    ),
                     "target_configuration_hash": expected_identity.configuration_hash,
                 }
             )
@@ -381,6 +401,7 @@ def _declared_identity(
     runtime_profile: OpenCodeRuntimeProfile,
     sandbox_policy: AgentSandboxPolicy,
     launch_policy: OpenCodeNetworkedLaunchPolicy,
+    measurement_binding_sha256: str | None = None,
 ) -> TargetIdentity:
     """Reproduce stable runtime target identity without creating a live HTTP client."""
 
@@ -441,7 +462,7 @@ def _declared_identity(
             "networked_launch_policy_sha256": launch_policy.policy_sha256,
         }
     )
-    return docker_exec_identity.model_copy(
+    identity = docker_exec_identity.model_copy(
         update={
             "configuration_hash": canonical_json_hash(
                 {
@@ -454,6 +475,12 @@ def _declared_identity(
             "capabilities": docker_exec_identity.capabilities
             | frozenset({"runtime_attested", "runtime_health_verified"}),
         }
+    )
+    if measurement_binding_sha256 is None:
+        return identity
+    return bind_target_measurement_identity(
+        identity,
+        measurement_binding_sha256=measurement_binding_sha256,
     )
 
 

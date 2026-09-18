@@ -156,10 +156,10 @@ def _config() -> OpenCodeConfig:
     )
 
 
-def _provider(tmp_path: Path):
+def _provider(tmp_path: Path, *, measurement_binding: str | None = None):
     template = tmp_path / "template"
     sandbox_root = tmp_path / "sandboxes"
-    template.mkdir()
+    template.mkdir(parents=True)
     (template / "README.md").write_text("synthetic\n", encoding="utf-8")
     workspace = DisposableWorkspaceSupervisor(
         template_root=template,
@@ -190,6 +190,7 @@ def _provider(tmp_path: Path):
         runtime_profile=runtime,
         sandbox_policy=policy,
         opencode_config=_config(),
+        target_measurement_binding_sha256=measurement_binding,
     )
     return provider, runtime_supervisor, workspace
 
@@ -220,6 +221,22 @@ def test_declared_target_is_agent_and_direct_execution_is_fail_closed(tmp_path: 
     assert provider.declared_target.identity.target_mode == TargetMode.AGENT
     response = asyncio.run(provider.declared_target.execute(SimpleNamespace()))
     assert response.error_kind == "isolation:disposable_trial_lease_required"
+
+
+def test_declared_target_identity_binds_exact_measurement_configuration(
+    tmp_path: Path,
+) -> None:
+    unbound, _, _ = _provider(tmp_path / "unbound")
+    binding = "d" * 64
+    bound, _, _ = _provider(tmp_path / "bound", measurement_binding=binding)
+
+    assert (
+        bound.declared_target.identity.configuration_hash
+        != unbound.declared_target.identity.configuration_hash
+    )
+    assert "measurement_identity_bound" in bound.declared_target.identity.capabilities
+    assert bound.target_measurement_binding_sha256 == binding
+
 
 
 def test_acquire_returns_valid_disposable_lease_with_fresh_workspace(
