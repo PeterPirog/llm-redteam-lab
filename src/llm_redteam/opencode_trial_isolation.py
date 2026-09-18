@@ -90,6 +90,7 @@ class DockerOpenCodeTrialLeaseProvider:
         sandbox_policy: AgentSandboxPolicy,
         opencode_config: OpenCodeConfig,
         target_measurement_binding_sha256: str | None = None,
+        model_peer_runtime_proof_sha256: str | None = None,
         health_python_executable: str = "python",
     ) -> None:
         if not provider_id:
@@ -127,6 +128,10 @@ class DockerOpenCodeTrialLeaseProvider:
             target_measurement_binding_sha256
         ):
             raise ValueError("target measurement binding must be a lowercase SHA-256")
+        if model_peer_runtime_proof_sha256 is not None and not _is_sha256(
+            model_peer_runtime_proof_sha256
+        ):
+            raise ValueError("model-peer runtime proof must be a lowercase SHA-256")
         if not health_python_executable or any(
             character.isspace() for character in health_python_executable
         ):
@@ -144,6 +149,7 @@ class DockerOpenCodeTrialLeaseProvider:
         self.sandbox_policy = sandbox_policy
         self.opencode_config = opencode_config
         self.target_measurement_binding_sha256 = target_measurement_binding_sha256
+        self.model_peer_runtime_proof_sha256 = model_peer_runtime_proof_sha256
         self.health_python_executable = health_python_executable
         self._counter = 0
         self._active: dict[str, _ActiveTrial] = {}
@@ -248,6 +254,9 @@ class DockerOpenCodeTrialLeaseProvider:
                     "model_peer_container_id_sha256": self.model_peer_container_id_sha256,
                     "target_measurement_binding_sha256": (
                         self.target_measurement_binding_sha256
+                    ),
+                    "model_peer_runtime_proof_sha256": (
+                        self.model_peer_runtime_proof_sha256
                     ),
                     "target_configuration_hash": expected_identity.configuration_hash,
                 }
