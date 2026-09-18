@@ -497,6 +497,9 @@ def _hal_smoke_preflight_payload(static_plan, composition) -> dict[str, object]:
     payload.update(
         {
             "composition_sha256": composition.composition_sha256,
+            "red_measurement_binding_sha256": (
+                composition.red_measurement_binding_sha256
+            ),
             "blue_artifact_digest": composition.blue_artifact_digest,
             "model_network_profile_sha256": composition.model_network.profile_sha256,
             "model_peer_profile_sha256": composition.model_peer.profile_sha256,
@@ -520,6 +523,10 @@ def _print_hal_smoke_preflight(payload: dict[str, object]) -> None:
     table.add_row("Live runtime admitted", str(payload["live_runtime_admitted"]))
     if payload["phase"] == "offline_composed":
         table.add_row("Composition", str(payload["composition_sha256"]))
+        table.add_row(
+            "Red measurement binding",
+            str(payload["red_measurement_binding_sha256"]),
+        )
         table.add_row("Blue artifact", str(payload["blue_artifact_digest"]))
         table.add_row(
             "Outstanding live evidence",

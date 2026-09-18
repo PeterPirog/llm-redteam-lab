@@ -137,6 +137,7 @@ class CampaignLifecycleExecutor:
         red_model_client: RoleModelClient | None = None,
         fixture_runtime: FixtureRuntime | None = None,
         target_lease_provider: TargetTrialLeaseProvider | None = None,
+        red_measurement_binding_sha256: str | None = None,
     ) -> None:
         self.target = target
         self.judge = judge
@@ -147,6 +148,7 @@ class CampaignLifecycleExecutor:
         self.red_model_client = red_model_client
         self.fixture_runtime = fixture_runtime
         self.target_lease_provider = target_lease_provider
+        self.red_measurement_binding_sha256 = red_measurement_binding_sha256
 
     async def run(
         self,
@@ -596,6 +598,10 @@ class CampaignLifecycleExecutor:
         fixture_priming_enabled: bool,
     ) -> RedStrategyRuntime | None:
         if not plan.red_policy.model_backed:
+            if self.red_measurement_binding_sha256 is not None:
+                raise ValueError(
+                    "Red measurement binding requires a model-backed Red policy"
+                )
             return None
         if self.models is None:
             raise ValueError("model-backed Red requires models configuration")
@@ -612,6 +618,7 @@ class CampaignLifecycleExecutor:
             model_client=self.red_model_client,
             budget=ledger,
             fixture_priming_enabled=fixture_priming_enabled,
+            red_measurement_binding_sha256=self.red_measurement_binding_sha256,
         )
 
     async def _run_static_single_turn(

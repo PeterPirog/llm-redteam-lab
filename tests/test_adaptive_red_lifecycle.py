@@ -176,6 +176,7 @@ def test_adaptive_discovery_runs_through_persisted_lifecycle() -> None:
         judge_policy_descriptor=judge_descriptor,
         models=models,
         red_model_client=scripts,
+        red_measurement_binding_sha256="e" * 64,
     )
     plan = CampaignPlan(
         purpose=CampaignPurpose.DISCOVERY,
@@ -217,6 +218,7 @@ def test_adaptive_discovery_runs_through_persisted_lifecycle() -> None:
         session_mode=SessionMode.REPLAY,
         campaign_budget=_budget(),
         models=models,
+        red_measurement_binding_sha256="e" * 64,
     )
     assert measurement.attack_policy_fingerprint == fingerprint_attack_policy(
         expected_descriptor
@@ -313,9 +315,34 @@ def test_adaptive_policy_descriptor_changes_with_model_or_flow_budget() -> None:
         campaign_budget=_budget(max_backtracks=0, max_branches=1),
         models=_models(),
     )
+    changed_artifact = build_model_backed_red_policy_descriptor(
+        policy=RedPolicyKind.ADAPTIVE,
+        purpose=CampaignPurpose.DISCOVERY,
+        target_class=TargetClass.WRITING,
+        target_mode=TargetMode.MODEL,
+        session_mode=SessionMode.REPLAY,
+        campaign_budget=_budget(),
+        models=_models(),
+        red_measurement_binding_sha256="f" * 64,
+    )
 
     assert fingerprint_attack_policy(base) != fingerprint_attack_policy(changed_model)
     assert fingerprint_attack_policy(base) != fingerprint_attack_policy(changed_flow)
+    assert fingerprint_attack_policy(base) != fingerprint_attack_policy(changed_artifact)
+
+
+def test_red_measurement_binding_rejects_non_sha256_values() -> None:
+    with pytest.raises(ValueError, match="lowercase SHA-256"):
+        build_model_backed_red_policy_descriptor(
+            policy=RedPolicyKind.ADAPTIVE,
+            purpose=CampaignPurpose.DISCOVERY,
+            target_class=TargetClass.WRITING,
+            target_mode=TargetMode.MODEL,
+            session_mode=SessionMode.REPLAY,
+            campaign_budget=_budget(),
+            models=_models(),
+            red_measurement_binding_sha256="not-a-digest",
+        )
 
 
 def test_portfolio_runtime_uses_risk_aware_policy_without_extra_model_call() -> None:
