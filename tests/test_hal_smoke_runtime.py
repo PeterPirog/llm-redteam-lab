@@ -305,6 +305,45 @@ def test_build_trial_provider_binds_stable_identity_and_live_artifact_proof(
     assert "measurement_identity_bound" in provider.declared_target.identity.capabilities
 
 
+def test_campaign_teardown_refuses_while_trial_provider_has_active_lease(
+    tmp_path: Path,
+) -> None:
+    composition, identity = _composition()
+    staged_store = _store(tmp_path / "store", identity)
+    supervisor, network, peer, _ = _supervisor()
+    lease = supervisor.launch(
+        composition=composition,
+        staged_store=staged_store,
+        artifact_contract=_contract(),
+        network_name="llmrt-hal-smoke",
+    )
+    template = tmp_path / "template"
+    template.mkdir()
+    (template / "README.md").write_text("synthetic\n", encoding="utf-8")
+    workspaces = DisposableWorkspaceSupervisor(
+        template_root=template,
+        sandbox_root=tmp_path / "sandboxes",
+    )
+    provider = supervisor.build_trial_provider(
+        lease=lease,
+        provider_id="hal-smoke-blue",
+        workspace_supervisor=workspaces,
+        runtime_supervisor=SimpleNamespace(),
+        runner=FakeRunner(),
+    )
+    provider._active["synthetic-active-trial"] = object()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="trial leases are active"):
+        supervisor.release(lease)
+
+    assert peer.released == []
+    assert network.released == []
+    provider._active.clear()
+    release = supervisor.release(lease)
+    assert release.cleanup_complete is True
+
+
+
 def test_release_preserves_network_until_peer_teardown_succeeds(tmp_path: Path) -> None:
     composition, identity = _composition()
     supervisor, network, peer, _ = _supervisor()
