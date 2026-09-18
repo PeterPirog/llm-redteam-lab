@@ -159,7 +159,7 @@ def _config() -> OpenCodeConfig:
 def _provider(tmp_path: Path, *, measurement_binding: str | None = None):
     template = tmp_path / "template"
     sandbox_root = tmp_path / "sandboxes"
-    template.mkdir()
+    template.mkdir(parents=True)
     (template / "README.md").write_text("synthetic\n", encoding="utf-8")
     workspace = DisposableWorkspaceSupervisor(
         template_root=template,
