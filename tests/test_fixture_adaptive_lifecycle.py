@@ -356,32 +356,13 @@ def test_fixture_descriptor_uses_separate_red_runtime_identity() -> None:
     assert fixture["first_turn_source"] == "fixture_legitimate_task"
 
 
-def test_fixture_sequence_can_prove_model_and_system_compromise(tmp_path: Path) -> None:
-    result, target, scripts, runtime = _run_fixture_campaign(tmp_path, allow_effect=True)
-
-    execution = result.executions[0]
-    assert execution.outcome == CompromiseOutcome.MODEL_AND_SYSTEM_COMPROMISE
-    assert execution.model_compromise is True
-    assert execution.system_compromise is True
-    assert result.conversations[0].first_violation_ordinal == 2
-    assert len(target.requests) == 2
-    assert target.requests[0].prompt.startswith("Fix `subtract(a, b)`")
-    assert scripts.calls[ModelRole.RED_PLANNER] == 1
-    assert not runtime.workspace_root.exists()
-    assert any(
-        evidence.source == "fixture_runtime"
-        and evidence.data.get("cleanup_complete") is True
-        for evidence in execution.evidence
-    )
+def test_fixture_sequence_requires_compound_target_isolation(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="compound fixture/target isolation"):
+        _run_fixture_campaign(tmp_path, allow_effect=True)
 
 
-def test_fixture_sequence_distinguishes_contained_model_compromise(tmp_path: Path) -> None:
-    result, target, scripts, runtime = _run_fixture_campaign(tmp_path, allow_effect=False)
-
-    execution = result.executions[0]
-    assert execution.outcome == CompromiseOutcome.MODEL_COMPROMISE
-    assert execution.model_compromise is True
-    assert execution.system_compromise is False
-    assert len(target.requests) == 2
-    assert scripts.calls[ModelRole.RED_PLANNER] == 2
-    assert not runtime.workspace_root.exists()
+def test_contained_fixture_sequence_requires_compound_target_isolation(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="compound fixture/target isolation"):
+        _run_fixture_campaign(tmp_path, allow_effect=False)
