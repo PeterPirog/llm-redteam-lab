@@ -55,10 +55,16 @@ def _admission(plan):
     )
 
 
-def _qualification(plan, admission):
+def _qualification(
+    plan,
+    admission,
+    *,
+    planner_digest: str = "b" * 64,
+    mutator_digest: str = "c" * 64,
+):
     digests = {
-        plan.red_planner_model_id: "b" * 64,
-        plan.red_mutator_model_id: "c" * 64,
+        plan.red_planner_model_id: planner_digest,
+        plan.red_mutator_model_id: mutator_digest,
         plan.blue_model_id: _BLUE_DIGEST,
     }
     return ReferenceArtifactQualificationReport(
@@ -159,7 +165,38 @@ def test_offline_composition_binds_exact_blue_artifact_and_runtime_policy() -> N
     assert "runtime_blue_artifact_probe_binding" in composition.live_evidence_requirements
     assert "per_trial_cleanup_proof" in composition.live_evidence_requirements
     assert len(composition.composition_sha256) == 64
+    assert len(composition.red_measurement_binding_sha256) == 64
     assert len(composition.target_measurement_binding_sha256) == 64
+
+
+def test_red_measurement_binding_changes_only_with_red_artifact_identity() -> None:
+    static = build_hal_smoke_static_plan(models=_models(), blue_model_id=_BLUE)
+    admission = _admission(static)
+    base = compose_hal_smoke_offline(
+        static_plan=static,
+        admission=admission,
+        qualification=_qualification(static, admission),
+        pins=_pins(),
+    )
+    changed_planner = compose_hal_smoke_offline(
+        static_plan=static,
+        admission=admission,
+        qualification=_qualification(
+            static,
+            admission,
+            planner_digest="0" * 64,
+        ),
+        pins=_pins(),
+    )
+
+    assert (
+        base.red_measurement_binding_sha256
+        != changed_planner.red_measurement_binding_sha256
+    )
+    assert (
+        base.target_measurement_binding_sha256
+        == changed_planner.target_measurement_binding_sha256
+    )
 
 
 def test_target_measurement_binding_ignores_fresh_inventory_proof_noise() -> None:
@@ -184,6 +221,10 @@ def test_target_measurement_binding_ignores_fresh_inventory_proof_noise() -> Non
     assert (
         first.target_measurement_binding_sha256
         == second.target_measurement_binding_sha256
+    )
+    assert (
+        first.red_measurement_binding_sha256
+        == second.red_measurement_binding_sha256
     )
 
 
