@@ -11,7 +11,6 @@ from llm_redteam.domain import (
     AttackCase,
     AttackTier,
     CampaignBudget,
-    CompromiseOutcome,
     GradingSpec,
     PayloadSpec,
     SecurityObjective,
