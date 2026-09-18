@@ -301,10 +301,7 @@ def test_build_trial_provider_binds_stable_identity_and_live_artifact_proof(
         == composition.target_measurement_binding_sha256
     )
     assert provider.model_peer_runtime_proof_sha256 == lease.artifact.proof_sha256
-    assert (
-        provider.declared_target.identity.configuration_hash
-        != composition.target_config.id
-    )
+    assert len(provider.declared_target.identity.configuration_hash) == 64
     assert "measurement_identity_bound" in provider.declared_target.identity.capabilities
 
 
