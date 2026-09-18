@@ -407,3 +407,30 @@ def test_static_artifact_drift_is_rejected_before_docker(tmp_path: Path) -> None
     assert network.created == []
     assert peer.launched == []
     assert artifact.calls == []
+
+
+
+def test_blue_infrastructure_provenance_is_hash_safe_and_requires_active_lease(
+    tmp_path: Path,
+) -> None:
+    composition, identity = _composition()
+    supervisor, _, _, _ = _supervisor()
+    lease = supervisor.launch(
+        composition=composition,
+        staged_store=_store(tmp_path, identity),
+        artifact_contract=_contract(),
+        network_name="llmrt-hal-smoke",
+    )
+
+    provenance = supervisor.execution_provenance(lease)
+
+    assert provenance.kind == "hal_blue_infrastructure_v1"
+    assert provenance.payload["lease_id_hash"] == lease.lease_id_hash
+    assert provenance.payload["artifact_proof_sha256"] == lease.artifact.proof_sha256
+    assert provenance.payload["infrastructure_proof_sha256"] == lease.proof_sha256
+    assert len(provenance.content_hash) == 64
+
+    release = supervisor.release(lease)
+    assert release.cleanup_complete is True
+    with pytest.raises(RuntimeError, match="not active"):
+        supervisor.execution_provenance(lease)
