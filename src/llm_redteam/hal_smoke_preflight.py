@@ -127,6 +127,7 @@ class HalSmokeOfflineComposition(StrictModel):
     runtime_pins_sha256: str = Field(pattern=_HASH_PATTERN)
     local_admission_proof_sha256: str = Field(pattern=_HASH_PATTERN)
     artifact_qualification_proof_sha256: str = Field(pattern=_HASH_PATTERN)
+    red_measurement_binding_sha256: str = Field(pattern=_HASH_PATTERN)
     blue_artifact_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     model_network: DockerIsolatedModelNetworkProfile
     model_peer: DockerOllamaStagedPeerProfile
@@ -268,6 +269,10 @@ def compose_hal_smoke_offline(
         for binding in qualification.bindings
         if binding.model_id == static_plan.blue_model_id
     )
+    red_measurement_binding_sha256 = _red_measurement_binding_sha256(
+        static_plan=static_plan,
+        qualification=qualification,
+    )
 
     network = DockerIsolatedModelNetworkProfile(
         model_endpoint_host=pins.model_endpoint_host,
@@ -342,6 +347,7 @@ def compose_hal_smoke_offline(
         runtime_pins_sha256=pins.pins_sha256,
         local_admission_proof_sha256=admission.proof_sha256,
         artifact_qualification_proof_sha256=qualification.proof_sha256,
+        red_measurement_binding_sha256=red_measurement_binding_sha256,
         blue_artifact_digest=blue_binding.artifact_digest,
         model_network=network,
         model_peer=model_peer,
@@ -399,6 +405,43 @@ def _validate_model_evidence(
     staged_digest = _normalize_sha256_digest(store.manifest_digest)
     if qualified_digest != staged_digest:
         raise ValueError("staged Blue manifest disagrees with qualified Blue artifact")
+
+
+def _red_measurement_binding_sha256(
+    *,
+    static_plan: HalSmokeStaticPlan,
+    qualification: ReferenceArtifactQualificationReport,
+) -> str:
+    """Stable exact-artifact identity for the Red planner/mutator pair."""
+
+    by_model = {binding.model_id: binding for binding in qualification.bindings}
+    planner = by_model.get(static_plan.red_planner_model_id)
+    mutator = by_model.get(static_plan.red_mutator_model_id)
+    if planner is None or mutator is None:
+        raise ValueError("artifact qualification does not contain exact Red bindings")
+    return canonical_json_hash(
+        {
+            "version": 1,
+            "red_planner": {
+                "model_id": static_plan.red_planner_model_id,
+                "configuration_sha256": (
+                    static_plan.red_planner_configuration_sha256
+                ),
+                "artifact_digest": planner.artifact_digest,
+                "artifact_identity_sha256": planner.artifact_identity_sha256,
+                "contract_sha256": planner.contract_sha256,
+            },
+            "red_mutator": {
+                "model_id": static_plan.red_mutator_model_id,
+                "configuration_sha256": (
+                    static_plan.red_mutator_configuration_sha256
+                ),
+                "artifact_digest": mutator.artifact_digest,
+                "artifact_identity_sha256": mutator.artifact_identity_sha256,
+                "contract_sha256": mutator.contract_sha256,
+            },
+        }
+    )
 
 
 def _normalize_sha256_digest(value: str) -> str:
