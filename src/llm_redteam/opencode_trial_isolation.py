@@ -187,6 +187,12 @@ class DockerOpenCodeTrialLeaseProvider:
         return TargetIsolationLevel.DISPOSABLE_SANDBOX
 
     @property
+    def active_trial_count(self) -> int:
+        """Number of acquired trial leases not yet completely released."""
+
+        return len(self._active)
+
+    @property
     def declared_target(self) -> TargetAdapter:
         return self._declared_target
 
