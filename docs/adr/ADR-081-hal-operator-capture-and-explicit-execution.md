@@ -20,9 +20,18 @@ reduce auditability and make operator mistakes harder to detect.
 
 ## Decision
 
-Expose a three-step operator flow.
+Expose a four-step operator flow.
 
-### 1. Runtime capture
+### 1. Freeze exact artifact contracts
+
+`hal-smoke-freeze-contracts` consumes a saved local Ollama `/api/tags` response and the
+bounded smoke model configuration. It freezes exactly three local-only contracts: Red planner,
+Red mutator and Blue. Duplicate/missing records and Ollama remote proxies are rejected.
+
+This removes manual digest copying while keeping the snapshot acquisition itself outside the
+tool.
+
+### 2. Runtime capture
 
 `hal-smoke-capture-runtime`:
 
@@ -37,7 +46,7 @@ Expose a three-step operator flow.
 
 The manifest path is never guessed from a model tag.
 
-### 2. Dry validation
+### 3. Dry validation
 
 `hal-smoke-run` without `--execute`:
 
@@ -47,13 +56,15 @@ The manifest path is never guessed from a model tag.
 - loads runtime pins;
 - composes the exact offline HAL smoke contract;
 - selects the fixed built-in safe smoke case and budget profile;
+- validates a dedicated minimal immutable workspace template and requires the synthetic
+  forbidden marker to be absent before execution;
 - reports the bound hashes and local paths;
 - does not inspect Docker, stage model bytes, require OpenCode secrets, contact Ollama or
   invoke any model.
 
 This is the default behavior.
 
-### 3. Explicit execution
+### 4. Explicit execution
 
 Only `hal-smoke-run --execute` crosses the live runtime boundary.
 
@@ -87,7 +98,7 @@ The transition from GPT/GitHub development to HAL is now explicit and reproducib
 1. collect fresh inventory/tags;
 2. freeze exact artifact contracts;
 3. capture runtime pins;
-4. dry-validate;
+4. dry-validate the dedicated minimal workspace and all saved evidence;
 5. explicitly execute one bounded smoke.
 
 CI tests capture and dry-validation behavior with synthetic files and fake Docker command
