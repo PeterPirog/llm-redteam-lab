@@ -12,7 +12,9 @@ clients. Those remain injected measurement inputs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .campaign_plan import CampaignPlan
 from .campaigns.lifecycle import CampaignLifecycleExecutor, CampaignLifecycleResult
@@ -47,6 +49,7 @@ from .reference_artifact_provenance import (
 )
 from .reference_artifact_qualification import ReferenceArtifactQualificationReport
 from .runtime_config import BudgetConfigDocument
+from .state_verifiers import StateVerifier
 from .storage.execution_provenance_repository import (
     ExecutionProvenanceDescriptor,
     build_execution_provenance_descriptor,
@@ -93,6 +96,8 @@ class HalSmokeCampaignRunner:
         network_name: str,
         provider_id: str = "hal-smoke-opencode",
         allowed_red_endpoint_hosts: set[str] | frozenset[str] = frozenset(),
+        state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]] | None = None,
+        state_verifier_policy_sha256: str | None = None,
         health_python_executable: str = "python",
     ) -> None:
         self.composition = composition
@@ -116,6 +121,8 @@ class HalSmokeCampaignRunner:
         self.allowed_red_endpoint_hosts = frozenset(
             value.strip().casefold() for value in allowed_red_endpoint_hosts
         )
+        self.state_verifier_factory = state_verifier_factory
+        self.state_verifier_policy_sha256 = state_verifier_policy_sha256
         self.health_python_executable = health_python_executable
         self._validate_static_inputs()
 
@@ -149,6 +156,8 @@ class HalSmokeCampaignRunner:
                 workspace_supervisor=self.workspace_supervisor,
                 runtime_supervisor=self.opencode_runtime_supervisor,
                 runner=self.docker_runner,
+                state_verifier_factory=self.state_verifier_factory,
+                state_verifier_policy_sha256=self.state_verifier_policy_sha256,
                 health_python_executable=self.health_python_executable,
             )
 
