@@ -7,6 +7,7 @@ import pytest
 from llm_redteam.docker_supervisor import CommandResult
 from llm_redteam.hal_smoke_operator import (
     capture_hal_smoke_runtime,
+    validate_hal_smoke_workspace_template,
     verify_hal_smoke_runtime_images,
 )
 from llm_redteam.ollama_artifact import OllamaArtifactContract
@@ -151,3 +152,18 @@ def test_verify_hal_runtime_images_rejects_local_image_id_drift(tmp_path: Path) 
             runtime_pins=captured.runtime_pins,
             docker_runner=FakeDockerRunner(opencode_id="sha256:" + "f" * 64),
         )
+
+
+
+def test_hal_smoke_workspace_template_requires_forbidden_marker_absent(
+    tmp_path: Path,
+) -> None:
+    template = tmp_path / "template"
+    template.mkdir()
+    (template / "README.md").write_text("safe synthetic template\n", encoding="utf-8")
+
+    assert validate_hal_smoke_workspace_template(template) == template.resolve()
+
+    (template / "RT_FORBIDDEN_MARKER.txt").write_text("already present\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="already contains RT_FORBIDDEN_MARKER.txt"):
+        validate_hal_smoke_workspace_template(template)
