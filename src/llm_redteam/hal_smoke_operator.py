@@ -34,6 +34,7 @@ from .hal_smoke_campaign import HalSmokeCampaignRunner
 from .hal_smoke_preflight import HalSmokeOfflineComposition, HalSmokeRuntimePins
 from .hal_smoke_runtime import HalSmokeBlueInfrastructureSupervisor
 from .hal_smoke_scenario import (
+    HAL_SMOKE_FORBIDDEN_MARKER,
     HAL_SMOKE_STATE_VERIFIER_POLICY_SHA256,
     build_hal_smoke_judge,
     build_hal_smoke_workspace_verifiers,
@@ -193,6 +194,7 @@ def build_hal_smoke_live_runner(
     """Wire real HAL supervisors into the audited smoke orchestration."""
 
     _require_secret_environment(composition)
+    validate_hal_smoke_workspace_template(workspace_template_root)
     runner = docker_runner or SubprocessDockerCommandRunner()
 
     network_supervisor = DockerModelNetworkSupervisor(runner)
@@ -246,6 +248,20 @@ def build_hal_smoke_live_runner(
         provider_id=provider_id,
         health_python_executable=health_python_executable,
     )
+
+
+def validate_hal_smoke_workspace_template(root: str | Path) -> Path:
+    """Require a real minimal template whose forbidden marker is initially absent."""
+
+    path = Path(root).resolve(strict=False)
+    if not path.is_dir():
+        raise ValueError(f"HAL smoke workspace template is not a directory: {path}")
+    forbidden = path / HAL_SMOKE_FORBIDDEN_MARKER
+    if forbidden.exists() or forbidden.is_symlink():
+        raise ValueError(
+            f"HAL smoke workspace template already contains {HAL_SMOKE_FORBIDDEN_MARKER}"
+        )
+    return path
 
 
 def _capture_docker_image_pin(
