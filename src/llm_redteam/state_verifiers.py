@@ -230,6 +230,90 @@ class FilesystemTreeVerifier:
         )
 
 
+class RelativePathStateVerifier:
+    """Observe only explicitly declared relative paths inside one approved workspace.
+
+    Missing paths are represented as stable state components, so creation of a forbidden
+    marker is measurable. Symlinks are hashed but never followed. Legitimate changes to
+    all other workspace paths are intentionally ignored.
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        relative_paths: Iterable[str],
+        verifier_id: str = "relative-path-state-v1",
+        categories: frozenset[str] = frozenset({"filesystem_write"}),
+    ) -> None:
+        normalized = tuple(
+            sorted({_safe_relative_state_path(value) for value in relative_paths})
+        )
+        if not normalized:
+            raise ValueError("RelativePathStateVerifier requires at least one relative path")
+        if not verifier_id:
+            raise ValueError("RelativePathStateVerifier verifier_id must be non-empty")
+        if not categories:
+            raise ValueError("RelativePathStateVerifier categories cannot be empty")
+        self.root = Path(root).resolve(strict=False)
+        self._relative_paths = normalized
+        self._verifier_id = verifier_id
+        self._categories = categories
+
+    @property
+    def verifier_id(self) -> str:
+        return self._verifier_id
+
+    @property
+    def categories(self) -> frozenset[str]:
+        return self._categories
+
+    def capture(self) -> VerifierSnapshot:
+        components: list[StateComponent] = []
+        errors: list[str] = []
+        if not self.root.exists() or not self.root.is_dir():
+            errors.append(_error_hash("workspace_root_unavailable", _path_hash(self.root)))
+            return _build_snapshot(
+                verifier_id=self.verifier_id,
+                categories=self.categories,
+                complete=False,
+                components=(),
+                error_hashes=errors,
+            )
+
+        for relative in self._relative_paths:
+            path = self.root.joinpath(*PurePosixPath(relative).parts)
+            try:
+                components.append(_relative_path_component(path, relative))
+            except OSError as exc:
+                errors.append(_error_hash(type(exc).__name__, _path_hash(relative)))
+        return _build_snapshot(
+            verifier_id=self.verifier_id,
+            categories=self.categories,
+            complete=not errors,
+            components=components,
+            error_hashes=errors,
+        )
+
+    def assess(
+        self,
+        before: VerifierSnapshot,
+        after: VerifierSnapshot,
+        *,
+        control_event_id: str,
+        action_categories: frozenset[str],
+        attribution_ambiguous: bool = False,
+    ) -> AgentEffectObservation | None:
+        return _assess_hash_change(
+            verifier=self,
+            before=before,
+            after=after,
+            control_event_id=control_event_id,
+            action_categories=action_categories,
+            attribution_ambiguous=attribution_ambiguous,
+        )
+
+
 class LocalGitRefVerifier:
     """Observe ref/HEAD changes in one local Git repository or synthetic bare remote.
 
@@ -440,6 +524,53 @@ def _snapshot_hash(
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return sha256(encoded.encode()).hexdigest()
+
+
+def _safe_relative_state_path(value: str) -> str:
+    normalized = value.replace("\\", "/")
+    raw_parts = normalized.split("/")
+    if not normalized or any(part in {"", ".", ".."} for part in raw_parts):
+        raise ValueError("state verifier paths must be canonical non-empty relative paths")
+    path = PurePosixPath(*raw_parts)
+    if path.is_absolute():
+        raise ValueError("state verifier paths must remain relative")
+    return path.as_posix()
+
+
+def _relative_path_component(path: Path, relative: str) -> StateComponent:
+    identity_hash = _path_hash(relative)
+    if not path.exists() and not path.is_symlink():
+        return StateComponent(
+            identity_hash=identity_hash,
+            kind="absent",
+            value_hash=canonical_json_hash({"exists": False}),
+        )
+    info = path.lstat()
+    mode = stat.S_IMODE(info.st_mode)
+    if path.is_symlink():
+        payload = {
+            "mode": mode,
+            "target_hash": sha256(os.readlink(path).encode()).hexdigest(),
+        }
+        kind = "symlink"
+    elif stat.S_ISDIR(info.st_mode):
+        payload = {"mode": mode, "exists": True}
+        kind = "directory"
+    elif stat.S_ISREG(info.st_mode):
+        payload = {
+            "mode": mode,
+            "size": info.st_size,
+            "content_hash": _file_hash(path),
+        }
+        kind = "file"
+    else:
+        payload = {"mode": mode, "size": info.st_size}
+        kind = "special"
+    return StateComponent(
+        identity_hash=identity_hash,
+        kind=kind,
+        value_hash=canonical_json_hash(payload),
+    )
 
 
 def _file_hash(path: Path) -> str:

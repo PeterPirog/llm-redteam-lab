@@ -15,7 +15,7 @@ from llm_redteam.docker_networked_opencode_profile import (
     DockerNetworkedOpenCodeAgentProfile,
 )
 from llm_redteam.docker_sandbox import DockerSandboxProfile
-from llm_redteam.domain import TargetMode
+from llm_redteam.domain import EvidenceKind, TargetMode
 from llm_redteam.opencode_model_peer import OpenCodeModelPeerBinding
 from llm_redteam.opencode_networked_launch import OpenCodeNetworkedLaunchPolicy
 from llm_redteam.opencode_runtime import (
@@ -23,11 +23,12 @@ from llm_redteam.opencode_runtime import (
     OpenCodeRuntimeProfile,
     SandboxEnforcementKind,
 )
+from llm_redteam.state_verifiers import RelativePathStateVerifier
 from llm_redteam.target_trial_isolation import (
     TargetIsolationLevel,
     validate_target_trial_lease,
 )
-from llm_redteam.targets.base import SessionMode, TargetResponse
+from llm_redteam.targets.base import SessionMode, TargetRequest, TargetResponse
 from llm_redteam.targets.opencode import OpenCodeConfig
 
 _IMAGE_REF = "synthetic/opencode@sha256:" + "a" * 64
@@ -156,7 +157,13 @@ def _config() -> OpenCodeConfig:
     )
 
 
-def _provider(tmp_path: Path, *, measurement_binding: str | None = None):
+def _provider(
+    tmp_path: Path,
+    *,
+    measurement_binding: str | None = None,
+    state_verifier_factory=None,
+    state_verifier_policy_sha256: str | None = None,
+):
     template = tmp_path / "template"
     sandbox_root = tmp_path / "sandboxes"
     template.mkdir(parents=True)
@@ -191,6 +198,8 @@ def _provider(tmp_path: Path, *, measurement_binding: str | None = None):
         sandbox_policy=policy,
         opencode_config=_config(),
         target_measurement_binding_sha256=measurement_binding,
+        state_verifier_factory=state_verifier_factory,
+        state_verifier_policy_sha256=state_verifier_policy_sha256,
     )
     return provider, runtime_supervisor, workspace
 
@@ -263,6 +272,141 @@ def test_acquire_returns_valid_disposable_lease_with_fresh_workspace(
     workspace_path = Path(str(runtime_supervisor.launches[0]["workspace_host_path"]))
     assert workspace_path.is_dir()
     assert (workspace_path / "README.md").read_text(encoding="utf-8") == "synthetic\n"
+
+
+def test_acquire_attaches_independent_verifier_to_fresh_workspace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace_ref: list[Path] = []
+    closed: list[bool] = []
+
+    class MutatingTarget:
+        def __init__(self, identity) -> None:
+            self._identity = identity
+
+        @property
+        def identity(self):
+            return self._identity
+
+        async def execute(self, request):
+            del request
+            assert workspace_ref
+            (workspace_ref[0] / "RT_FORBIDDEN_MARKER.txt").write_text(
+                "synthetic forbidden effect",
+                encoding="utf-8",
+            )
+            return TargetResponse(text="synthetic")
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    policy_sha = "e" * 64
+
+    def verifier_factory(workspace_path: Path):
+        workspace_ref.append(workspace_path)
+        return (
+            RelativePathStateVerifier(
+                workspace_path,
+                relative_paths=("RT_FORBIDDEN_MARKER.txt",),
+                verifier_id="hal-smoke-marker-v1",
+            ),
+        )
+
+    provider, runtime_supervisor, _ = _provider(
+        tmp_path,
+        state_verifier_factory=verifier_factory,
+        state_verifier_policy_sha256=policy_sha,
+    )
+
+    def fake_builder(**kwargs):
+        del kwargs
+        return SimpleNamespace(identity=provider.declared_target.identity)
+
+    def fake_health_gate(target, health):
+        del target, health
+        return MutatingTarget(provider.declared_target.identity)
+
+    monkeypatch.setattr(
+        isolation_module,
+        "build_attested_docker_exec_opencode_target",
+        fake_builder,
+    )
+    monkeypatch.setattr(isolation_module, "HealthGatedOpenCodeTarget", fake_health_gate)
+
+    lease = provider.acquire(
+        expected_identity=provider.declared_target.identity,
+        trial_id="trial-state-verified",
+    )
+    response = asyncio.run(
+        lease.target.execute(
+            TargetRequest(
+                attack_id="trial-state-verified",
+                prompt="synthetic marker boundary",
+            )
+        )
+    )
+
+    state_evidence = [
+        item for item in response.evidence if item.kind == EvidenceKind.SYSTEM_STATE
+    ]
+    assert len(state_evidence) == 1
+    assert state_evidence[0].data["state"] == "observed"
+    assert workspace_ref[0] == Path(
+        str(runtime_supervisor.launches[0]["workspace_host_path"])
+    )
+    assert provider.state_verifier_policy_sha256 == policy_sha
+
+    release = asyncio.run(provider.release_async(lease))
+    assert release.cleanup_complete is True
+    assert closed == [True]
+
+
+def test_state_verifier_policy_changes_provider_fingerprint(tmp_path: Path) -> None:
+    def factory(workspace_path: Path):
+        return (
+            RelativePathStateVerifier(
+                workspace_path,
+                relative_paths=("RT_FORBIDDEN_MARKER.txt",),
+            ),
+        )
+
+    first, _, _ = _provider(
+        tmp_path / "first",
+        state_verifier_factory=factory,
+        state_verifier_policy_sha256="d" * 64,
+    )
+    second, _, _ = _provider(
+        tmp_path / "second",
+        state_verifier_factory=factory,
+        state_verifier_policy_sha256="e" * 64,
+    )
+
+    assert first.provider_fingerprint != second.provider_fingerprint
+
+
+def test_state_verifier_factory_and_policy_must_be_supplied_together(
+    tmp_path: Path,
+) -> None:
+    def factory(workspace_path: Path):
+        return (
+            RelativePathStateVerifier(
+                workspace_path,
+                relative_paths=("RT_FORBIDDEN_MARKER.txt",),
+            ),
+        )
+
+    with pytest.raises(ValueError, match="supplied together"):
+        _provider(
+            tmp_path / "factory-only",
+            state_verifier_factory=factory,
+        )
+
+    with pytest.raises(ValueError, match="supplied together"):
+        _provider(
+            tmp_path / "policy-only",
+            state_verifier_policy_sha256="e" * 64,
+        )
 
 
 def test_release_async_closes_target_then_removes_runtime_and_workspace(

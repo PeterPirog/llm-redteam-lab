@@ -12,7 +12,9 @@ clients. Those remain injected measurement inputs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .campaign_plan import CampaignPlan
 from .campaigns.lifecycle import CampaignLifecycleExecutor, CampaignLifecycleResult
@@ -47,6 +49,7 @@ from .reference_artifact_provenance import (
 )
 from .reference_artifact_qualification import ReferenceArtifactQualificationReport
 from .runtime_config import BudgetConfigDocument
+from .state_verifiers import StateVerifier
 from .storage.execution_provenance_repository import (
     ExecutionProvenanceDescriptor,
     build_execution_provenance_descriptor,
@@ -90,6 +93,8 @@ class HalSmokeCampaignRunner:
         repository: ExperimentRepository,
         budgets: BudgetConfigDocument,
         judge_policy_descriptor: object,
+        state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]],
+        state_verifier_policy_sha256: str,
         network_name: str,
         provider_id: str = "hal-smoke-opencode",
         allowed_red_endpoint_hosts: set[str] | frozenset[str] = frozenset(),
@@ -111,6 +116,8 @@ class HalSmokeCampaignRunner:
         self.repository = repository
         self.budgets = budgets
         self.judge_policy_descriptor = judge_policy_descriptor
+        self.state_verifier_factory = state_verifier_factory
+        self.state_verifier_policy_sha256 = state_verifier_policy_sha256
         self.network_name = network_name
         self.provider_id = provider_id
         self.allowed_red_endpoint_hosts = frozenset(
@@ -149,6 +156,8 @@ class HalSmokeCampaignRunner:
                 workspace_supervisor=self.workspace_supervisor,
                 runtime_supervisor=self.opencode_runtime_supervisor,
                 runner=self.docker_runner,
+                state_verifier_factory=self.state_verifier_factory,
+                state_verifier_policy_sha256=self.state_verifier_policy_sha256,
                 health_python_executable=self.health_python_executable,
             )
 
@@ -233,6 +242,19 @@ class HalSmokeCampaignRunner:
         )
 
     def _validate_static_inputs(self) -> None:
+        if not _is_sha256(self.state_verifier_policy_sha256):
+            raise ValueError("HAL smoke state verifier policy must be a lowercase SHA-256")
+        if not isinstance(self.judge_policy_descriptor, dict):
+            raise ValueError("HAL smoke Judge policy descriptor must be an object")
+        if self.judge_policy_descriptor.get("kind") != "system_state":
+            raise ValueError("HAL smoke requires a system_state Judge policy")
+        if (
+            self.judge_policy_descriptor.get("state_verifier_policy_sha256")
+            != self.state_verifier_policy_sha256
+        ):
+            raise ValueError(
+                "HAL smoke Judge policy does not bind the configured state verifier"
+            )
         static = build_hal_smoke_static_plan(
             models=self.models,
             blue_model_id=self.composition.static_plan.blue_model_id,
@@ -342,3 +364,9 @@ def _validate_smoke_plan(plan: CampaignPlan) -> None:
         raise ValueError("first HAL smoke forbids agent network access")
     if plan.allow_agent_git_push:
         raise ValueError("first HAL smoke forbids agent git publication")
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )

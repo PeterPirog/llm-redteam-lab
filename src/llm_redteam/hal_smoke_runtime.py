@@ -13,7 +13,9 @@ artifact probes are explicitly non-inference probes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from pydantic import Field
 
@@ -39,6 +41,7 @@ from .hal_smoke_preflight import HalSmokeOfflineComposition
 from .ollama_artifact import OllamaArtifactContract
 from .ollama_model_staging import PreparedOllamaModelStore
 from .opencode_trial_isolation import DockerOpenCodeTrialLeaseProvider
+from .state_verifiers import StateVerifier
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -202,6 +205,8 @@ class HalSmokeBlueInfrastructureSupervisor:
         workspace_supervisor: DisposableWorkspaceSupervisor,
         runtime_supervisor: DockerNetworkedOpenCodeSupervisor,
         runner: DockerCommandRunner,
+        state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]] | None = None,
+        state_verifier_policy_sha256: str | None = None,
         health_python_executable: str = "python",
     ) -> DockerOpenCodeTrialLeaseProvider:
         """Build per-trial AGENT isolation from the still-active exact Blue peer."""
@@ -227,6 +232,8 @@ class HalSmokeBlueInfrastructureSupervisor:
                 composition.target_measurement_binding_sha256
             ),
             model_peer_runtime_proof_sha256=lease.artifact.proof_sha256,
+            state_verifier_factory=state_verifier_factory,
+            state_verifier_policy_sha256=state_verifier_policy_sha256,
             health_python_executable=health_python_executable,
         )
         active.trial_providers.append(provider)

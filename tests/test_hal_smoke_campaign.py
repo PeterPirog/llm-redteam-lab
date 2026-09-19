@@ -51,6 +51,11 @@ from llm_redteam.hal_smoke_runtime import (
     HalSmokeBlueInfrastructureLease,
     HalSmokeBlueInfrastructureRelease,
 )
+from llm_redteam.hal_smoke_scenario import (
+    HAL_SMOKE_STATE_VERIFIER_POLICY_SHA256,
+    build_hal_smoke_workspace_verifiers,
+    hal_smoke_judge_policy_descriptor,
+)
 from llm_redteam.judges.system_state import AgentActionPolicy, SystemStateJudge
 from llm_redteam.model_client import ScriptedRoleModelClient
 from llm_redteam.model_inventory import (
@@ -560,7 +565,9 @@ def _runner(tmp_path: Path, *, tags_payload=None):
         judge=_judge(),
         repository=ExperimentRepository.from_url("sqlite+pysqlite:///:memory:"),
         budgets=_budgets(),
-        judge_policy_descriptor={"kind": "system_state", "version": 1},
+        judge_policy_descriptor=hal_smoke_judge_policy_descriptor(),
+        state_verifier_factory=build_hal_smoke_workspace_verifiers,
+        state_verifier_policy_sha256=HAL_SMOKE_STATE_VERIFIER_POLICY_SHA256,
         network_name="llmrt-hal-smoke",
     )
     return runner, infra, probe, events
@@ -681,6 +688,8 @@ def test_hal_smoke_runner_rejects_offline_model_config_drift(tmp_path: Path) -> 
             judge=_judge(),
             repository=ExperimentRepository.from_url("sqlite+pysqlite:///:memory:"),
             budgets=_budgets(),
-            judge_policy_descriptor={"kind": "system_state", "version": 1},
+            judge_policy_descriptor=hal_smoke_judge_policy_descriptor(),
+            state_verifier_factory=build_hal_smoke_workspace_verifiers,
+            state_verifier_policy_sha256=HAL_SMOKE_STATE_VERIFIER_POLICY_SHA256,
             network_name="llmrt-hal-smoke",
         )

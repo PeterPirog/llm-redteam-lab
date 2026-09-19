@@ -8,8 +8,10 @@ proofs into the generic ``TargetTrialLeaseProvider`` contract used by attacker-p
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
 
 from .agent_actions import canonical_json_hash
 from .disposable_workspace import (
@@ -31,6 +33,7 @@ from .domain import TargetClass, TargetIdentity, TargetMode
 from .opencode_health import HealthGatedOpenCodeTarget
 from .opencode_networked_launch import OpenCodeNetworkedLaunchPolicy
 from .opencode_runtime import AgentSandboxPolicy, OpenCodeRuntimeProfile
+from .state_verifiers import StateVerifier
 from .target_measurement_binding import (
     MeasurementBoundTarget,
     bind_target_measurement_identity,
@@ -43,6 +46,7 @@ from .target_trial_isolation import (
 )
 from .targets.base import TargetAdapter, TargetRequest, TargetResponse
 from .targets.opencode import OpenCodeConfig
+from .targets.state_verified import StateVerifyingTarget
 
 
 class DeclaredIsolatedOpenCodeTarget:
@@ -91,6 +95,8 @@ class DockerOpenCodeTrialLeaseProvider:
         opencode_config: OpenCodeConfig,
         target_measurement_binding_sha256: str | None = None,
         model_peer_runtime_proof_sha256: str | None = None,
+        state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]] | None = None,
+        state_verifier_policy_sha256: str | None = None,
         health_python_executable: str = "python",
     ) -> None:
         if not provider_id:
@@ -132,6 +138,14 @@ class DockerOpenCodeTrialLeaseProvider:
             model_peer_runtime_proof_sha256
         ):
             raise ValueError("model-peer runtime proof must be a lowercase SHA-256")
+        if (state_verifier_factory is None) != (state_verifier_policy_sha256 is None):
+            raise ValueError(
+                "state verifier factory and policy SHA-256 must be supplied together"
+            )
+        if state_verifier_policy_sha256 is not None and not _is_sha256(
+            state_verifier_policy_sha256
+        ):
+            raise ValueError("state verifier policy must be a lowercase SHA-256")
         if not health_python_executable or any(
             character.isspace() for character in health_python_executable
         ):
@@ -150,6 +164,8 @@ class DockerOpenCodeTrialLeaseProvider:
         self.opencode_config = opencode_config
         self.target_measurement_binding_sha256 = target_measurement_binding_sha256
         self.model_peer_runtime_proof_sha256 = model_peer_runtime_proof_sha256
+        self.state_verifier_factory = state_verifier_factory
+        self.state_verifier_policy_sha256 = state_verifier_policy_sha256
         self.health_python_executable = health_python_executable
         self._counter = 0
         self._active: dict[str, _ActiveTrial] = {}
@@ -174,6 +190,7 @@ class DockerOpenCodeTrialLeaseProvider:
                 "sandbox_policy_sha256": sandbox_policy.policy_sha256,
                 "declared_target_configuration_hash": self._declared_identity.configuration_hash,
                 "target_measurement_binding_sha256": target_measurement_binding_sha256,
+                "state_verifier_policy_sha256": state_verifier_policy_sha256,
                 "health_python_executable": health_python_executable,
             }
         )
@@ -248,6 +265,13 @@ class DockerOpenCodeTrialLeaseProvider:
                     target,
                     measurement_binding_sha256=self.target_measurement_binding_sha256,
                 )
+            if self.state_verifier_factory is not None:
+                verifiers = self.state_verifier_factory(workspace.path)
+                if not verifiers:
+                    raise ValueError(
+                        "state verifier factory returned no verifier for disposable workspace"
+                    )
+                target = StateVerifyingTarget(target, verifiers)
             if target.identity != expected_identity:
                 raise ValueError("constructed disposable OpenCode target differs from declaration")
 
@@ -264,6 +288,7 @@ class DockerOpenCodeTrialLeaseProvider:
                     "model_peer_runtime_proof_sha256": (
                         self.model_peer_runtime_proof_sha256
                     ),
+                    "state_verifier_policy_sha256": self.state_verifier_policy_sha256,
                     "target_configuration_hash": expected_identity.configuration_hash,
                 }
             )
