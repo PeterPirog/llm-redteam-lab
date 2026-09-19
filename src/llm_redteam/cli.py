@@ -23,6 +23,7 @@ from .campaigns.lifecycle import deterministic_judge_policy_descriptor
 from .corpus import load_corpus_files
 from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
+from .hal_smoke_operator import HalSmokeOperatorInputs, run_live_hal_smoke
 from .hal_smoke_preflight import (
     build_hal_smoke_static_plan,
     compose_hal_smoke_offline,
@@ -60,6 +61,7 @@ DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 DEFAULT_HAL_SMOKE_MODELS = Path("config/models.hal-smoke.example.yaml")
 DEFAULT_HAL_SMOKE_BLUE_MODEL = "ornith-1.5:9b"
+DEFAULT_HAL_SMOKE_DATABASE_URL = "sqlite+pysqlite:///hal-smoke.db"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
 
 app = typer.Typer(
@@ -267,6 +269,126 @@ def hal_smoke_preflight_command(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         _print_hal_smoke_preflight(payload)
+
+
+@app.command("hal-smoke-run")
+def hal_smoke_run_command(
+    model_inventory: Annotated[
+        Path,
+        typer.Option("--model-inventory", help="Fresh saved OpenWebUI /api/models response."),
+    ],
+    artifact_contracts: Annotated[
+        Path,
+        typer.Option("--artifact-contracts", help="Exact local Ollama artifact contracts."),
+    ],
+    ollama_tags_snapshot: Annotated[
+        Path,
+        typer.Option("--ollama-tags-snapshot", help="Fresh saved local Ollama /api/tags."),
+    ],
+    runtime_pins: Annotated[
+        Path,
+        typer.Option("--runtime-pins", help="Digest-pinned HAL/OpenCode runtime inputs."),
+    ],
+    source_ollama_models_root: Annotated[
+        Path,
+        typer.Option(
+            "--source-ollama-models-root",
+            help="Local HAL Ollama models root containing manifests/ and blobs/.",
+        ),
+    ],
+    staging_root: Annotated[
+        Path,
+        typer.Option("--staging-root", help="Laboratory-owned exact Blue staging root."),
+    ],
+    blue_manifest_path: Annotated[
+        str,
+        typer.Option(
+            "--blue-manifest-path",
+            help="Blue manifest path relative to the Ollama manifests directory.",
+        ),
+    ],
+    workspace_template_root: Annotated[
+        Path,
+        typer.Option(
+            "--workspace-template-root",
+            help="Immutable local template copied into every disposable Blue trial.",
+        ),
+    ],
+    workspace_sandbox_root: Annotated[
+        Path,
+        typer.Option(
+            "--workspace-sandbox-root",
+            help="Laboratory-owned root for disposable Blue trial workspaces.",
+        ),
+    ],
+    models_config: Annotated[
+        Path,
+        typer.Option("--models", help="Bounded local HAL smoke model configuration."),
+    ] = DEFAULT_HAL_SMOKE_MODELS,
+    blue_model: Annotated[
+        str,
+        typer.Option("--blue-model", help="Exact Blue model ID for the isolated peer."),
+    ] = DEFAULT_HAL_SMOKE_BLUE_MODEL,
+    budget_config: Annotated[
+        Path,
+        typer.Option("--budgets", help="Campaign budget configuration."),
+    ] = DEFAULT_BUDGET_CONFIG,
+    database_url: Annotated[
+        str,
+        typer.Option("--database-url", help="SQLAlchemy URL for local smoke evidence."),
+    ] = DEFAULT_HAL_SMOKE_DATABASE_URL,
+    network_name: Annotated[
+        str,
+        typer.Option("--network-name", help="Owned Docker network name for this smoke."),
+    ] = "llmrt-hal-smoke",
+    campaign_id: Annotated[
+        str | None,
+        typer.Option("--campaign-id", help="Optional explicit campaign identifier."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run the fixed first HAL OpenCode AGENT instrumentation smoke.
+
+    This is the live boundary: it stages the exact Blue artifact, starts the isolated
+    Docker model peer and per-trial OpenCode runtime, performs the live Red artifact
+    recheck, executes the fixed synthetic forbidden-marker scenario, and requires cleanup.
+    All model inference remains local to the configured HAL Ollama endpoints.
+    """
+
+    inputs = HalSmokeOperatorInputs(
+        models_config=models_config,
+        model_inventory=model_inventory,
+        artifact_contracts=artifact_contracts,
+        ollama_tags_snapshot=ollama_tags_snapshot,
+        runtime_pins=runtime_pins,
+        source_ollama_models_root=source_ollama_models_root,
+        staging_root=staging_root,
+        blue_manifest_relative_path=blue_manifest_path,
+        workspace_template_root=workspace_template_root,
+        workspace_sandbox_root=workspace_sandbox_root,
+        budget_config=budget_config,
+        blue_model_id=blue_model,
+    )
+    try:
+        result = asyncio.run(
+            run_live_hal_smoke(
+                inputs=inputs,
+                database_url=database_url,
+                network_name=network_name,
+                campaign_id=campaign_id,
+            )
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except RuntimeError as exc:
+        console.print(f"[red]HAL SMOKE FAILED[/red] {exc}", stderr=True)
+        raise typer.Exit(code=1) from exc
+
+    payload = _hal_smoke_run_payload(result)
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _print_hal_smoke_run(payload)
 
 
 @app.command("reference-run")
@@ -477,6 +599,41 @@ async def _execute_reference_run(
     finally:
         await red_client.aclose()
         await target.aclose()
+
+
+def _hal_smoke_run_payload(result) -> dict[str, object]:
+    campaign = result.run.campaign
+    return {
+        "campaign_id": campaign.campaign_id,
+        "status": campaign.status.value,
+        "target_snapshot_id": campaign.target_snapshot_id,
+        "measurement_hash": campaign.measurement_hash,
+        "composition_sha256": result.composition_sha256,
+        "staged_store_identity_sha256": result.staged_store_identity_sha256,
+        "execution_provenance": dict(result.run.execution_provenance_hashes),
+        "blue_infrastructure_proof_sha256": result.run.blue_infrastructure.proof_sha256,
+        "blue_teardown_proof_sha256": result.run.blue_release.teardown_proof_sha256,
+        "cleanup_complete": result.run.blue_release.cleanup_complete,
+        "outcomes": [execution.outcome.value for execution in campaign.executions],
+    }
+
+
+def _print_hal_smoke_run(payload: dict[str, object]) -> None:
+    table = Table(title="HAL live smoke")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("Campaign", str(payload["campaign_id"]))
+    table.add_row("Status", str(payload["status"]))
+    table.add_row("Composition", str(payload["composition_sha256"]))
+    table.add_row("Target snapshot", str(payload["target_snapshot_id"]))
+    table.add_row("Cleanup complete", str(payload["cleanup_complete"]))
+    outcomes = payload["outcomes"]
+    assert isinstance(outcomes, list)
+    table.add_row("Outcomes", ", ".join(str(value) for value in outcomes) or "none")
+    provenance = payload["execution_provenance"]
+    assert isinstance(provenance, dict)
+    table.add_row("Provenance kinds", ", ".join(sorted(provenance)) or "none")
+    console.print(table)
 
 
 def _hal_smoke_preflight_payload(static_plan, composition) -> dict[str, object]:
