@@ -27,6 +27,7 @@ from .hal_smoke_operator import (
     build_hal_smoke_live_runner,
     capture_hal_smoke_runtime,
     rebuild_captured_staged_store,
+    validate_hal_smoke_workspace_template,
     verify_hal_smoke_runtime_images,
 )
 from .hal_smoke_preflight import (
@@ -71,6 +72,7 @@ DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 DEFAULT_HAL_SMOKE_MODELS = Path("config/models.hal-smoke.example.yaml")
 DEFAULT_HAL_SMOKE_BLUE_MODEL = "ornith-1.5:9b"
 DEFAULT_OLLAMA_MODELS_ROOT = Path.home() / ".ollama" / "models"
+DEFAULT_HAL_SMOKE_WORKSPACE_TEMPLATE = Path("runtime/hal_smoke_workspace_template")
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
 
 app = typer.Typer(
@@ -384,7 +386,7 @@ def hal_smoke_run_command(
     workspace_template_root: Annotated[
         Path,
         typer.Option("--workspace-template-root"),
-    ] = Path("."),
+    ] = DEFAULT_HAL_SMOKE_WORKSPACE_TEMPLATE,
     workspace_sandbox_root: Annotated[
         Path,
         typer.Option("--workspace-sandbox-root"),
@@ -441,6 +443,7 @@ def hal_smoke_run_command(
         budgets = load_budget_config(budget_config)
         plan = build_hal_smoke_campaign_plan()
         case = build_hal_smoke_case()
+        validate_hal_smoke_workspace_template(workspace_template_root)
     except (OSError, RuntimeError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
