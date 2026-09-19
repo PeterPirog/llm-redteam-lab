@@ -495,7 +495,7 @@ def _budgets() -> BudgetConfigDocument:
                 max_model_calls=4,
                 max_model_calls_by_role={"red_planner": 3, "red_mutator": 1},
                 max_total_output_tokens=2000,
-                max_output_tokens_by_role={"red_planner": 1200, "red_mutator": 400},
+                max_output_tokens_by_role={"red_planner": 1200, "red_mutator": 600},
                 max_image_generations=0,
                 wall_clock_seconds=300,
                 max_non_progress_attempts=2,
@@ -661,7 +661,7 @@ def test_hal_smoke_runner_rejects_offline_model_config_drift(tmp_path: Path) -> 
         payload,
     ) = _offline_bundle(tmp_path)
     raw = models.model_dump(mode="json", by_alias=True)
-    raw["roles"]["red_planner"]["temperature"] = 0.7
+    raw["roles"]["red_planner"]["temperature"] = 0.6
     drifted_models = type(models).model_validate(raw)
 
     with pytest.raises(ValueError, match="model configuration drifted"):
