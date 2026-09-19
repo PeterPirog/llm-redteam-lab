@@ -28,6 +28,8 @@ class OpenCodeHealthObservation(StrictModel):
     container_id_sha256: str = Field(pattern=_HASH_PATTERN)
     endpoint_sha256: str = Field(pattern=_HASH_PATTERN)
     response_sha256: str = Field(pattern=_HASH_PATTERN)
+    probe_profile_sha256: str = Field(pattern=_HASH_PATTERN)
+    probe_command_sha256: str = Field(pattern=_HASH_PATTERN)
 
     @property
     def proof_sha256(self) -> str:
