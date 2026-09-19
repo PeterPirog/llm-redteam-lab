@@ -17,6 +17,7 @@ from .docker_networked_supervisor import (
     DockerNetworkedAgentLease,
     DockerNetworkedAgentSupervisor,
 )
+from .docker_opencode_health_probe import DockerOpenCodeHealthProbeProfile
 from .docker_opencode_environment import (
     DockerNetworkedOpenCodeEnvironmentAttestor,
     DockerNetworkedOpenCodeEnvironmentObservation,
@@ -72,9 +73,9 @@ class DockerNetworkedOpenCodeSupervisor:
         model_peer_container_id_sha256: str,
         runtime_profile: OpenCodeRuntimeProfile,
         sandbox_policy: AgentSandboxPolicy,
+        health_probe_profile: DockerOpenCodeHealthProbeProfile,
         workspace_host_path: str,
         container_name: str,
-        health_python_executable: str = "python",
     ) -> DockerNetworkedOpenCodeLease:
         """Return only after launch, environment and health evidence agree exactly."""
 
@@ -93,6 +94,7 @@ class DockerNetworkedOpenCodeSupervisor:
             model_peer_container_id_sha256=model_peer_container_id_sha256,
             runtime_profile=runtime_profile,
             sandbox_policy=sandbox_policy,
+            health_probe_profile=health_probe_profile,
             workspace_host_path=workspace_host_path,
             container_name=container_name,
             command=profile.launch_command,
@@ -114,7 +116,7 @@ class DockerNetworkedOpenCodeSupervisor:
             health = self._health_supervisor.probe_opencode_health(
                 _as_sandbox_lease(agent),
                 runtime_profile,
-                python_executable=health_python_executable,
+                probe_profile=health_probe_profile,
             )
             _validate_runtime_binding(
                 agent=agent,
@@ -124,6 +126,7 @@ class DockerNetworkedOpenCodeSupervisor:
                 profile=profile,
                 launch_policy=launch_policy,
                 model_peer_container_id_sha256=model_peer_container_id_sha256,
+                health_probe_profile=health_probe_profile,
             )
         except Exception:
             self._agent_supervisor.release(agent)
@@ -151,6 +154,7 @@ def _validate_static_binding(
     network_lease: DockerModelNetworkLease,
     model_peer_container_id_sha256: str,
     runtime_profile: OpenCodeRuntimeProfile,
+    health_probe_profile: DockerOpenCodeHealthProbeProfile,
 ) -> None:
     if profile.launch_policy_sha256 != launch_policy.policy_sha256:
         raise ValueError("Docker AGENT profile does not bind the requested launch policy")
@@ -163,6 +167,8 @@ def _validate_static_binding(
     launch_policy.model_binding.validate_network(model_network_profile)
     if not _is_sha256(model_peer_container_id_sha256):
         raise ValueError("model-peer container identity must be a lowercase SHA-256")
+    if health_probe_profile.image_ref == profile.image_ref:
+        raise ValueError("health probe must use the separate laboratory probe image")
 
 
 def _validate_runtime_binding(
@@ -174,6 +180,7 @@ def _validate_runtime_binding(
     profile: DockerNetworkedOpenCodeAgentProfile,
     launch_policy: OpenCodeNetworkedLaunchPolicy,
     model_peer_container_id_sha256: str,
+    health_probe_profile: DockerOpenCodeHealthProbeProfile,
 ) -> None:
     if environment.container_id_sha256 != agent.container_id_sha256:
         raise RuntimeError("OpenCode environment and AGENT lease bind different containers")
@@ -190,6 +197,8 @@ def _validate_runtime_binding(
         raise RuntimeError("OpenCode environment and AGENT lease bind different networks")
     if health.runtime_profile_sha256 != launch_policy.runtime.profile_sha256:
         raise RuntimeError("OpenCode health does not bind the launch runtime")
+    if health.probe_profile_sha256 != health_probe_profile.profile_sha256:
+        raise RuntimeError("OpenCode health does not bind the trusted probe profile")
     if health.sandbox_attestation_sha256 != launch_plan.sandbox_attestation_sha256:
         raise RuntimeError("OpenCode health and launch plan bind different sandbox evidence")
     if launch_plan.networked_launch_policy_sha256 != launch_policy.policy_sha256:
