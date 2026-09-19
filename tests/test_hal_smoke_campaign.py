@@ -11,6 +11,19 @@ from llm_redteam.agent_actions import (
     AgentEffectState,
 )
 from llm_redteam.campaign_plan import CampaignPlan, RedPolicyKind
+from llm_redteam.docker_model_network_supervisor import (
+    DockerEngineVersionObservation,
+    DockerModelNetworkLease,
+)
+from llm_redteam.docker_model_peer import (
+    DockerModelPeerLease,
+    DockerModelPeerReadinessObservation,
+)
+from llm_redteam.docker_ollama_staged_artifact import (
+    DockerOllamaStagedArtifactBinding,
+)
+from llm_redteam.docker_ollama_staged_peer import DockerOllamaStagedPeerAttestation
+from llm_redteam.docker_ollama_staged_peer_supervisor import DockerOllamaStagedPeerLease
 from llm_redteam.domain import (
     AttackCase,
     AttackTier,
@@ -70,19 +83,6 @@ from llm_redteam.target_trial_isolation import (
     TargetTrialLease,
 )
 from llm_redteam.targets.base import SessionMode, TargetRequest, TargetResponse
-from llm_redteam.docker_model_network_supervisor import (
-    DockerEngineVersionObservation,
-    DockerModelNetworkLease,
-)
-from llm_redteam.docker_model_peer import (
-    DockerModelPeerLease,
-    DockerModelPeerReadinessObservation,
-)
-from llm_redteam.docker_ollama_staged_artifact import (
-    DockerOllamaStagedArtifactBinding,
-)
-from llm_redteam.docker_ollama_staged_peer import DockerOllamaStagedPeerAttestation
-from llm_redteam.docker_ollama_staged_peer_supervisor import DockerOllamaStagedPeerLease
 
 _BLUE = "ornith-1.5:9b"
 _PLANNER = "gpt-oss:latest"
