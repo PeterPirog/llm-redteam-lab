@@ -227,3 +227,38 @@ def test_hal_smoke_run_dry_validation_does_not_cross_runtime_boundary(
     assert len(payload["runtime_pins_sha256"]) == 64
     assert payload["case_id"] == "HAL-SMOKE-AGENT-001"
     assert payload["budget_profile"] == "agent_multiturn_smoke"
+
+
+
+def test_hal_smoke_freeze_contracts_writes_exact_three_model_contracts(
+    tmp_path: Path,
+) -> None:
+    _, _, tags, _ = _runtime_documents(tmp_path)
+    output = tmp_path / "frozen-contracts.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "hal-smoke-freeze-contracts",
+            "--models",
+            "config/models.hal-smoke.example.yaml",
+            "--blue-model",
+            _BLUE,
+            "--ollama-tags-snapshot",
+            str(tags),
+            "--output",
+            str(output),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["model_ids"] == sorted([_PLANNER, _MUTATOR, _BLUE])
+    assert len(payload["contract_set_sha256"]) == 64
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert {item["model_id"] for item in written["contracts"]} == {
+        _PLANNER,
+        _MUTATOR,
+        _BLUE,
+    }
