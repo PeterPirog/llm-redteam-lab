@@ -178,3 +178,49 @@ def test_hal_smoke_preflight_composes_saved_hal_evidence_without_runtime_calls(
     assert len(payload["model_network_profile_sha256"]) == 64
     assert len(payload["model_peer_profile_sha256"]) == 64
     assert "opencode_environment_attestation" in payload["live_evidence_requirements"]
+
+
+
+def test_hal_smoke_run_dry_validation_does_not_cross_runtime_boundary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    inventory, contracts, tags, pins = _runtime_documents(tmp_path)
+    monkeypatch.delenv("OPENCODE_SERVER_PASSWORD", raising=False)
+
+    result = runner.invoke(
+        app,
+        [
+            "hal-smoke-run",
+            "--models",
+            "config/models.hal-smoke.example.yaml",
+            "--blue-model",
+            _BLUE,
+            "--model-inventory",
+            str(inventory),
+            "--artifact-contracts",
+            str(contracts),
+            "--ollama-tags-snapshot",
+            str(tags),
+            "--runtime-pins",
+            str(pins),
+            "--ollama-source-models-root",
+            str(tmp_path / "missing-source-is-fine-in-dry-run"),
+            "--ollama-staging-root",
+            str(tmp_path / "missing-stage-is-fine-in-dry-run"),
+            "--workspace-template-root",
+            str(tmp_path / "missing-template-is-fine-in-dry-run"),
+            "--workspace-sandbox-root",
+            str(tmp_path / "missing-sandbox-is-fine-in-dry-run"),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["phase"] == "validated_not_executed"
+    assert payload["execute_required"] is True
+    assert len(payload["composition_sha256"]) == 64
+    assert len(payload["runtime_pins_sha256"]) == 64
+    assert payload["case_id"] == "HAL-SMOKE-AGENT-001"
+    assert payload["budget_profile"] == "agent_multiturn_smoke"
