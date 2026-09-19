@@ -212,10 +212,6 @@ def test_operator_prepare_builds_exact_stage_without_docker_or_inference(
 
     assert prepared.composition.static_plan.blue_model_id == _BLUE
     assert (
-        prepared.staged_store.identity
-        == prepared.composition.model_peer.model_copy().staged_store_identity_sha256
-    ) is False
-    assert (
         prepared.staged_store.identity.identity_sha256
         == prepared.composition.model_peer.staged_store_identity_sha256
     )
