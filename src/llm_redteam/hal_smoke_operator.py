@@ -126,6 +126,31 @@ def capture_hal_smoke_runtime(
     )
 
 
+def verify_hal_smoke_runtime_images(
+    *,
+    runtime_pins: HalSmokeRuntimePins,
+    docker_runner: DockerCommandRunner | None = None,
+) -> tuple[DockerImagePinObservation, DockerImagePinObservation]:
+    """Recheck local image identities immediately before live HAL execution."""
+
+    runner = docker_runner or SubprocessDockerCommandRunner()
+    opencode = _capture_docker_image_pin(
+        runner,
+        image_ref=runtime_pins.opencode_image_ref,
+        label="OpenCode",
+    )
+    ollama_peer = _capture_docker_image_pin(
+        runner,
+        image_ref=runtime_pins.ollama_peer_image_ref,
+        label="Ollama peer",
+    )
+    if opencode.image_id != runtime_pins.opencode_image_id:
+        raise ValueError("live OpenCode image ID differs from persisted HAL runtime pins")
+    if ollama_peer.image_id != runtime_pins.ollama_peer_image_id:
+        raise ValueError("live Ollama peer image ID differs from persisted HAL runtime pins")
+    return opencode, ollama_peer
+
+
 def rebuild_captured_staged_store(
     *,
     runtime_pins: HalSmokeRuntimePins,
