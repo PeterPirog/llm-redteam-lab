@@ -24,6 +24,7 @@ from .docker_exec_opencode import build_attested_docker_exec_opencode_target
 from .docker_model_network import DockerIsolatedModelNetworkProfile
 from .docker_model_network_supervisor import DockerModelNetworkLease
 from .docker_networked_opencode_profile import DockerNetworkedOpenCodeAgentProfile
+from .docker_opencode_health_probe import DockerOpenCodeHealthProbeProfile
 from .docker_networked_opencode_supervisor import (
     DockerNetworkedOpenCodeLease,
     DockerNetworkedOpenCodeSupervisor,
@@ -97,7 +98,7 @@ class DockerOpenCodeTrialLeaseProvider:
         model_peer_runtime_proof_sha256: str | None = None,
         state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]] | None = None,
         state_verifier_policy_sha256: str | None = None,
-        health_python_executable: str = "python",
+        health_probe_profile: DockerOpenCodeHealthProbeProfile,
     ) -> None:
         if not provider_id:
             raise ValueError("target isolation provider_id must be non-empty")
@@ -146,11 +147,6 @@ class DockerOpenCodeTrialLeaseProvider:
             state_verifier_policy_sha256
         ):
             raise ValueError("state verifier policy must be a lowercase SHA-256")
-        if not health_python_executable or any(
-            character.isspace() for character in health_python_executable
-        ):
-            raise ValueError("health_python_executable must be one executable token")
-
         self._workspace_supervisor = workspace_supervisor
         self._runtime_supervisor = runtime_supervisor
         self._runner = runner
@@ -166,7 +162,7 @@ class DockerOpenCodeTrialLeaseProvider:
         self.model_peer_runtime_proof_sha256 = model_peer_runtime_proof_sha256
         self.state_verifier_factory = state_verifier_factory
         self.state_verifier_policy_sha256 = state_verifier_policy_sha256
-        self.health_python_executable = health_python_executable
+        self.health_probe_profile = health_probe_profile
         self._counter = 0
         self._active: dict[str, _ActiveTrial] = {}
 
@@ -191,7 +187,7 @@ class DockerOpenCodeTrialLeaseProvider:
                 "declared_target_configuration_hash": self._declared_identity.configuration_hash,
                 "target_measurement_binding_sha256": target_measurement_binding_sha256,
                 "state_verifier_policy_sha256": state_verifier_policy_sha256,
-                "health_python_executable": health_python_executable,
+                "health_probe_profile_sha256": health_probe_profile.profile_sha256,
             }
         )
 
@@ -244,9 +240,9 @@ class DockerOpenCodeTrialLeaseProvider:
                 model_peer_container_id_sha256=self.model_peer_container_id_sha256,
                 runtime_profile=self.runtime_profile,
                 sandbox_policy=self.sandbox_policy,
+                health_probe_profile=self.health_probe_profile,
                 workspace_host_path=str(workspace.path),
                 container_name=container_name,
-                health_python_executable=self.health_python_executable,
             )
             container = DockerExecContainerRef(
                 container_name=runtime.agent.container_name,
