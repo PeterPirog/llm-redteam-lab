@@ -38,8 +38,8 @@ from .ollama_model_staging import PreparedOllamaModelStore
 from .red_runtime_artifact import (
     OllamaTagsProbe,
     RedRuntimeArtifactRecheck,
-    red_runtime_artifact_recheck_provenance,
     recheck_red_runtime_artifacts,
+    red_runtime_artifact_recheck_provenance,
 )
 from .reference_artifact_provenance import (
     LOCAL_MODEL_ADMISSION_PROVENANCE_KIND,
