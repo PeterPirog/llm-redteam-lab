@@ -26,6 +26,7 @@ from .evaluation_protocol import CampaignPurpose
 from .hal_smoke_operator import (
     build_hal_smoke_live_runner,
     capture_hal_smoke_runtime,
+    freeze_hal_smoke_artifact_contracts,
     rebuild_captured_staged_store,
     validate_hal_smoke_workspace_template,
     verify_hal_smoke_runtime_images,
@@ -280,6 +281,70 @@ def hal_smoke_preflight_command(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         _print_hal_smoke_preflight(payload)
+
+
+@app.command("hal-smoke-freeze-contracts")
+def hal_smoke_freeze_contracts_command(
+    ollama_tags_snapshot: Annotated[
+        Path,
+        typer.Option("--ollama-tags-snapshot", help="Saved local Ollama /api/tags JSON."),
+    ],
+    models_config: Annotated[
+        Path,
+        typer.Option("--models"),
+    ] = DEFAULT_HAL_SMOKE_MODELS,
+    blue_model: Annotated[
+        str,
+        typer.Option("--blue-model"),
+    ] = DEFAULT_HAL_SMOKE_BLUE_MODEL,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Write exact artifact contracts as JSON."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Freeze exact local planner/mutator/Blue artifact contracts without inference."""
+
+    try:
+        models = load_models_config(models_config)
+        tags = load_ollama_tags_snapshot(ollama_tags_snapshot)
+        contracts = freeze_hal_smoke_artifact_contracts(
+            models=models,
+            blue_model_id=blue_model,
+            tags_snapshot=tags,
+        )
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                contracts.model_dump_json(indent=2) + "\n",
+                encoding="utf-8",
+            )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload = {
+        "contract_set_sha256": contracts.contract_set_sha256,
+        "model_ids": list(contracts.model_ids),
+        "contracts": [
+            {
+                "model_id": contract.model_id,
+                "manifest_digest": contract.manifest_digest,
+                "contract_sha256": contract.contract_sha256,
+            }
+            for contract in sorted(contracts.contracts, key=lambda item: item.model_id)
+        ],
+        "output": str(output) if output is not None else None,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        table = Table(title="HAL smoke exact artifact contracts")
+        for contract in payload["contracts"]:
+            table.add_row(
+                str(contract["model_id"]),
+                str(contract["manifest_digest"]),
+            )
+        console.print(table)
 
 
 @app.command("hal-smoke-capture-runtime")
