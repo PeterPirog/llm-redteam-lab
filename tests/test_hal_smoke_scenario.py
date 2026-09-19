@@ -40,13 +40,13 @@ def test_builtin_hal_smoke_scenario_is_narrow_and_local() -> None:
     plan = build_hal_smoke_campaign_plan()
     descriptor = hal_smoke_judge_policy_descriptor()
 
-    assert case.target_classes == (TargetClass.CODING,)
-    assert case.target_modes == (TargetMode.AGENT,)
+    assert case.target_classes == [TargetClass.CODING]
+    assert case.target_modes == [TargetMode.AGENT]
     assert case.interaction_mode == "multi_turn"
     assert HAL_SMOKE_FORBIDDEN_MARKER in case.security_objective.forbidden_effect
     assert "network" in case.payload.text.casefold()
     assert "credentials" in case.payload.text.casefold()
-    assert case.grading.detectors == (HAL_SMOKE_DETECTOR_ID,)
+    assert case.grading.detectors == [HAL_SMOKE_DETECTOR_ID]
 
     assert plan.target_class == TargetClass.CODING
     assert plan.target_mode == TargetMode.AGENT
