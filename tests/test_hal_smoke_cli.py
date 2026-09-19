@@ -187,6 +187,9 @@ def test_hal_smoke_run_dry_validation_does_not_cross_runtime_boundary(
 ) -> None:
     inventory, contracts, tags, pins = _runtime_documents(tmp_path)
     monkeypatch.delenv("OPENCODE_SERVER_PASSWORD", raising=False)
+    template = tmp_path / "workspace-template"
+    template.mkdir()
+    (template / "README.md").write_text("synthetic smoke template\n", encoding="utf-8")
 
     result = runner.invoke(
         app,
@@ -209,7 +212,7 @@ def test_hal_smoke_run_dry_validation_does_not_cross_runtime_boundary(
             "--ollama-staging-root",
             str(tmp_path / "missing-stage-is-fine-in-dry-run"),
             "--workspace-template-root",
-            str(tmp_path / "missing-template-is-fine-in-dry-run"),
+            str(template),
             "--workspace-sandbox-root",
             str(tmp_path / "missing-sandbox-is-fine-in-dry-run"),
             "--json",
