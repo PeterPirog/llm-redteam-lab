@@ -23,10 +23,20 @@ from .campaigns.lifecycle import deterministic_judge_policy_descriptor
 from .corpus import load_corpus_files
 from .domain import TargetClass, TargetMode
 from .evaluation_protocol import CampaignPurpose
+from .hal_smoke_operator import (
+    build_hal_smoke_live_runner,
+    capture_hal_smoke_runtime,
+    rebuild_captured_staged_store,
+    verify_hal_smoke_runtime_images,
+)
 from .hal_smoke_preflight import (
     build_hal_smoke_static_plan,
     compose_hal_smoke_offline,
     load_hal_smoke_runtime_pins,
+)
+from .hal_smoke_scenario import (
+    build_hal_smoke_campaign_plan,
+    build_hal_smoke_case,
 )
 from .judges.deterministic import DeterministicJudge
 from .model_client import OpenAICompatibleRoleModelClient
@@ -267,6 +277,256 @@ def hal_smoke_preflight_command(
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
     else:
         _print_hal_smoke_preflight(payload)
+
+
+@app.command("hal-smoke-capture-runtime")
+def hal_smoke_capture_runtime_command(
+    artifact_contracts: Annotated[
+        Path,
+        typer.Option("--artifact-contracts", help="Exact local Ollama artifact contracts."),
+    ],
+    blue_model: Annotated[
+        str,
+        typer.Option("--blue-model", help="Blue model to stage and pin."),
+    ] = DEFAULT_HAL_SMOKE_BLUE_MODEL,
+    manifest_relative_path: Annotated[
+        str,
+        typer.Option("--blue-manifest-relative-path"),
+    ] = "",
+    source_models_root: Annotated[
+        Path,
+        typer.Option("--ollama-source-models-root"),
+    ] = Path.home() / ".ollama" / "models",
+    staging_root: Annotated[
+        Path,
+        typer.Option("--ollama-staging-root"),
+    ] = Path(".llm-redteam-hal") / "ollama-staging",
+    opencode_application_version: Annotated[
+        str,
+        typer.Option("--opencode-application-version"),
+    ] = "",
+    opencode_image_ref: Annotated[
+        str,
+        typer.Option("--opencode-image-ref"),
+    ] = "",
+    ollama_peer_image_ref: Annotated[
+        str,
+        typer.Option("--ollama-peer-image-ref"),
+    ] = "",
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Write captured runtime pins as JSON."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Capture exact HAL runtime pins without model inference."""
+
+    try:
+        contracts = load_ollama_artifact_contracts(artifact_contracts)
+        blue_contract = _require_ollama_contract(contracts, blue_model)
+        captured = capture_hal_smoke_runtime(
+            blue_artifact_contract=blue_contract,
+            manifest_relative_path=manifest_relative_path,
+            source_models_root=source_models_root,
+            staging_root=staging_root,
+            opencode_application_version=opencode_application_version,
+            opencode_image_ref=opencode_image_ref,
+            ollama_peer_image_ref=ollama_peer_image_ref,
+        )
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                captured.runtime_pins.model_dump_json(indent=2) + "\n",
+                encoding="utf-8",
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload = {
+        "runtime_pins_sha256": captured.runtime_pins.pins_sha256,
+        "staged_blue_store_identity_sha256": (
+            captured.staged_store.identity.identity_sha256
+        ),
+        "opencode_image_id": captured.opencode_image.image_id,
+        "ollama_peer_image_id": captured.ollama_peer_image.image_id,
+        "output": str(output) if output is not None else None,
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        table = Table(title="HAL runtime capture")
+        for key, value in payload.items():
+            table.add_row(key, str(value))
+        console.print(table)
+
+
+@app.command("hal-smoke-run")
+def hal_smoke_run_command(
+    models_config: Annotated[Path, typer.Option("--models")] = DEFAULT_HAL_SMOKE_MODELS,
+    model_inventory: Annotated[Path, typer.Option("--model-inventory")] = ...,
+    artifact_contracts: Annotated[Path, typer.Option("--artifact-contracts")] = ...,
+    ollama_tags_snapshot: Annotated[Path, typer.Option("--ollama-tags-snapshot")] = ...,
+    runtime_pins: Annotated[Path, typer.Option("--runtime-pins")] = ...,
+    blue_model: Annotated[str, typer.Option("--blue-model")] = DEFAULT_HAL_SMOKE_BLUE_MODEL,
+    manifest_relative_path: Annotated[
+        str,
+        typer.Option("--blue-manifest-relative-path"),
+    ] = "",
+    source_models_root: Annotated[
+        Path,
+        typer.Option("--ollama-source-models-root"),
+    ] = Path.home() / ".ollama" / "models",
+    staging_root: Annotated[
+        Path,
+        typer.Option("--ollama-staging-root"),
+    ] = Path(".llm-redteam-hal") / "ollama-staging",
+    workspace_template_root: Annotated[
+        Path,
+        typer.Option("--workspace-template-root"),
+    ] = Path("."),
+    workspace_sandbox_root: Annotated[
+        Path,
+        typer.Option("--workspace-sandbox-root"),
+    ] = Path(".llm-redteam-hal") / "workspaces",
+    budget_config: Annotated[Path, typer.Option("--budgets")] = DEFAULT_BUDGET_CONFIG,
+    database_url: Annotated[
+        str,
+        typer.Option("--database-url"),
+    ] = "sqlite+pysqlite:///hal-smoke.db",
+    network_name: Annotated[
+        str,
+        typer.Option("--network-name"),
+    ] = "llmrt-hal-smoke",
+    campaign_id: Annotated[str | None, typer.Option("--campaign-id")] = None,
+    execute: Annotated[
+        bool,
+        typer.Option("--execute", help="Explicitly cross the HAL runtime/inference boundary."),
+    ] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate or explicitly execute the fixed first HAL OpenCode smoke."""
+
+    try:
+        models = load_models_config(models_config)
+        static_plan = build_hal_smoke_static_plan(
+            models=models,
+            blue_model_id=blue_model,
+        )
+        inventory = load_openwebui_ollama_inventory(model_inventory)
+        pins = load_hal_smoke_runtime_pins(runtime_pins)
+        admission = validate_local_only_model_selection(
+            models=models,
+            inventory=inventory,
+            blue_model_id=blue_model,
+            blue_endpoint=f"http://{pins.model_endpoint_host}:{pins.model_endpoint_port}",
+            blue_required_capabilities={"text"},
+            allowed_endpoint_hosts={pins.model_endpoint_host},
+        )
+        contracts = load_ollama_artifact_contracts(artifact_contracts)
+        tags = load_ollama_tags_snapshot(ollama_tags_snapshot)
+        qualification = qualify_admitted_ollama_artifacts(
+            admission=admission,
+            inventory=inventory,
+            contracts=contracts,
+            tags_snapshot=tags,
+        )
+        composition = compose_hal_smoke_offline(
+            static_plan=static_plan,
+            admission=admission,
+            qualification=qualification,
+            pins=pins,
+        )
+        blue_contract = _require_ollama_contract(contracts, blue_model)
+        budgets = load_budget_config(budget_config)
+        plan = build_hal_smoke_campaign_plan()
+        case = build_hal_smoke_case()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    if not execute:
+        payload = {
+            "phase": "validated_not_executed",
+            "execute_required": True,
+            "composition_sha256": composition.composition_sha256,
+            "red_measurement_binding_sha256": composition.red_measurement_binding_sha256,
+            "target_measurement_binding_sha256": (
+                composition.target_measurement_binding_sha256
+            ),
+            "runtime_pins_sha256": pins.pins_sha256,
+            "blue_model": blue_model,
+            "case_id": case.id,
+            "budget_profile": plan.budget_profile,
+            "local_paths": {
+                "source_models_root": str(source_models_root),
+                "staging_root": str(staging_root),
+                "workspace_template_root": str(workspace_template_root),
+                "workspace_sandbox_root": str(workspace_sandbox_root),
+            },
+        }
+        if json_output:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            table = Table(title="HAL smoke validated (not executed)")
+            table.add_row("Composition", composition.composition_sha256)
+            table.add_row("Blue model", blue_model)
+            table.add_row("Case", case.id)
+            table.add_row("Runtime boundary", "NOT CROSSED; rerun with --execute on HAL")
+            console.print(table)
+        return
+
+    try:
+        verify_hal_smoke_runtime_images(runtime_pins=pins)
+        staged_store = rebuild_captured_staged_store(
+            runtime_pins=pins,
+            blue_artifact_contract=blue_contract,
+            manifest_relative_path=manifest_relative_path,
+            source_models_root=source_models_root,
+            staging_root=staging_root,
+        )
+        live_runner = build_hal_smoke_live_runner(
+            composition=composition,
+            admission=admission,
+            qualification=qualification,
+            models=models,
+            staged_store=staged_store,
+            blue_artifact_contract=blue_contract,
+            workspace_template_root=workspace_template_root,
+            workspace_sandbox_root=workspace_sandbox_root,
+            repository=ExperimentRepository.from_url(database_url),
+            budgets=budgets,
+            network_name=network_name,
+        )
+        result = asyncio.run(
+            _run_hal_smoke_live_and_close(
+                live_runner,
+                plan=plan,
+                case=case,
+                campaign_id=campaign_id,
+            )
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    payload = {
+        "phase": "executed",
+        "campaign_id": result.campaign.campaign_id,
+        "campaign_status": result.campaign.status.value,
+        "measurement_hash": result.campaign.measurement_hash,
+        "blue_infrastructure_proof_sha256": result.blue_infrastructure.proof_sha256,
+        "blue_teardown_proof_sha256": result.blue_release.teardown_proof_sha256,
+        "red_runtime_recheck_proof_sha256": result.red_runtime_recheck.proof_sha256,
+        "execution_provenance_hashes": dict(result.execution_provenance_hashes),
+        "isolation_record_count": len(result.campaign.isolation_records),
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        table = Table(title="HAL smoke execution")
+        table.add_row("Campaign", result.campaign.campaign_id)
+        table.add_row("Status", result.campaign.status.value)
+        table.add_row("Measurement", result.campaign.measurement_hash)
+        table.add_row("Isolation records", str(len(result.campaign.isolation_records)))
+        console.print(table)
 
 
 @app.command("reference-run")
@@ -538,6 +798,30 @@ def _print_hal_smoke_preflight(payload: dict[str, object]) -> None:
             str(len(payload["required_offline_inputs"])),
         )
     console.print(table)
+
+
+
+def _require_ollama_contract(contracts, model_id: str):
+    matches = [contract for contract in contracts.contracts if contract.model_id == model_id]
+    if len(matches) != 1:
+        raise ValueError(
+            f"artifact contracts must contain exactly one contract for Blue model: {model_id}"
+        )
+    return matches[0]
+
+
+async def _run_hal_smoke_live_and_close(live_runner, *, plan, case, campaign_id):
+    try:
+        return await live_runner.run(
+            plan=plan,
+            cases=(case,),
+            campaign_id=campaign_id,
+        )
+    finally:
+        for client in (live_runner.red_model_client, live_runner.red_tags_probe):
+            close = getattr(client, "aclose", None)
+            if close is not None:
+                await close()
 
 
 def _reference_result_payload(result: ReferenceEvaluationRunResult) -> dict[str, object]:
