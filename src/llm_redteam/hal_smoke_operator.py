@@ -31,7 +31,11 @@ from .docker_supervisor import (
 )
 from .domain import StrictModel
 from .hal_smoke_campaign import HalSmokeCampaignRunner
-from .hal_smoke_preflight import HalSmokeOfflineComposition, HalSmokeRuntimePins
+from .hal_smoke_preflight import (
+    HalSmokeOfflineComposition,
+    HalSmokeRuntimePins,
+    build_hal_smoke_static_plan,
+)
 from .hal_smoke_runtime import HalSmokeBlueInfrastructureSupervisor
 from .hal_smoke_scenario import (
     HAL_SMOKE_FORBIDDEN_MARKER,
@@ -49,7 +53,10 @@ from .ollama_model_staging import (
     PreparedOllamaModelStore,
 )
 from .red_runtime_artifact import HttpxLocalOllamaTagsProbe
-from .reference_artifact_qualification import ReferenceArtifactQualificationReport
+from .reference_artifact_qualification import (
+    OllamaArtifactContractSet,
+    ReferenceArtifactQualificationReport,
+)
 from .runtime_config import BudgetConfigDocument
 from .storage.repository import ExperimentRepository
 
@@ -71,6 +78,27 @@ class CapturedHalSmokeRuntime:
     runtime_pins: HalSmokeRuntimePins
     opencode_image: DockerImagePinObservation
     ollama_peer_image: DockerImagePinObservation
+
+
+def freeze_hal_smoke_artifact_contracts(
+    *,
+    models: ModelsConfig,
+    blue_model_id: str,
+    tags_snapshot: object,
+) -> OllamaArtifactContractSet:
+    """Freeze exact local planner/mutator/Blue digests from one saved Ollama tags response."""
+
+    static = build_hal_smoke_static_plan(models=models, blue_model_id=blue_model_id)
+    model_ids = (
+        static.red_planner_model_id,
+        static.red_mutator_model_id,
+        static.blue_model_id,
+    )
+    contracts = tuple(
+        _contract_from_tags_snapshot(model_id=model_id, payload=tags_snapshot)
+        for model_id in sorted(model_ids)
+    )
+    return OllamaArtifactContractSet(contracts=contracts)
 
 
 def capture_hal_smoke_runtime(
@@ -262,6 +290,39 @@ def validate_hal_smoke_workspace_template(root: str | Path) -> Path:
             f"HAL smoke workspace template already contains {HAL_SMOKE_FORBIDDEN_MARKER}"
         )
     return path
+
+
+def _contract_from_tags_snapshot(
+    *,
+    model_id: str,
+    payload: object,
+) -> OllamaArtifactContract:
+    if not isinstance(payload, dict):
+        raise ValueError("Ollama tags snapshot must be a JSON object")
+    models = payload.get("models")
+    if not isinstance(models, list):
+        raise ValueError("Ollama tags snapshot must contain a models list")
+    matches = [
+        item
+        for item in models
+        if isinstance(item, dict)
+        and (item.get("name") == model_id or item.get("model") == model_id)
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"Ollama tags snapshot must resolve exactly one model: {model_id}")
+    record = matches[0]
+    if record.get("remote_model") or record.get("remote_host"):
+        raise ValueError(f"HAL smoke artifact must be local, not remote proxy: {model_id}")
+    digest = record.get("digest")
+    if not isinstance(digest, str):
+        raise ValueError(f"Ollama tags snapshot lacks exact digest: {model_id}")
+    contract = OllamaArtifactContract(
+        model_id=model_id,
+        expected_manifest_digest=digest,
+        require_local=True,
+    )
+    contract.verify_tags_response(payload)
+    return contract
 
 
 def _capture_docker_image_pin(
