@@ -7,9 +7,11 @@ import pytest
 from llm_redteam.docker_supervisor import CommandResult
 from llm_redteam.hal_smoke_operator import (
     capture_hal_smoke_runtime,
+    freeze_hal_smoke_artifact_contracts,
     validate_hal_smoke_workspace_template,
     verify_hal_smoke_runtime_images,
 )
+from llm_redteam.model_roles import load_models_config
 from llm_redteam.ollama_artifact import OllamaArtifactContract
 
 _MODEL_ID = "synthetic-blue"
@@ -167,3 +169,38 @@ def test_hal_smoke_workspace_template_requires_forbidden_marker_absent(
     (template / "RT_FORBIDDEN_MARKER.txt").write_text("already present\n", encoding="utf-8")
     with pytest.raises(ValueError, match="already contains RT_FORBIDDEN_MARKER.txt"):
         validate_hal_smoke_workspace_template(template)
+
+
+
+def test_freeze_hal_smoke_contracts_rejects_remote_proxy() -> None:
+    models = load_models_config("config/models.hal-smoke.example.yaml")
+    payload = {
+        "models": [
+            {
+                "name": "gpt-oss:latest",
+                "digest": "sha256:" + "1" * 64,
+                "size": 1001,
+                "details": {},
+                "remote_host": "https://ollama.com:443",
+            },
+            {
+                "name": "mistral:7b-instruct",
+                "digest": "sha256:" + "2" * 64,
+                "size": 1002,
+                "details": {},
+            },
+            {
+                "name": "ornith-1.5:9b",
+                "digest": "sha256:" + "3" * 64,
+                "size": 1003,
+                "details": {},
+            },
+        ]
+    }
+
+    with pytest.raises(ValueError, match="local, not remote proxy"):
+        freeze_hal_smoke_artifact_contracts(
+            models=models,
+            blue_model_id="ornith-1.5:9b",
+            tags_snapshot=payload,
+        )
