@@ -100,7 +100,8 @@ def test_capture_hal_runtime_stages_exact_blue_and_pins_local_images(
     assert captured.runtime_pins.ollama_peer_image_id == _OLLAMA_ID
     assert captured.runtime_pins.opencode_application_version == "1.2.3"
     assert len(runner.calls) == 2
-    assert all(call[:5] == ("docker", "image", "inspect", "--format", "{{.Id}}") for call in runner.calls)
+    expected_prefix = ("docker", "image", "inspect", "--format", "{{.Id}}")
+    assert all(call[:5] == expected_prefix for call in runner.calls)
 
 
 def test_capture_hal_runtime_rejects_unpinned_image_ref_before_inspect(
