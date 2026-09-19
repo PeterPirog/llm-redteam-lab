@@ -23,6 +23,7 @@ from .docker_sandbox import (
     DockerSandboxProfile,
     attest_offline_docker_sandbox,
 )
+from .docker_opencode_health_probe import DockerOpenCodeHealthProbeProfile
 from .domain import StrictModel
 from .opencode_health import OpenCodeHealthObservation
 from .opencode_runtime import (
@@ -32,19 +33,6 @@ from .opencode_runtime import (
 )
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
-_OPENCODE_HEALTH_PROBE_SCRIPT = (
-    "import base64,json,os,sys,urllib.request;"
-    "url=sys.argv[1];password_env=sys.argv[2];"
-    "request=urllib.request.Request(url);"
-    "password=os.getenv(password_env) if password_env else None;"
-    "username=os.getenv('OPENCODE_SERVER_USERNAME','opencode');"
-    "request.add_header('Authorization','Basic '+"
-    "base64.b64encode((username+':'+password).encode()).decode()) if password else None;"
-    "response=urllib.request.urlopen(request,timeout=5);"
-    "data=response.read();response.close();print(data.decode())"
-)
-
-
 class CommandResult(StrictModel):
     """Minimal non-persistent result from one local supervisor command."""
 
@@ -167,29 +155,21 @@ class DockerProcessSupervisor:
         lease: DockerSandboxLease,
         runtime_profile: OpenCodeRuntimeProfile,
         *,
-        python_executable: str = "python",
+        probe_profile: DockerOpenCodeHealthProbeProfile,
     ) -> OpenCodeHealthObservation:
-        """Probe `/global/health` from inside the owned network namespace."""
+        """Probe OpenCode from a trusted ephemeral container sharing its network namespace."""
 
-        if not python_executable or any(character.isspace() for character in python_executable):
-            raise ValueError("python_executable must be one non-empty executable token")
         self._require_owned_container(lease)
-        endpoint = _opencode_health_endpoint(runtime_profile)
+        command = probe_profile.docker_run_command(
+            agent_container_name=lease.container_name,
+            runtime_profile=runtime_profile,
+        )
         result = self._runner.run(
-            (
-                "docker",
-                "exec",
-                lease.container_name,
-                python_executable,
-                "-c",
-                _OPENCODE_HEALTH_PROBE_SCRIPT,
-                endpoint,
-                runtime_profile.server_password_env or "",
-            ),
+            command,
             timeout_seconds=self._command_timeout_seconds,
         )
         if result.returncode != 0:
-            raise RuntimeError("OpenCode container health probe failed")
+            raise RuntimeError("OpenCode trusted health probe failed")
         self._require_owned_container(lease)
 
         try:
@@ -205,6 +185,9 @@ class DockerProcessSupervisor:
         if not isinstance(application_version, str) or not application_version:
             raise RuntimeError("OpenCode health response lacks application version")
 
+        endpoint = (
+            f"http://{runtime_profile.hostname}:{runtime_profile.port}/global/health"
+        )
         return OpenCodeHealthObservation(
             healthy=True,
             application_version=application_version,
@@ -213,6 +196,8 @@ class DockerProcessSupervisor:
             container_id_sha256=lease.container_id_sha256,
             endpoint_sha256=sha256(endpoint.encode()).hexdigest(),
             response_sha256=sha256(result.stdout.encode()).hexdigest(),
+            probe_profile_sha256=probe_profile.profile_sha256,
+            probe_command_sha256=canonical_json_hash(list(command)),
         )
 
     def release(self, lease: DockerSandboxLease) -> None:
@@ -293,12 +278,6 @@ class DockerProcessSupervisor:
         )
         if remove_result.returncode != 0:
             raise RuntimeError("Docker sandbox cleanup failed after rejected attestation")
-
-
-def _opencode_health_endpoint(runtime_profile: OpenCodeRuntimeProfile) -> str:
-    hostname = runtime_profile.hostname.strip()
-    url_host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
-    return f"http://{url_host}:{runtime_profile.port}/global/health"
 
 
 def _parse_container_id(stdout: str) -> str:
