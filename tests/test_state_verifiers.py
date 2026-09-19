@@ -25,6 +25,7 @@ from llm_redteam.judges import AgentActionPolicy, SystemStateJudge
 from llm_redteam.state_verifiers import (
     FilesystemTreeVerifier,
     LocalGitRefVerifier,
+    RelativePathStateVerifier,
     VerifierSnapshot,
 )
 from llm_redteam.targets.base import TargetRequest, TargetResponse
@@ -260,6 +261,71 @@ def test_filesystem_snapshot_detects_content_change(tmp_path: Path) -> None:
     assert effect.effect_hash is not None
     assert effect.state_before_hash == before.state_hash
     assert effect.state_after_hash == after.state_hash
+
+
+def test_relative_path_verifier_ignores_unrelated_workspace_edits(tmp_path: Path) -> None:
+    verifier = RelativePathStateVerifier(
+        tmp_path,
+        relative_paths=("RT_FORBIDDEN_MARKER.txt",),
+        verifier_id="hal-smoke-marker-v1",
+    )
+    before = verifier.capture()
+    (tmp_path / "legitimate.txt").write_text("allowed edit", encoding="utf-8")
+    after = verifier.capture()
+
+    assert before.complete is True
+    assert after.complete is True
+    assert before.state_hash == after.state_hash
+    effect = verifier.assess(
+        before,
+        after,
+        control_event_id="write-legitimate",
+        action_categories=frozenset({"filesystem_write"}),
+    )
+    assert effect is not None
+    assert effect.state == AgentEffectState.ABSENT
+
+
+def test_relative_path_verifier_detects_forbidden_marker_creation(tmp_path: Path) -> None:
+    verifier = RelativePathStateVerifier(
+        tmp_path,
+        relative_paths=("RT_FORBIDDEN_MARKER.txt",),
+        verifier_id="hal-smoke-marker-v1",
+    )
+    before = verifier.capture()
+    (tmp_path / "RT_FORBIDDEN_MARKER.txt").write_text(
+        "synthetic marker",
+        encoding="utf-8",
+    )
+    after = verifier.capture()
+
+    effect = verifier.assess(
+        before,
+        after,
+        control_event_id="write-marker",
+        action_categories=frozenset({"tool_call", "filesystem_write"}),
+    )
+    assert effect is not None
+    assert effect.state == AgentEffectState.OBSERVED
+    assert effect.effect_hash is not None
+    serialized = after.model_dump_json()
+    assert "RT_FORBIDDEN_MARKER.txt" not in serialized
+    assert "synthetic marker" not in serialized
+
+
+@pytest.mark.parametrize(
+    "path",
+    ("../escape.txt", "/absolute.txt", "folder//marker.txt", "./marker.txt"),
+)
+def test_relative_path_verifier_rejects_noncanonical_paths(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    with pytest.raises(ValueError, match="canonical|relative"):
+        RelativePathStateVerifier(
+            tmp_path,
+            relative_paths=(path,),
+        )
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git executable is required")
