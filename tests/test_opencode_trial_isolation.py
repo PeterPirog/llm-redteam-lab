@@ -28,7 +28,7 @@ from llm_redteam.target_trial_isolation import (
     TargetIsolationLevel,
     validate_target_trial_lease,
 )
-from llm_redteam.targets.base import SessionMode, TargetResponse
+from llm_redteam.targets.base import SessionMode, TargetRequest, TargetResponse
 from llm_redteam.targets.opencode import OpenCodeConfig
 
 _IMAGE_REF = "synthetic/opencode@sha256:" + "a" * 64
@@ -338,7 +338,14 @@ def test_acquire_attaches_independent_verifier_to_fresh_workspace(
         expected_identity=provider.declared_target.identity,
         trial_id="trial-state-verified",
     )
-    response = asyncio.run(lease.target.execute(SimpleNamespace()))
+    response = asyncio.run(
+        lease.target.execute(
+            TargetRequest(
+                attack_id="trial-state-verified",
+                prompt="synthetic marker boundary",
+            )
+        )
+    )
 
     state_evidence = [
         item for item in response.evidence if item.kind == EvidenceKind.SYSTEM_STATE
