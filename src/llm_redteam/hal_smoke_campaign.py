@@ -93,11 +93,11 @@ class HalSmokeCampaignRunner:
         repository: ExperimentRepository,
         budgets: BudgetConfigDocument,
         judge_policy_descriptor: object,
+        state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]],
+        state_verifier_policy_sha256: str,
         network_name: str,
         provider_id: str = "hal-smoke-opencode",
         allowed_red_endpoint_hosts: set[str] | frozenset[str] = frozenset(),
-        state_verifier_factory: Callable[[Path], tuple[StateVerifier, ...]] | None = None,
-        state_verifier_policy_sha256: str | None = None,
         health_python_executable: str = "python",
     ) -> None:
         self.composition = composition
@@ -116,13 +116,13 @@ class HalSmokeCampaignRunner:
         self.repository = repository
         self.budgets = budgets
         self.judge_policy_descriptor = judge_policy_descriptor
+        self.state_verifier_factory = state_verifier_factory
+        self.state_verifier_policy_sha256 = state_verifier_policy_sha256
         self.network_name = network_name
         self.provider_id = provider_id
         self.allowed_red_endpoint_hosts = frozenset(
             value.strip().casefold() for value in allowed_red_endpoint_hosts
         )
-        self.state_verifier_factory = state_verifier_factory
-        self.state_verifier_policy_sha256 = state_verifier_policy_sha256
         self.health_python_executable = health_python_executable
         self._validate_static_inputs()
 
@@ -242,6 +242,8 @@ class HalSmokeCampaignRunner:
         )
 
     def _validate_static_inputs(self) -> None:
+        if not _is_sha256(self.state_verifier_policy_sha256):
+            raise ValueError("HAL smoke state verifier policy must be a lowercase SHA-256")
         static = build_hal_smoke_static_plan(
             models=self.models,
             blue_model_id=self.composition.static_plan.blue_model_id,
@@ -351,3 +353,9 @@ def _validate_smoke_plan(plan: CampaignPlan) -> None:
         raise ValueError("first HAL smoke forbids agent network access")
     if plan.allow_agent_git_push:
         raise ValueError("first HAL smoke forbids agent git publication")
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
