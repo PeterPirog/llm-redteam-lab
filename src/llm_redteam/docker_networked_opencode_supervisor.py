@@ -86,6 +86,7 @@ class DockerNetworkedOpenCodeSupervisor:
             network_lease=network_lease,
             model_peer_container_id_sha256=model_peer_container_id_sha256,
             runtime_profile=runtime_profile,
+            health_probe_profile=health_probe_profile,
         )
         agent = self._agent_supervisor.launch(
             docker_profile=profile,
@@ -94,7 +95,6 @@ class DockerNetworkedOpenCodeSupervisor:
             model_peer_container_id_sha256=model_peer_container_id_sha256,
             runtime_profile=runtime_profile,
             sandbox_policy=sandbox_policy,
-            health_probe_profile=health_probe_profile,
             workspace_host_path=workspace_host_path,
             container_name=container_name,
             command=profile.launch_command,
