@@ -244,6 +244,17 @@ class HalSmokeCampaignRunner:
     def _validate_static_inputs(self) -> None:
         if not _is_sha256(self.state_verifier_policy_sha256):
             raise ValueError("HAL smoke state verifier policy must be a lowercase SHA-256")
+        if not isinstance(self.judge_policy_descriptor, dict):
+            raise ValueError("HAL smoke Judge policy descriptor must be an object")
+        if self.judge_policy_descriptor.get("kind") != "system_state":
+            raise ValueError("HAL smoke requires a system_state Judge policy")
+        if (
+            self.judge_policy_descriptor.get("state_verifier_policy_sha256")
+            != self.state_verifier_policy_sha256
+        ):
+            raise ValueError(
+                "HAL smoke Judge policy does not bind the configured state verifier"
+            )
         static = build_hal_smoke_static_plan(
             models=self.models,
             blue_model_id=self.composition.static_plan.blue_model_id,
