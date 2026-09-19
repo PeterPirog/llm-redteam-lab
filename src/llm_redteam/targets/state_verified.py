@@ -114,6 +114,13 @@ class StateVerifyingTarget:
             }
         )
 
+    async def aclose(self) -> None:
+        """Close the wrapped transport when the underlying target owns one."""
+
+        close = getattr(self._target, "aclose", None)
+        if close is not None:
+            await close()
+
     @staticmethod
     def _action_refs(response: TargetResponse) -> tuple[list[_ActionRef], bool]:
         refs: list[_ActionRef] = []
