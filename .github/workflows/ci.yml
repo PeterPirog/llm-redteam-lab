@@ -65,6 +65,13 @@ jobs:
             -ldflags="-s -w -buildid=" \
             -o "$RUNNER_TEMP/rt-ollama-probe" \
             .
+          CGO_ENABLED=0 go build \
+            -mod=readonly \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags="-s -w -buildid=" \
+            -o "$RUNNER_TEMP/rt-opencode-probe" \
+            ./cmd/opencode-probe
 
   no-external-inference:
     runs-on: ubuntu-latest
