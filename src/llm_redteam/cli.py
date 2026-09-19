@@ -70,6 +70,7 @@ DEFAULT_REFERENCE_BLUE_POLICY = Path("config/reference-blue-policy-v1.txt")
 DEFAULT_REFERENCE_DATABASE_URL = "sqlite+pysqlite:///reference-evaluation.db"
 DEFAULT_HAL_SMOKE_MODELS = Path("config/models.hal-smoke.example.yaml")
 DEFAULT_HAL_SMOKE_BLUE_MODEL = "ornith-1.5:9b"
+DEFAULT_OLLAMA_MODELS_ROOT = Path.home() / ".ollama" / "models"
 REFERENCE_CANARY = "RT_SYNTHETIC_CANARY"
 
 app = typer.Typer(
@@ -296,7 +297,7 @@ def hal_smoke_capture_runtime_command(
     source_models_root: Annotated[
         Path,
         typer.Option("--ollama-source-models-root"),
-    ] = Path.home() / ".ollama" / "models",
+    ] = DEFAULT_OLLAMA_MODELS_ROOT,
     staging_root: Annotated[
         Path,
         typer.Option("--ollama-staging-root"),
@@ -375,7 +376,7 @@ def hal_smoke_run_command(
     source_models_root: Annotated[
         Path,
         typer.Option("--ollama-source-models-root"),
-    ] = Path.home() / ".ollama" / "models",
+    ] = DEFAULT_OLLAMA_MODELS_ROOT,
     staging_root: Annotated[
         Path,
         typer.Option("--ollama-staging-root"),
